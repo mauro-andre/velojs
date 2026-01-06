@@ -1,7 +1,8 @@
 import type { Plugin } from "vite";
 import type { VeloConfig, RouteConfig } from "../types.js";
 import { scanRoutes, generateManifest } from "./scanner.js";
-import { resolve } from "path";
+import { splitCode } from "./code-splitter.js";
+import { resolve, dirname, relative, extname } from "path";
 import { existsSync, mkdirSync, writeFileSync } from "fs";
 
 /**
@@ -93,7 +94,69 @@ export default function velojs(config?: VeloConfig): Plugin {
       console.log(`   Generated route manifest: ${manifestPath}`);
       console.log("✅ VeloJS: Scanner complete!");
 
-      // TODO: Implementar code-splitter e generator
+      // 7. Code splitting - processa cada arquivo único
+      console.log("\n🔀 VeloJS: Code splitting...");
+
+      const processedFiles = new Set<string>();
+      const allFiles = [
+        ...scanResult.routes.map((r) => r.filePath),
+        ...Array.from(scanResult.layouts.values()).map((l) => l.filePath),
+      ];
+
+      allFiles.forEach((filePath) => {
+        // Evita processar o mesmo arquivo duas vezes
+        if (processedFiles.has(filePath)) return;
+        processedFiles.add(filePath);
+
+        // Verifica se arquivo existe
+        if (!existsSync(filePath)) {
+          console.warn(`   ⚠️  File not found: ${filePath}`);
+          return;
+        }
+
+        console.log(`   Processing: ${relative(absoluteWorkDir, filePath)}`);
+
+        // Code splitting
+        const splitResult = splitCode(filePath);
+
+        // Calcula paths de output
+        const relativePath = relative(absoluteWorkDir, filePath);
+        const ext = extname(relativePath);
+        const withoutExt = relativePath.slice(0, -ext.length);
+
+        const serverOutputPath = resolve(
+          absoluteOutDir,
+          `${withoutExt}.server.ts`
+        );
+        const clientOutputPath = resolve(
+          absoluteOutDir,
+          `${withoutExt}.client.tsx`
+        );
+
+        // Cria diretórios se necessário
+        mkdirSync(dirname(serverOutputPath), { recursive: true });
+        mkdirSync(dirname(clientOutputPath), { recursive: true });
+
+        // Escreve arquivos
+        writeFileSync(serverOutputPath, splitResult.serverCode, "utf-8");
+        writeFileSync(clientOutputPath, splitResult.clientCode, "utf-8");
+
+        console.log(
+          `     → Server: ${relative(process.cwd(), serverOutputPath)}`
+        );
+        console.log(
+          `     → Client: ${relative(process.cwd(), clientOutputPath)}`
+        );
+        console.log(
+          `     → Metadata: loader=${splitResult.metadata.hasLoader}, actions=[${splitResult.metadata.actions.join(", ")}]`
+        );
+      });
+
+      console.log(
+        `\n✅ VeloJS: Code splitting complete! Processed ${processedFiles.size} file(s)`
+      );
+
+      // TODO: Implementar generator (rotas Hono + Wouter)
     },
   };
 }
