@@ -5,26 +5,26 @@
  *
  * @example
  * ```tsx
- * import { useLoaderData, useAction } from "velojs/hooks";
+ * import { useLoaderData, useAction, revalidate } from "velojs/hooks";
  *
  * export default function Page() {
  *   const { value, loading } = useLoaderData<typeof loader>();
  *   const [create, creating] = useAction(action_createUser);
+ *
+ *   const handleCreate = async () => {
+ *     await create("John", "john@example.com");
+ *     revalidate();
+ *   };
  *
  *   return <div>...</div>;
  * }
  * ```
  */
 
-// TODO: Implementar hooks
-export function useLoaderData() {
-  throw new Error("useLoaderData not implemented yet");
-}
+export {
+  useLoaderData,
+  revalidate,
+  clearLoaderCache,
+} from "./useLoaderData.js";
 
-export function useAction() {
-  throw new Error("useAction not implemented yet");
-}
-
-export function revalidate() {
-  throw new Error("revalidate not implemented yet");
-}
+export { useAction } from "./useAction.js";
