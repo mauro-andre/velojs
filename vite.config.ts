@@ -23,6 +23,11 @@ export default defineConfig({
         "wouter-preact",
         "vite",
         "@swc/core",
+        // Node.js built-ins
+        "path",
+        "fs",
+        "url",
+        "module",
       ],
     },
   },
