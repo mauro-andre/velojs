@@ -10,6 +10,8 @@ export default defineConfig({
         "vite-plugin/index": resolve(__dirname, "src/vite-plugin/index.ts"),
         "hooks/index": resolve(__dirname, "src/hooks/index.ts"),
         "runtime/index": resolve(__dirname, "src/runtime/index.ts"),
+        "dev-server": resolve(__dirname, "src/dev-server.ts"),
+        "cli": resolve(__dirname, "src/cli.ts"),
       },
       formats: ["es"],
       fileName: (format, entryName) => `${entryName}.js`,
@@ -17,6 +19,7 @@ export default defineConfig({
     rollupOptions: {
       external: [
         "hono",
+        "@hono/node-server",
         "preact",
         "@preact/signals",
         "preact-render-to-string",
@@ -27,6 +30,7 @@ export default defineConfig({
         "path",
         "fs",
         "url",
+        "http",
         "module",
         "async_hooks",
       ],

@@ -4,7 +4,7 @@ import { existsSync } from "fs";
 import { resolve } from "path";
 
 // Verifica se existe entry.server.ts customizado
-const entryServerPath = resolve("/var/mnt/data/dev-projects/velojs/examples/basic/app", "entry.server.ts");
+const entryServerPath = resolve("/mnt/data/dev-projects/velojs/examples/basic/app", "entry.server.ts");
 if (existsSync(entryServerPath)) {
   // Carrega configuração customizada
   import(entryServerPath).then((mod) => {

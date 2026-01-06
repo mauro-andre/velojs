@@ -21,7 +21,14 @@
     "./runtime": {
       "types": "./dist/runtime/index.d.ts",
       "import": "./dist/runtime/index.js"
+    },
+    "./dev": {
+      "types": "./dist/dev-server.d.ts",
+      "import": "./dist/dev-server.js"
     }
+  },
+  "bin": {
+    "velo": "./dist/cli.js"
   },
   "files": [
     "dist"
@@ -53,6 +60,7 @@
   },
   "homepage": "https://github.com/mauro-andre/velojs#readme",
   "dependencies": {
+    "@hono/node-server": "^1.19.7",
     "@preact/signals": "^2.5.1",
     "hono": "^4.11.3",
     "preact": "^10.28.1",

@@ -26,7 +26,9 @@ function generateServerRoutes(
   const routes: string[] = [];
 
   imports.push(`import { Hono } from "hono";`);
-  imports.push(`import { render } from "preact-render-to-string";`);
+  imports.push(`import { renderPage } from "velojs/runtime";`);
+  imports.push(``);
+  imports.push(`const app = new Hono();`);
   imports.push(``);
 
   // Processa cada rota
@@ -39,7 +41,14 @@ function generateServerRoutes(
       `import * as ${routeVar} from "./${serverPath.replace(/\.ts$/, ".js")}";`
     );
 
-    // Import dos layouts da cadeia
+    // Import do componente client
+    const clientPath = getClientPath(route.filePath, workDir);
+    const componentVar = `Component${index}`;
+    imports.push(
+      `import ${componentVar} from "./${clientPath.replace(/\.tsx$/, ".js")}";`
+    );
+
+    // Import dos layouts (server + client)
     const layoutImports: string[] = [];
     const layoutVars: string[] = [];
     route.layoutChain?.forEach((layout, layoutIndex) => {
@@ -57,13 +66,6 @@ function generateServerRoutes(
       layoutImports.push(layoutVar);
       layoutVars.push(`${layoutVar}Component`);
     });
-
-    // Import do component client
-    const clientPath = getClientPath(route.filePath, workDir);
-    const componentVar = `Component${index}`;
-    imports.push(
-      `import ${componentVar} from "./${clientPath.replace(/\.tsx$/, ".js")}";`
-    );
 
     // Gera rota SSR (primeira carga)
     routes.push(`
@@ -92,18 +94,12 @@ app.get("${route.url}", async (c) => {
     });
   }
 
-  // 2. Renderiza nested (de dentro pra fora)
+  // 2. Renderiza componentes nested (de dentro pra fora)
   let rendered = <${componentVar} />;
   ${layoutVars.reverse().map((layoutVar) => `rendered = <${layoutVar}>{rendered}</${layoutVar}>;`).join("\n  ")}
 
-  // 3. Renderiza HTML
-  const html = render(rendered);
-
-  // 4. Injeta dados
-  const dataScript = \`<script>window.__PAGE_DATA__ = \${JSON.stringify(data)};</script>\`;
-  const finalHtml = html.replace("</body>", \`\${dataScript}</body>\`);
-
-  return c.html(finalHtml);
+  // 3. Renderiza com SSR usando renderPage
+  return renderPage(c, rendered, data);
 });
 
 // Data API (navegação SPA)
@@ -171,8 +167,6 @@ app.post("/api${route.url}/${actionName}", async (c) => {
 
   // Template final
   return `${imports.join("\n")}
-
-const app = new Hono();
 
 ${routes.join("\n")}
 

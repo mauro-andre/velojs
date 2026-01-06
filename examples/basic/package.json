@@ -4,10 +4,10 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "node ./node_modules/velojs/dist/cli.js dev",
     "build": "vite build",
     "preview": "vite preview",
-    "serve": "node server.ts"
+    "serve": "node .velojs/server.js"
   },
   "dependencies": {
     "velojs": "file:../..",

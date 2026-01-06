@@ -180,8 +180,8 @@ export default function velojs(config?: VeloConfig): Plugin {
         absoluteOutDir
       );
 
-      // Escreve server-routes.ts
-      const serverRoutesPath = resolve(absoluteOutDir, "server-routes.ts");
+      // Escreve server-routes.tsx (TSX porque contém JSX)
+      const serverRoutesPath = resolve(absoluteOutDir, "server-routes.tsx");
       writeFileSync(serverRoutesPath, serverCode, "utf-8");
       console.log(`   Generated: ${relative(process.cwd(), serverRoutesPath)}`);
 
@@ -232,7 +232,7 @@ function generateIndexHtml(): string {
 </head>
 <body>
   <div id="app"></div>
-  <script type="module" src="./client.tsx"></script>
+  <script type="module" src="/.velojs/client.tsx"></script>
 </body>
 </html>
 `;

@@ -30,7 +30,13 @@ const loaderCache = new Map<string, any>();
  * ```
  */
 export function useLoaderData<T extends (...args: any) => any>() {
-  const data = signal<Awaited<ReturnType<T>> | null>(null);
+  // Inicializa com dados do SSR se disponível (executa antes do useEffect)
+  const initialData =
+    typeof window !== "undefined" && (window as any).__PAGE_DATA__
+      ? (window as any).__PAGE_DATA__.page
+      : null;
+
+  const data = signal<Awaited<ReturnType<T>> | null>(initialData);
   const loading = signal(false);
   const error = signal<Error | null>(null);
 
