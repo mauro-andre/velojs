@@ -28,6 +28,7 @@ export default defineConfig({
         "fs",
         "url",
         "module",
+        "async_hooks",
       ],
     },
   },
