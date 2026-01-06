@@ -137,6 +137,36 @@ app.get("${route.url}", async (c) => {
   return c.json(data);
 });
 `);
+
+    // Gera rotas POST para Server Actions
+    if (route.actions && route.actions.length > 0) {
+      route.actions.forEach((actionName) => {
+        routes.push(`
+// Action: ${route.url}/${actionName}
+app.post("/api${route.url}/${actionName}", async (c) => {
+  try {
+    // Parse body
+    const body = await c.req.json();
+    const args = body.args || [];
+
+    // Executa action
+    if (!${routeVar}.${actionName}) {
+      return c.json({ error: "Action not found" }, 404);
+    }
+
+    const result = await ${routeVar}.${actionName}(...args);
+    return c.json({ success: true, data: result });
+  } catch (error) {
+    console.error("Action error:", error);
+    return c.json({
+      success: false,
+      error: error instanceof Error ? error.message : "Unknown error"
+    }, 500);
+  }
+});
+`);
+      });
+    }
   });
 
   // Template final

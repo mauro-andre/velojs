@@ -47,13 +47,13 @@ export default function velojs(config?: VeloConfig): Plugin {
       console.log(`   Absolute workDir: ${absoluteWorkDir}`);
       console.log(`   Absolute outDir: ${absoluteOutDir}`);
 
-      // 2. Carrega routes.ts
-      const routesPath = resolve(process.cwd(), "routes.ts");
+      // 2. Carrega routes.ts (agora dentro do workDir)
+      const routesPath = resolve(absoluteWorkDir, "routes.ts");
       console.log(`   Loading routes from: ${routesPath}`);
 
       if (!existsSync(routesPath)) {
         throw new Error(
-          `routes.ts not found at ${routesPath}. Please create a routes.ts file in your project root.`
+          `routes.ts not found at ${routesPath}. Please create a routes.ts file in your workDir (${workDir}).`
         );
       }
 
@@ -99,6 +99,7 @@ export default function velojs(config?: VeloConfig): Plugin {
       console.log("\n🔀 VeloJS: Code splitting...");
 
       const processedFiles = new Set<string>();
+      const fileActionsMap = new Map<string, string[]>();
       const allFiles = [
         ...scanResult.routes.map((r) => r.filePath),
         ...Array.from(scanResult.layouts.values()).map((l) => l.filePath),
@@ -151,11 +152,24 @@ export default function velojs(config?: VeloConfig): Plugin {
         console.log(
           `     → Metadata: loader=${splitResult.metadata.hasLoader}, actions=[${splitResult.metadata.actions.join(", ")}]`
         );
+
+        // Armazena actions para usar no generator
+        if (splitResult.metadata.actions.length > 0) {
+          fileActionsMap.set(filePath, splitResult.metadata.actions);
+        }
       });
 
       console.log(
         `\n✅ VeloJS: Code splitting complete! Processed ${processedFiles.size} file(s)`
       );
+
+      // Atualiza rotas com informações de actions
+      scanResult.routes.forEach((route) => {
+        const actions = fileActionsMap.get(route.filePath);
+        if (actions) {
+          route.actions = actions;
+        }
+      });
 
       // 8. Gera rotas Hono e Wouter
       console.log("\n📝 VeloJS: Generating routes...");
@@ -176,10 +190,105 @@ export default function velojs(config?: VeloConfig): Plugin {
       writeFileSync(clientRoutesPath, clientCode, "utf-8");
       console.log(`   Generated: ${relative(process.cwd(), clientRoutesPath)}`);
 
+      // 9. Gera entry points automáticos
+      console.log("\n📦 VeloJS: Generating entry points...");
+
+      // Gera index.html
+      const indexHtmlPath = resolve(absoluteOutDir, "index.html");
+      const indexHtmlContent = generateIndexHtml();
+      writeFileSync(indexHtmlPath, indexHtmlContent, "utf-8");
+      console.log(`   Generated: ${relative(process.cwd(), indexHtmlPath)}`);
+
+      // Gera client.tsx
+      const clientEntryPath = resolve(absoluteOutDir, "client.tsx");
+      const clientEntryContent = generateClientEntry();
+      writeFileSync(clientEntryPath, clientEntryContent, "utf-8");
+      console.log(`   Generated: ${relative(process.cwd(), clientEntryPath)}`);
+
+      // Gera server.ts
+      const serverEntryPath = resolve(absoluteOutDir, "server.ts");
+      const serverEntryContent = generateServerEntry(absoluteWorkDir);
+      writeFileSync(serverEntryPath, serverEntryContent, "utf-8");
+      console.log(`   Generated: ${relative(process.cwd(), serverEntryPath)}`);
+
       console.log("\n✅ VeloJS: Build complete! 🎉");
       console.log(`   Total routes: ${scanResult.metadata.totalRoutes}`);
       console.log(`   Total layouts: ${scanResult.metadata.totalLayouts}`);
       console.log(`   Files processed: ${processedFiles.size}`);
     },
   };
+}
+
+/**
+ * Gera index.html
+ */
+function generateIndexHtml(): string {
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>VeloJS App</title>
+</head>
+<body>
+  <div id="app"></div>
+  <script type="module" src="./client.tsx"></script>
+</body>
+</html>
+`;
+}
+
+/**
+ * Gera client.tsx
+ */
+function generateClientEntry(): string {
+  return `import { hydrate } from "preact";
+import { Routes } from "./client-routes.js";
+
+// Hydrate the SSR content
+const root = document.getElementById("app");
+
+if (root) {
+  hydrate(<Routes />, root);
+}
+`;
+}
+
+/**
+ * Gera server.ts com suporte a entry.server.ts customizado
+ */
+function generateServerEntry(workDir: string): string {
+  return `import { serve } from "@hono/node-server";
+import app from "./server-routes.js";
+import { existsSync } from "fs";
+import { resolve } from "path";
+
+// Verifica se existe entry.server.ts customizado
+const entryServerPath = resolve("${workDir}", "entry.server.ts");
+if (existsSync(entryServerPath)) {
+  // Carrega configuração customizada
+  import(entryServerPath).then((mod) => {
+    if (mod.configureServer) {
+      mod.configureServer(app);
+    }
+    if (mod.onServerStart) {
+      mod.onServerStart(app);
+    }
+    startServer();
+  });
+} else {
+  startServer();
+}
+
+function startServer() {
+  const port = process.env.PORT ? parseInt(process.env.PORT) : 3000;
+
+  console.log(\`🚀 VeloJS server running at http://localhost:\${port}\`);
+
+  serve({
+    fetch: app.fetch,
+    port,
+  });
+}
+`;
 }

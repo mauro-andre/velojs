@@ -36,6 +36,12 @@ export interface ProcessedRoute {
    * Ex: "/users/:id" → ["id"]
    */
   params: string[];
+
+  /**
+   * Server actions disponíveis nesta rota
+   * Ex: ["action_createUser", "action_deleteUser"]
+   */
+  actions?: string[];
 }
 
 /**

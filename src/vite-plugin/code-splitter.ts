@@ -29,9 +29,10 @@ export interface SplitResult {
  * Separa código de um arquivo page.tsx/layout.tsx em server e client
  *
  * @param filePath - Path absoluto do arquivo
+ * @param outDir - Diretório de saída (.velojs)
  * @returns Código separado
  */
-export function splitCode(filePath: string): SplitResult {
+export function splitCode(filePath: string, outDir?: string): SplitResult {
   // 1. Lê arquivo
   const sourceCode = readFileSync(filePath, "utf-8");
 
@@ -44,11 +45,11 @@ export function splitCode(filePath: string): SplitResult {
   // 3. Extrai elementos
   const extracted = extractElements(ast);
 
-  // 4. Gera código server
-  const serverCode = generateServerCode(extracted, sourceCode);
+  // 4. Gera código server (re-export)
+  const serverCode = generateServerCode(extracted, filePath, outDir);
 
-  // 5. Gera código client
-  const clientCode = generateClientCode(extracted, sourceCode);
+  // 5. Gera código client (re-export)
+  const clientCode = generateClientCode(extracted, filePath, outDir);
 
   return {
     serverCode,
@@ -164,65 +165,55 @@ function extractElements(ast: Module): ExtractedElements {
 }
 
 /**
- * Gera código do servidor (loader + actions)
+ * Gera código do servidor (loader + actions) - usa re-exports
  */
 function generateServerCode(
   extracted: ExtractedElements,
-  sourceCode: string
+  _filePath: string,
+  _outDir?: string
 ): string {
-  const parts: string[] = [];
-
-  // Loader
-  if (extracted.loader) {
-    const code = sourceCode.slice(
-      extracted.loader.start,
-      extracted.loader.end
-    );
-    parts.push(code);
-  }
-
-  // Actions
-  extracted.actions.forEach((action) => {
-    const code = sourceCode.slice(action.start, action.end);
-    parts.push(code);
-  });
-
   // Se não tem nada, retorna export vazio
-  if (parts.length === 0) {
+  if (!extracted.loader && extracted.actions.length === 0) {
     return "// No server-side code\n";
   }
 
-  return parts.join("\n\n");
+  // Monta lista de exports
+  const exports: string[] = [];
+  if (extracted.loader) {
+    exports.push("loader");
+  }
+  extracted.actions.forEach((action) => {
+    exports.push(action.name);
+  });
+
+  // Re-export tudo do arquivo original
+  // Como os arquivos server ficam em .velojs/ e os originais em app/
+  // Exemplo: .velojs/home/page.server.ts -> ../../app/home/page.tsx
+  //          .velojs/admin/users/page.server.ts -> ../../../app/admin/users/page.tsx
+  const appRelativePath = _filePath.split("/app/")[1];
+  const depth = appRelativePath.split("/").length;
+  const upLevels = "../".repeat(depth);
+  const relativePath = `${upLevels}app/${appRelativePath}`;
+  return `export * from "${relativePath}";\n`;
 }
 
 /**
- * Gera código do cliente (imports + component)
+ * Gera código do cliente (component) - usa re-export
  */
 function generateClientCode(
   extracted: ExtractedElements,
-  sourceCode: string
+  _filePath: string,
+  _outDir?: string
 ): string {
-  const parts: string[] = [];
-
-  // Imports
-  extracted.imports.forEach((imp) => {
-    const code = sourceCode.slice(imp.start, imp.end);
-    parts.push(code);
-  });
-
-  // Default export (component)
-  if (extracted.defaultExport) {
-    const code = sourceCode.slice(
-      extracted.defaultExport.start,
-      extracted.defaultExport.end
-    );
-    parts.push(code);
-  }
-
   // Se não tem component, retorna export vazio
   if (!extracted.defaultExport) {
     return "// No client-side component\n";
   }
 
-  return parts.join("\n\n");
+  // Re-export apenas o default do arquivo original
+  const appRelativePath = _filePath.split("/app/")[1];
+  const depth = appRelativePath.split("/").length;
+  const upLevels = "../".repeat(depth);
+  const relativePath = `${upLevels}app/${appRelativePath}`;
+  return `export { default } from "${relativePath}";\n`;
 }

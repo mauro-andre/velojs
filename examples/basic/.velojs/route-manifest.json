@@ -1,0 +1,25 @@
+{
+  "metadata": {
+    "totalRoutes": 2,
+    "totalLayouts": 2,
+    "workDir": "/var/mnt/data/dev-projects/velojs/examples/basic/app"
+  },
+  "routes": [
+    {
+      "type": "route",
+      "url": "/",
+      "file": "/var/mnt/data/dev-projects/velojs/examples/basic/app/home/page.tsx",
+      "params": [],
+      "middlewareCount": 0,
+      "layoutDepth": 1
+    },
+    {
+      "type": "route",
+      "url": "/admin/users",
+      "file": "/var/mnt/data/dev-projects/velojs/examples/basic/app/admin/users/page.tsx",
+      "params": [],
+      "middlewareCount": 0,
+      "layoutDepth": 2
+    }
+  ]
+}
