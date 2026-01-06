@@ -2,6 +2,7 @@ import type { Plugin } from "vite";
 import type { VeloConfig, RouteConfig } from "../types.js";
 import { scanRoutes, generateManifest } from "./scanner.js";
 import { splitCode } from "./code-splitter.js";
+import { generateRoutes } from "./generator.js";
 import { resolve, dirname, relative, extname } from "path";
 import { existsSync, mkdirSync, writeFileSync } from "fs";
 
@@ -156,7 +157,29 @@ export default function velojs(config?: VeloConfig): Plugin {
         `\n✅ VeloJS: Code splitting complete! Processed ${processedFiles.size} file(s)`
       );
 
-      // TODO: Implementar generator (rotas Hono + Wouter)
+      // 8. Gera rotas Hono e Wouter
+      console.log("\n📝 VeloJS: Generating routes...");
+
+      const { serverCode, clientCode } = generateRoutes(
+        scanResult,
+        absoluteWorkDir,
+        absoluteOutDir
+      );
+
+      // Escreve server-routes.ts
+      const serverRoutesPath = resolve(absoluteOutDir, "server-routes.ts");
+      writeFileSync(serverRoutesPath, serverCode, "utf-8");
+      console.log(`   Generated: ${relative(process.cwd(), serverRoutesPath)}`);
+
+      // Escreve client-routes.tsx
+      const clientRoutesPath = resolve(absoluteOutDir, "client-routes.tsx");
+      writeFileSync(clientRoutesPath, clientCode, "utf-8");
+      console.log(`   Generated: ${relative(process.cwd(), clientRoutesPath)}`);
+
+      console.log("\n✅ VeloJS: Build complete! 🎉");
+      console.log(`   Total routes: ${scanResult.metadata.totalRoutes}`);
+      console.log(`   Total layouts: ${scanResult.metadata.totalLayouts}`);
+      console.log(`   Files processed: ${processedFiles.size}`);
     },
   };
 }
