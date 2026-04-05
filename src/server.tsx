@@ -323,11 +323,9 @@ export const startServer = async (options: StartServerOptions) => {
     if (process.env.NODE_ENV === "production") {
         const { serve } = await import("@hono/node-server");
         const { serveStatic } = await import("@hono/node-server/serve-static");
-        const { dirname, join } = await import("node:path");
-        const { fileURLToPath } = await import("node:url");
+        const { join } = await import("node:path");
 
-        const __dirname = dirname(fileURLToPath(import.meta.url));
-        const clientDir = join(__dirname, "client");
+        const clientDir = join(process.cwd(), "dist/client");
 
         // Serve static files from dist/client/ if STATIC_BASE_URL is not external
         const staticUrl = process.env.STATIC_BASE_URL || "";
