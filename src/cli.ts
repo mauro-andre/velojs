@@ -1,5 +1,3 @@
-#!/usr/bin/env npx tsx
-
 import { spawnSync } from "node:child_process";
 import { resolve } from "node:path";
 

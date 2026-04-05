@@ -19,6 +19,8 @@ jobs:
 
       - run: npm test
 
+      - run: npm run build
+
       - name: Set version from release tag
         run: npm version "$GITHUB_REF_NAME" --no-git-tag-version
 

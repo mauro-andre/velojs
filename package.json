@@ -23,75 +23,51 @@
         "velojs": "bin/velojs.js"
     },
     "files": [
-        "src/",
+        "dist/",
         "bin/",
         "README.md",
         "LICENSE"
     ],
     "scripts": {
+        "build": "vite build --config vite.build.config.ts && tsc --declaration --emitDeclarationOnly --outDir dist --noEmit false --rootDir src",
         "typecheck": "tsc --noEmit",
         "test": "vitest run",
         "test:watch": "vitest"
     },
-    "main": "./src/index.ts",
-    "types": "./src/index.ts",
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts",
     "exports": {
         ".": {
-            "types": "./src/index.ts",
-            "import": "./src/index.ts"
+            "types": "./dist/index.d.ts",
+            "import": "./dist/index.js"
         },
         "./server": {
-            "types": "./src/server.tsx",
-            "import": "./src/server.tsx"
+            "types": "./dist/server.d.ts",
+            "import": "./dist/server.js"
         },
         "./client": {
-            "types": "./src/client.tsx",
-            "import": "./src/client.tsx"
+            "types": "./dist/client.d.ts",
+            "import": "./dist/client.js"
         },
         "./hooks": {
-            "types": "./src/hooks.tsx",
-            "import": "./src/hooks.tsx"
+            "types": "./dist/hooks.d.ts",
+            "import": "./dist/hooks.js"
         },
         "./cookie": {
-            "types": "./src/cookie.ts",
-            "import": "./src/cookie.ts"
+            "types": "./dist/cookie.d.ts",
+            "import": "./dist/cookie.js"
         },
         "./factory": {
-            "types": "./src/factory.ts",
-            "import": "./src/factory.ts"
+            "types": "./dist/factory.d.ts",
+            "import": "./dist/factory.js"
         },
         "./vite": {
-            "types": "./src/vite.ts",
-            "import": "./src/vite.ts"
+            "types": "./dist/vite.d.ts",
+            "import": "./dist/vite.js"
         },
         "./config": {
-            "types": "./src/config.ts",
-            "import": "./src/config.ts"
-        }
-    },
-    "typesVersions": {
-        "*": {
-            "server": [
-                "./src/server.tsx"
-            ],
-            "client": [
-                "./src/client.tsx"
-            ],
-            "hooks": [
-                "./src/hooks.tsx"
-            ],
-            "cookie": [
-                "./src/cookie.ts"
-            ],
-            "factory": [
-                "./src/factory.ts"
-            ],
-            "vite": [
-                "./src/vite.ts"
-            ],
-            "config": [
-                "./src/config.ts"
-            ]
+            "types": "./dist/config.d.ts",
+            "import": "./dist/config.js"
         }
     },
     "dependencies": {
@@ -106,7 +82,6 @@
         "hono": "^4.12.0",
         "preact": "^10.29.0",
         "preact-render-to-string": "^6.6.0",
-        "tsx": "^4.19.0",
         "vite": "^7.3.0",
         "wouter-preact": "^3.9.0"
     },
