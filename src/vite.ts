@@ -707,7 +707,7 @@ function veloTransformPlugin(veloConfig: VeloConfig, appDirectory: string): Plug
                 return `
 import "${serverInitPath}";
 import routes from "${routesPath}";
-import { startServer } from "velojs/server";
+import { startServer } from "@mauroandre/velojs/server";
 
 export default await startServer({ routes });
 `;
@@ -717,7 +717,7 @@ export default await startServer({ routes });
                 return `
 import "${clientInitPath}";
 import routes from "${routesPath}";
-import { startClient } from "velojs/client";
+import { startClient } from "@mauroandre/velojs/client";
 
 startClient({ routes });
 `;

@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 
-const PACKAGE_NAME = "velojs";
+const PACKAGE_NAME = "@mauroandre/velojs";
 
 const templates: Record<string, string> = {
     "package.json": `{
@@ -14,7 +14,11 @@ const templates: Record<string, string> = {
         "start": "velojs start"
     },
     "dependencies": {
-        "${PACKAGE_NAME}": "^0.1.0"
+        "${PACKAGE_NAME}": "latest"
+    },
+    "devDependencies": {
+        "@types/node": "latest",
+        "typescript": "latest"
     }
 }
 `,
@@ -30,6 +34,7 @@ export default { plugins: [veloPlugin()] };
         "moduleResolution": "bundler",
         "target": "esnext",
         "lib": ["esnext", "dom"],
+        "types": ["node", "vite/client"],
         "strict": true,
         "noUncheckedIndexedAccess": true,
         "verbatimModuleSyntax": true,
@@ -115,9 +120,7 @@ a:hover {
 }
 `,
 
-    "app/pages/Home.tsx": `export const metadata = { title: "Home" };
-
-export const Component = () => {
+    "app/pages/Home.tsx": `export const Component = () => {
     return (
         <main style={{ maxWidth: 640, margin: "80px auto", padding: "0 20px" }}>
             <h1>Welcome to VeloJS</h1>

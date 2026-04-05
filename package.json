@@ -1,6 +1,6 @@
 {
-    "name": "velojs",
-    "version": "0.1.0",
+    "name": "@mauroandre/velojs",
+    "version": "0.0.3",
     "type": "module",
     "description": "Fullstack web framework built on Hono + Preact with Vite-powered AST transforms",
     "keywords": [
@@ -16,11 +16,11 @@
     "license": "MIT",
     "repository": {
         "type": "git",
-        "url": "git+https://github.com/mauroandre/velojs.git"
+        "url": "git+https://github.com/mauro-andre/velojs.git"
     },
-    "homepage": "https://github.com/mauroandre/velojs#readme",
+    "homepage": "https://github.com/mauro-andre/velojs#readme",
     "bin": {
-        "velojs": "./bin/velojs.js"
+        "velojs": "bin/velojs.js"
     },
     "files": [
         "src/",

@@ -29,6 +29,7 @@ const runBuild = () => {
 };
 
 const runStart = () => {
+    process.env.NODE_ENV = "production";
     const serverPath = resolve(process.cwd(), "dist/server.js");
     runCommand("node", [serverPath]);
 };
