@@ -13,17 +13,19 @@ import _traverse from "@babel/traverse";
 import _generate from "@babel/generator";
 import * as t from "@babel/types";
 
-// Workaround para ESM
-const traverse = (_traverse as unknown as { default: typeof _traverse })
-    .default;
-const generate = (_generate as unknown as { default: typeof _generate })
-    .default;
+// Workaround para ESM — handle both CJS-wrapped and direct ESM exports
+const traverse = typeof _traverse === "function"
+    ? _traverse
+    : (_traverse as unknown as { default: typeof _traverse }).default;
+const generate = typeof _generate === "function"
+    ? _generate
+    : (_generate as unknown as { default: typeof _generate }).default;
 
 // ============================================
 // TRANSFORMAÇÃO 1: Injetar metadata (moduleId + fullPath)
 // ============================================
 
-function injectMetadata(
+export function injectMetadata(
     code: string,
     moduleId: string,
     fullPath?: string,
@@ -151,7 +153,7 @@ function injectMetadata(
 // TRANSFORMAÇÃO 2: Injetar moduleId no Loader e useLoader
 // ============================================
 
-function transformLoaderFunctions(code: string, moduleId: string): string {
+export function transformLoaderFunctions(code: string, moduleId: string): string {
     const ast = parse(code, {
         sourceType: "module",
         plugins: ["typescript", "jsx"],
@@ -198,7 +200,7 @@ function transformLoaderFunctions(code: string, moduleId: string): string {
 // TRANSFORMAÇÃO 3: Actions → Fetch stubs (client only)
 // ============================================
 
-function transformActionsForClient(code: string, moduleId: string): string {
+export function transformActionsForClient(code: string, moduleId: string): string {
     const ast = parse(code, {
         sourceType: "module",
         plugins: ["typescript", "jsx"],
@@ -386,7 +388,7 @@ function adjustParamsForClient(
 // TRANSFORMAÇÃO 4: Remover loaders (client only)
 // ============================================
 
-function removeLoaders(code: string): string {
+export function removeLoaders(code: string): string {
     const ast = parse(code, {
         sourceType: "module",
         plugins: ["typescript", "jsx"],
@@ -417,7 +419,7 @@ function removeLoaders(code: string): string {
 // TRANSFORMAÇÃO 5: Remover middlewares e imports (client only)
 // ============================================
 
-function removeMiddlewares(code: string): string {
+export function removeMiddlewares(code: string): string {
     const ast = parse(code, {
         sourceType: "module",
         plugins: ["typescript", "jsx"],
@@ -484,7 +486,7 @@ function removeMiddlewares(code: string): string {
 // TRANSFORMAÇÃO 6: Extrair e injetar fullPaths
 // ============================================
 
-interface PathInfo {
+export interface PathInfo {
     fullPath: string;
     path: string;
 }
@@ -493,7 +495,7 @@ interface PathInfo {
  * Parseia routes.tsx e retorna Map de moduleId → { fullPath, path }
  * moduleId aqui é derivado do import source (ex: "./auth/Login.js" → "auth/Login")
  */
-function buildFullPathMap(code: string): Map<string, PathInfo> {
+export function buildFullPathMap(code: string): Map<string, PathInfo> {
     const ast = parse(code, {
         sourceType: "module",
         plugins: ["typescript", "jsx"],
@@ -559,7 +561,7 @@ function buildFullPathMap(code: string): Map<string, PathInfo> {
 /**
  * Percorre recursivamente a árvore de rotas e coleta moduleName → { fullPath, path }
  */
-function collectFullPaths(
+export function collectFullPaths(
     elements: (t.Expression | t.SpreadElement | null)[],
     parentPath: string,
     result: Map<string, PathInfo>

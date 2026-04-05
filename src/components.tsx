@@ -102,7 +102,7 @@ type LinkProps = Omit<WouterLinkProps, "to" | "href"> & {
 /**
  * Substitutes :param placeholders in a path with actual values
  */
-function substituteParams(
+export function substituteParams(
     path: string,
     params: Record<string, string>
 ): string {

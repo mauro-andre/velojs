@@ -41,11 +41,13 @@ Usage:
   velojs <command>
 
 Commands:
+  init     Create a new VeloJS project
   dev      Start development server
   build    Build for production (client + server)
   start    Start production server
 
 Examples:
+  velojs init my-app
   velojs dev
   velojs build
   velojs start
@@ -53,6 +55,11 @@ Examples:
 };
 
 switch (command) {
+    case "init": {
+        const { runInit } = await import("./init.js");
+        await runInit(args[1]);
+        break;
+    }
     case "dev":
         runVite();
         break;

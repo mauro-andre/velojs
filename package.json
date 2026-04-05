@@ -2,11 +2,36 @@
     "name": "velojs",
     "version": "0.1.0",
     "type": "module",
+    "description": "Fullstack web framework built on Hono + Preact with Vite-powered AST transforms",
+    "keywords": [
+        "framework",
+        "fullstack",
+        "hono",
+        "preact",
+        "vite",
+        "ssr",
+        "typescript"
+    ],
+    "author": "Mauro André Silva",
+    "license": "MIT",
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/mauroandre/velojs.git"
+    },
+    "homepage": "https://github.com/mauroandre/velojs#readme",
     "bin": {
         "velojs": "./bin/velojs.js"
     },
+    "files": [
+        "src/",
+        "bin/",
+        "README.md",
+        "LICENSE"
+    ],
     "scripts": {
-        "typecheck": "tsc --noEmit"
+        "typecheck": "tsc --noEmit",
+        "test": "vitest run",
+        "test:watch": "vitest"
     },
     "main": "./src/index.ts",
     "types": "./src/index.ts",
@@ -70,6 +95,10 @@
         }
     },
     "dependencies": {
+        "@babel/generator": "^7.28.5",
+        "@babel/parser": "^7.28.5",
+        "@babel/traverse": "^7.28.5",
+        "@babel/types": "^7.28.5",
         "@hono/node-server": "^1.19.0",
         "@hono/vite-dev-server": "^0.25.0",
         "@preact/preset-vite": "^2.10.0",
@@ -77,17 +106,15 @@
         "hono": "^4.12.0",
         "preact": "^10.29.0",
         "preact-render-to-string": "^6.6.0",
+        "tsx": "^4.19.0",
         "vite": "^7.3.0",
         "wouter-preact": "^3.9.0"
     },
     "devDependencies": {
-        "@babel/generator": "^7.28.5",
-        "@babel/parser": "^7.28.5",
-        "@babel/traverse": "^7.28.5",
-        "@babel/types": "^7.28.5",
         "@types/babel__generator": "^7.27.0",
         "@types/babel__traverse": "^7.28.0",
         "@types/node": "^25.5.2",
-        "typescript": "^6.0.2"
+        "typescript": "^6.0.2",
+        "vitest": "^3.2.1"
     }
 }
