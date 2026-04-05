@@ -1,7 +1,15 @@
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 const PACKAGE_NAME = "@mauroandre/velojs";
+
+function getPackageVersion(): string {
+    const __dirname = path.dirname(fileURLToPath(import.meta.url));
+    const pkgPath = path.resolve(__dirname, "../package.json");
+    const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf-8"));
+    return pkg.version;
+}
 
 const templates: Record<string, string> = {
     "package.json": `{
@@ -14,7 +22,7 @@ const templates: Record<string, string> = {
         "start": "velojs start"
     },
     "dependencies": {
-        "${PACKAGE_NAME}": "latest"
+        "${PACKAGE_NAME}": "^${getPackageVersion()}"
     },
     "devDependencies": {
         "@types/node": "latest",
