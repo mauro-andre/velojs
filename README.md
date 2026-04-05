@@ -13,10 +13,10 @@ Fullstack web framework with SSR, hydration, and file-based conventions.
 ### Create a new project
 
 ```bash
-mkdir my-app && cd my-app
-npm init -y
-npm install velojs
-npm install -D typescript
+npx @mauroandre/velojs init my-app
+cd my-app
+npm install
+npx velojs dev
 ```
 
 ### Project structure
@@ -38,7 +38,7 @@ my-app/
 
 ```typescript
 import { defineConfig } from "vite";
-import { veloPlugin } from "velojs/vite";
+import { veloPlugin } from "@mauroandre/velojs/vite";
 
 export default defineConfig({
     plugins: [veloPlugin()],
@@ -52,7 +52,7 @@ export default defineConfig({
     "scripts": {
         "dev": "velojs dev",
         "build": "velojs build",
-        "start": "NODE_ENV=production velojs start"
+        "start": "velojs start"
     }
 }
 ```
@@ -63,7 +63,7 @@ The root component renders the HTML shell. It must accept `children` and include
 
 ```tsx
 import type { ComponentChildren } from "preact";
-import { Scripts } from "velojs";
+import { Scripts } from "@mauroandre/velojs";
 
 export const Component = ({ children }: { children?: ComponentChildren }) => (
     <html lang="en">
@@ -97,7 +97,7 @@ Runs on the server only. Use it to connect to databases, create indexes, registe
 
 ```typescript
 import type { Hono } from "hono";
-import { addRoutes, onServer } from "velojs/server";
+import { addRoutes, onServer } from "@mauroandre/velojs/server";
 
 // Connect to database
 import { connectDB } from "../db/engine.js";
@@ -121,7 +121,7 @@ setInterval(() => runCleanup().catch(console.error), 60_000);
 ### app/routes.tsx — Route definitions
 
 ```typescript
-import type { AppRoutes } from "velojs";
+import type { AppRoutes } from "@mauroandre/velojs";
 import * as Root from "./client-root.js";
 import * as Home from "./pages/Home.js";
 
@@ -139,8 +139,8 @@ export default [
 ### app/pages/Home.tsx — First page
 
 ```typescript
-import type { LoaderArgs } from "velojs";
-import { useLoader } from "velojs/hooks";
+import type { LoaderArgs } from "@mauroandre/velojs";
+import { useLoader } from "@mauroandre/velojs/hooks";
 
 export const loader = async ({ c }: LoaderArgs) => {
     return { message: "Hello, VeloJS!" };
@@ -177,7 +177,7 @@ Routes are defined in `app/routes.tsx` as a tree structure. Each node can have a
 
 ```typescript
 // app/routes.tsx
-import type { AppRoutes } from "velojs";
+import type { AppRoutes } from "@mauroandre/velojs";
 import * as Root from "./client-root.js";
 import * as AuthLayout from "./auth/Layout.js";
 import * as Login from "./auth/Login.js";
@@ -228,7 +228,7 @@ Root (isRoot — <html>, <head>, <body>)
 
 ```typescript
 // app/client-root.tsx — Root component
-import { Scripts } from "velojs";
+import { Scripts } from "@mauroandre/velojs";
 
 export const Component = ({ children }: { children: any }) => (
     <html>
@@ -327,8 +327,8 @@ export default [
 
 ```typescript
 // app/admin/Users.tsx
-import type { LoaderArgs, ActionArgs } from "velojs";
-import { useLoader } from "velojs/hooks";
+import type { LoaderArgs, ActionArgs } from "@mauroandre/velojs";
+import { useLoader } from "@mauroandre/velojs/hooks";
 
 interface User { id: string; name: string; }
 
@@ -423,7 +423,7 @@ Use for global/shared data loaded in a Layout and exported to child modules. Run
 
 ```typescript
 // app/admin/Layout.tsx
-import { Loader } from "velojs/hooks";
+import { Loader } from "@mauroandre/velojs/hooks";
 
 export const { data: globalData } = Loader<GlobalType>();
 
@@ -471,7 +471,7 @@ export const action_login = async ({
     const { authenticate } = await import("./auth.service.js");
     const token = await authenticate(body.email, body.password);
 
-    const { setCookie } = await import("velojs/cookie");
+    const { setCookie } = await import("@mauroandre/velojs/cookie");
     setCookie(c!, "session", token, { path: "/" });
 
     return { ok: true };
@@ -535,7 +535,7 @@ touch(items);
 Navigation with type-safe module references or string paths.
 
 ```typescript
-import { Link } from "velojs";
+import { Link } from "@mauroandre/velojs";
 import * as UserPage from "./users/UserDetail.js";
 import * as LoginPage from "./auth/Login.js";
 
@@ -588,7 +588,7 @@ The `~/` prefix escapes the nest context and navigates from the root. Use it whe
 Injects necessary scripts and styles in `<head>`.
 
 ```tsx
-import { Scripts } from "velojs";
+import { Scripts } from "@mauroandre/velojs";
 
 export const Component = ({ children }) => (
     <html>
@@ -635,8 +635,8 @@ Use `createMiddleware` from `velojs/factory` (wraps Hono's middleware):
 
 ```typescript
 // app/modules/auth/auth.middleware.ts
-import { createMiddleware } from "velojs/factory";
-import { getCookie } from "velojs/cookie";
+import { createMiddleware } from "@mauroandre/velojs/factory";
+import { getCookie } from "@mauroandre/velojs/cookie";
 
 export const authMiddleware = createMiddleware(async (c, next) => {
     const token = getCookie(c, "session");
@@ -731,7 +731,7 @@ Register custom Hono routes before page/action routes. Call in `app/server.tsx`.
 
 ```typescript
 // app/server.tsx
-import { addRoutes } from "velojs/server";
+import { addRoutes } from "@mauroandre/velojs/server";
 import type { Hono } from "hono";
 
 addRoutes((app: Hono) => {
@@ -759,7 +759,7 @@ addRoutes((app: Hono) => {
 Use Hono's `streamSSE` for real-time server-to-client communication.
 
 ```typescript
-import { addRoutes } from "velojs/server";
+import { addRoutes } from "@mauroandre/velojs/server";
 
 addRoutes((app) => {
     app.get("/api/events", async (c) => {
@@ -828,7 +828,7 @@ addRoutes((app) => {
 Access the underlying Node.js HTTP server. Useful for WebSocket handlers.
 
 ```typescript
-import { onServer } from "velojs/server";
+import { onServer } from "@mauroandre/velojs/server";
 
 onServer((httpServer) => {
     const { WebSocketServer } = await import("ws");
@@ -860,7 +860,7 @@ Callbacks queue until the server starts. If called after startup, executes immed
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `SERVER_PORT` | `3000` | Server port |
-| `NODE_ENV` | — | `production` enables static file serving |
+| `NODE_ENV` | — | Set automatically by `velojs start`. Enables static file serving |
 | `STATIC_BASE_URL` | `""` | CDN/bucket prefix for static assets |
 
 ---
@@ -924,14 +924,14 @@ Hooks (`useParams`, `useQuery`, `usePathname`, `Loader`, `useLoader`) access thi
 
 | Import | Contents |
 |--------|----------|
-| `velojs` | Types (`AppRoutes`, `ActionArgs`, `LoaderArgs`, `Metadata`), `Scripts`, `Link`, `defineConfig` |
-| `velojs/server` | `startServer`, `createApp`, `addRoutes`, `onServer`, `serverDataStorage` |
-| `velojs/client` | `startClient` |
-| `velojs/hooks` | `Loader`, `useLoader`, `useParams`, `useQuery`, `useNavigate`, `usePathname`, `touch` |
-| `velojs/cookie` | `getCookie`, `setCookie`, `deleteCookie`, `getSignedCookie`, `setSignedCookie` |
-| `velojs/factory` | `createMiddleware`, `createFactory` |
-| `velojs/vite` | `veloPlugin` |
-| `velojs/config` | `defineConfig`, `VeloConfig` |
+| `@mauroandre/velojs` | Types (`AppRoutes`, `ActionArgs`, `LoaderArgs`, `Metadata`), `Scripts`, `Link`, `defineConfig` |
+| `@mauroandre/velojs/server` | `startServer`, `createApp`, `addRoutes`, `onServer`, `serverDataStorage` |
+| `@mauroandre/velojs/client` | `startClient` |
+| `@mauroandre/velojs/hooks` | `Loader`, `useLoader`, `useParams`, `useQuery`, `useNavigate`, `usePathname`, `touch` |
+| `@mauroandre/velojs/cookie` | `getCookie`, `setCookie`, `deleteCookie`, `getSignedCookie`, `setSignedCookie` |
+| `@mauroandre/velojs/factory` | `createMiddleware`, `createFactory` |
+| `@mauroandre/velojs/vite` | `veloPlugin` |
+| `@mauroandre/velojs/config` | `defineConfig`, `VeloConfig` |
 
 ---
 
@@ -1003,10 +1003,9 @@ COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
 COPY --from=builder /app/dist ./dist
 
-ENV NODE_ENV=production
 ENV SERVER_PORT=3000
 EXPOSE 3000
-CMD ["node", "dist/server.js"]
+CMD ["npx", "velojs", "start"]
 ```
 
 ### Build output
@@ -1020,7 +1019,7 @@ velojs build
 #   server.js       # SSR server entry (single file)
 ```
 
-In production, VeloJS serves static files from `dist/client/` automatically when `NODE_ENV=production`.
+In production, `velojs start` sets `NODE_ENV=production` automatically and serves static files from `dist/client/`.
 
 ### Static assets on CDN
 
@@ -1036,7 +1035,7 @@ The `<Scripts />` component and CSS `url()` references will use this prefix auto
 
 ## Included Dependencies
 
-VeloJS includes everything you need. A single `npm install velojs` brings:
+VeloJS includes everything you need. A single `npm install @mauroandre/velojs` brings:
 
 - **Hono** — HTTP server and routing
 - **Preact** — UI rendering (SSR + client)
