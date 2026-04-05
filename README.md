@@ -1,508 +1,1049 @@
 # VeloJS
 
-> Full-stack TypeScript framework with Server Actions, SSR and Signals
+Fullstack web framework with SSR, hydration, and file-based conventions.
 
-The productivity of **React Router v7** with the flexibility of **Hono** and the lightness of **Preact**.
+- **Server**: Hono (web framework) + Preact SSR
+- **Client**: Preact + @preact/signals + wouter-preact
+- **Build**: Vite with custom plugin (Babel AST transforms)
 
-## Features
+---
 
-- ✅ **Zero Config** - Convention over configuration
-- ✅ **File-based Routing** - Nested layouts and automatic route generation
-- ✅ **Server Actions** - Type-safe mutations with `action_*` convention
-- ✅ **Data Loaders** - Server-side data fetching with automatic caching
-- ✅ **SSR + Hydration** - Automatic server-side rendering
-- ✅ **Reactive Signals** - Preact Signals for global state
-- ✅ **Code Splitting** - Automatic separation of server/client code
-- ✅ **Type-safe** - Full TypeScript with automatic type inference
-- ✅ **Hono Middlewares** - Use any Hono middleware
+## Getting Started
 
-## Tech Stack
-
-| Layer | Technology |
-|-------|-----------|
-| Backend | Hono 4.x |
-| Frontend | Preact 10.x |
-| State | @preact/signals |
-| Routing (Client) | wouter-preact |
-| SSR | preact-render-to-string |
-| Build | Vite 7.x |
-| Language | TypeScript |
-
-## Quick Start
-
-### Installation
+### Create a new project
 
 ```bash
-npm create velo@latest my-app
-cd my-app
-npm install
-npm run dev
+mkdir my-app && cd my-app
+npm init -y
+npm install velojs
+npm install -D typescript
 ```
 
-Or manually:
-
-```bash
-npm install velojs hono preact @preact/signals wouter-preact
-npm install -D vite typescript
-```
-
-### Project Structure
+### Project structure
 
 ```
 my-app/
-├── vite.config.ts          # Vite configuration
-├── package.json
-└── app/                    # Your application code
-    ├── routes.ts           # Route configuration
-    ├── entry.server.ts     # (Optional) Server customization
-    ├── layout.tsx          # Root layout
-    └── home/
-        └── page.tsx        # Home page
+├── app/
+│   ├── routes.tsx        # Route definitions (export default)
+│   ├── server.tsx        # Server init (DB connections, custom routes, etc)
+│   ├── client.tsx        # Client init (global CSS, etc)
+│   ├── client-root.tsx   # Root component (<html>, <head>, <body>)
+│   └── pages/            # Pages, layouts, modules
+├── vite.config.ts
+├── tsconfig.json
+└── package.json
 ```
 
-**That's it!** VeloJS automatically generates entry points (`index.html`, `client.tsx`, `server.ts`) in `.velojs/`.
-
-### Configuration
-
-**vite.config.ts:**
+### vite.config.ts
 
 ```typescript
-// vite.config.ts
 import { defineConfig } from "vite";
-import velojs from "velojs/vite-plugin";
+import { veloPlugin } from "velojs/vite";
 
 export default defineConfig({
-  plugins: [velojs()],
+    plugins: [veloPlugin()],
 });
 ```
 
-**package.json:**
+### package.json scripts
 
 ```json
 {
-  "type": "module",
-  "scripts": {
-    "dev": "velo dev",
-    "build": "vite build",
-    "serve": "node .velojs/server.js"
-  }
+    "scripts": {
+        "dev": "velojs dev",
+        "build": "velojs build",
+        "start": "NODE_ENV=production velojs start"
+    }
 }
 ```
 
-> **Note:** After npm publish, the `velo` CLI will be available globally. During development with local packages, use `"dev": "node ./node_modules/velojs/dist/cli.js dev"` instead.
+### app/client-root.tsx — Root component
 
-## Core Concepts
+The root component renders the HTML shell. It must accept `children` and include `<Scripts />`.
 
-### 1. Routes Configuration
+```tsx
+import type { ComponentChildren } from "preact";
+import { Scripts } from "velojs";
 
-Routes are defined in `app/routes.ts`:
+export const Component = ({ children }: { children?: ComponentChildren }) => (
+    <html lang="en">
+        <head>
+            <meta charset="UTF-8" />
+            <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+            <title>My App</title>
+            <Scripts />
+        </head>
+        <body>{children}</body>
+    </html>
+);
+```
+
+### app/client.tsx — Client entry
+
+Runs on the client only. Use it to import global CSS, initialize client-side libraries, or set up global components like toasts.
 
 ```typescript
-// app/routes.ts
-import { route, layout } from "velojs";
+// Import global styles
+import "./styles/global.css";
+
+// Optional: set up global client-side features
+// import { initAnalytics } from "./modules/analytics.js";
+// initAnalytics();
+```
+
+### app/server.tsx — Server entry
+
+Runs on the server only. Use it to connect to databases, create indexes, register custom API routes, start background jobs, and set up WebSocket handlers.
+
+```typescript
+import type { Hono } from "hono";
+import { addRoutes, onServer } from "velojs/server";
+
+// Connect to database
+import { connectDB } from "../db/engine.js";
+await connectDB();
+
+// Create indexes
+import { getDB } from "../db/engine.js";
+const db = getDB();
+await db.collection("users").createIndex({ email: 1 }, { unique: true });
+
+// Register custom API routes
+addRoutes((app: Hono) => {
+    app.get("/api/health", (c) => c.json({ ok: true }));
+});
+
+// Start background jobs
+const { runCleanup } = await import("./modules/cleanup.js");
+setInterval(() => runCleanup().catch(console.error), 60_000);
+```
+
+### app/routes.tsx — Route definitions
+
+```typescript
+import type { AppRoutes } from "velojs";
+import * as Root from "./client-root.js";
+import * as Home from "./pages/Home.js";
 
 export default [
-  layout("./layout.tsx", {
-    routes: [
-      route("/", "./home/page.tsx"),
-
-      layout("./admin/layout.tsx", {
-        prefix: "/admin",
-        routes: [
-          route("/users", "./admin/users/page.tsx"),
-          route("/settings", "./admin/settings/page.tsx"),
+    {
+        module: Root,
+        isRoot: true,
+        children: [
+            { path: "/", module: Home },
         ],
-      }),
-    ],
-  }),
-];
+    },
+] satisfies AppRoutes;
 ```
 
-**Result:**
-- `/` → Renders `layout.tsx` > `home/page.tsx`
-- `/admin/users` → Renders `layout.tsx` > `admin/layout.tsx` > `admin/users/page.tsx`
-- `/admin/settings` → Renders `layout.tsx` > `admin/layout.tsx` > `admin/settings/page.tsx`
-
-### 2. Layouts (Nested)
-
-Layouts wrap their child routes and can be nested infinitely:
+### app/pages/Home.tsx — First page
 
 ```typescript
-// app/layout.tsx
-export default function RootLayout({ children }: { children: any }) {
-  return (
-    <html>
-      <head>
-        <title>My App</title>
-      </head>
-      <body>
-        <header>
-          <nav>...</nav>
-        </header>
-        <main>{children}</main>
-        <footer>...</footer>
-      </body>
-    </html>
-  );
-}
-```
+import type { LoaderArgs } from "velojs";
+import { useLoader } from "velojs/hooks";
 
-```typescript
-// app/admin/layout.tsx
-export default function AdminLayout({ children }: { children: any }) {
-  return (
-    <div class="admin-wrapper">
-      <aside>Admin Sidebar</aside>
-      <div class="content">{children}</div>
-    </div>
-  );
-}
-```
+export const loader = async ({ c }: LoaderArgs) => {
+    return { message: "Hello, VeloJS!" };
+};
 
-**Key points:**
-- Layouts are **always nested** (no special "root" concept)
-- `prefix` is **optional** (defaults to empty string)
-- Use `{children}` to render nested content
-
-### 3. Data Loading (Loaders)
-
-Loaders fetch data on the server before rendering:
-
-```typescript
-// app/home/page.tsx
-export async function loader() {
-  // This runs ONLY on the server
-  const users = await db.users.findMany();
-
-  return {
-    users,
-    timestamp: new Date().toISOString(),
-  };
-}
-
-export default function HomePage() {
-  const { value: data, loading, error } = useLoaderData<typeof loader>();
-
-  if (loading.value) return <p>Loading...</p>;
-  if (error.value) return <p>Error: {error.value.message}</p>;
-
-  return (
-    <div>
-      <h1>Users</h1>
-      <ul>
-        {data.value?.users.map(user => (
-          <li key={user.id}>{user.name}</li>
-        ))}
-      </ul>
-    </div>
-  );
-}
-```
-
-**How it works:**
-1. **SSR**: Loader runs on server, data is injected in HTML
-2. **Client navigation**: Data fetched via `?_data=1` API
-3. **Cache**: Automatically cached per route
-
-### 4. Server Actions (Mutations)
-
-Server Actions are functions prefixed with `action_`:
-
-```typescript
-// app/admin/users/page.tsx
-import { useAction, revalidate } from "velojs/hooks";
-
-export async function action_createUser(name: string, email: string) {
-  // This runs ONLY on the server
-  const user = await db.users.create({ name, email });
-  return { success: true, user };
-}
-
-export async function action_deleteUser(id: number) {
-  await db.users.delete({ where: { id } });
-  return { success: true };
-}
-
-export default function UsersPage() {
-  const [createUser, creating] = useAction(action_createUser);
-  const [deleteUser, deleting] = useAction(action_deleteUser);
-
-  const handleCreate = async () => {
-    await createUser("John Doe", "john@example.com");
-    revalidate(); // Reload loader data
-  };
-
-  return (
-    <button onClick={handleCreate} disabled={creating.value}>
-      {creating.value ? "Creating..." : "Create User"}
-    </button>
-  );
-}
-```
-
-**Generated API routes:**
-- `POST /api/admin/users/action_createUser`
-- `POST /api/admin/users/action_deleteUser`
-
-**Type-safety:**
-- Arguments and return types are automatically inferred
-- Full autocomplete in your IDE
-
-### 5. Signals for State
-
-Use Preact Signals for reactive global state:
-
-```typescript
-import { signal } from "@preact/signals";
-
-const count = signal(0);
-
-export default function Counter() {
-  return (
-    <div>
-      <p>Count: {count.value}</p>
-      <button onClick={() => count.value++}>Increment</button>
-    </div>
-  );
-}
-```
-
-## Hooks
-
-### `useLoaderData<T>()`
-
-Access loader data with loading/error states:
-
-```typescript
-const { value, loading, error } = useLoaderData<typeof loader>();
-```
-
-**Properties:**
-- `value` - Signal with the loader data
-- `loading` - Signal indicating loading state
-- `error` - Signal with error (if any)
-
-### `useAction<T>(action)`
-
-Execute server actions:
-
-```typescript
-const [execute, { value: loading, error }] = useAction(action_createUser);
-
-// Call the action
-await execute("John", "john@example.com");
-```
-
-**Returns:**
-- `execute(...args)` - Function to call the action
-- `loading` - Loading state signal
-- `error` - Error signal (if any)
-
-### `revalidate()`
-
-Revalidate loader data for current route:
-
-```typescript
-import { revalidate } from "velojs/hooks";
-
-const handleSubmit = async () => {
-  await createUser(...);
-  revalidate(); // Reload all loaders for current route
+export const Component = () => {
+    const { data } = useLoader<{ message: string }>();
+    return <h1>{data.value?.message}</h1>;
 };
 ```
 
-## Server Customization
-
-Create `app/entry.server.ts` to customize the server:
-
-```typescript
-// app/entry.server.ts
-import type { Hono } from "hono";
-import { logger } from "hono/logger";
-import { cors } from "hono/cors";
-
-/**
- * Configure server before it starts
- */
-export function configureServer(app: Hono) {
-  // Add global middlewares
-  app.use("*", logger());
-  app.use("*", cors());
-
-  // Add custom routes
-  app.get("/health", (c) => c.json({ status: "ok" }));
-}
-
-/**
- * Hook called when server starts
- */
-export function onServerStart(app: Hono) {
-  console.log("🚀 Server ready!");
-  console.log(`📍 Routes: ${app.routes.length}`);
-
-  // Initialize database, etc.
-}
-```
-
-**Available Hooks:**
-- `configureServer(app: Hono)` - Configure middlewares, add routes
-- `onServerStart(app: Hono)` - Called when server starts
-
-**Both hooks are OPTIONAL!**
-
-## Advanced
-
-### Route Middlewares
-
-Add Hono middlewares to specific routes:
-
-```typescript
-// app/routes.ts
-import { route, layout } from "velojs";
-import { bearerAuth } from "hono/bearer-auth";
-
-const authMiddleware = bearerAuth({ token: "secret" });
-
-export default [
-  layout("./admin/layout.tsx", {
-    prefix: "/admin",
-    middleware: [authMiddleware], // Applied to all admin routes
-    routes: [
-      route("/users", "./admin/users/page.tsx"),
-    ],
-  }),
-];
-```
-
-### Dynamic Imports in Loaders
-
-Use dynamic imports to avoid bundling server-only code:
-
-```typescript
-export async function loader() {
-  // This import is NOT bundled in the client
-  const { db } = await import("~/lib/database");
-  return { users: await db.users.findMany() };
-}
-```
-
-### Access Request Context in Actions
-
-```typescript
-import { getContext } from "velojs/runtime";
-
-export async function action_updateUser(id: number, name: string) {
-  const { context, request, headers } = getContext();
-
-  // Access cookies, headers, etc.
-  const userId = context.get("userId");
-
-  return { success: true };
-}
-```
-
-## Build & Deploy
-
-### Development
+### Run
 
 ```bash
-npm run dev  # runs: velo dev
+npm run dev     # http://localhost:3000
 ```
 
-This starts the development server with HMR (Hot Module Replacement):
-- Client HMR: Automatic reload for component changes
-- Server HMR: Reloads server code on changes
-- Routes HMR: Re-scans routes when `routes.ts` changes
-
-Server will be available at `http://localhost:3000`.
-
-### Production Build
-
-```bash
-npm run build
-```
-
-Generates:
-- `.velojs/` - Generated server and client code
-- `dist/` - Client bundle (static assets)
-
-### Run Production Server
-
-```bash
-node .velojs/server.js
-```
-
-Or use a process manager:
-
-```bash
-pm2 start .velojs/server.js --name my-app
-```
-
-## Configuration Options
+### Configuration
 
 ```typescript
-// vite.config.ts
-import { defineConfig } from "vite";
-import velojs from "velojs/vite-plugin";
-
-export default defineConfig({
-  plugins: [
-    velojs({
-      workDir: "./app",      // Where your app code lives (default: "./app")
-      outDir: "./.velojs",   // Where generated files go (default: "./.velojs")
-    })
-  ],
+veloPlugin({
+    appDirectory: "./app",      // default
+    routesFile: "routes.tsx",   // default
+    serverInit: "server.tsx",   // default
+    clientInit: "client.tsx",   // default
 });
 ```
 
-## Examples
+---
 
-Check the `examples/` directory:
+## Routes
 
-- `examples/basic/` - Basic CRUD with loaders and actions
-- `examples/auth/` - Authentication with sessions (coming soon)
-- `examples/realtime/` - WebSockets and SSE (coming soon)
+Routes are defined in `app/routes.tsx` as a tree structure. Each node can have a `module` (component + loader + actions), `children` (nested routes), and `middlewares`.
 
-## Comparison
+```typescript
+// app/routes.tsx
+import type { AppRoutes } from "velojs";
+import * as Root from "./client-root.js";
+import * as AuthLayout from "./auth/Layout.js";
+import * as Login from "./auth/Login.js";
+import * as AdminLayout from "./admin/Layout.js";
+import * as Dashboard from "./admin/Dashboard.js";
+import * as Users from "./admin/Users.js";
+import * as UserDetail from "./admin/UserDetail.js";
+import { authMiddleware } from "./modules/auth/auth.middleware.js";
 
-| Feature | VeloJS | Next.js | Remix | SolidStart |
-|---------|--------|---------|-------|------------|
-| File-based routing | ✅ | ✅ | ✅ | ✅ |
-| Server Actions | ✅ | ✅ | ✅ | ✅ |
-| SSR | ✅ | ✅ | ✅ | ✅ |
-| Bundle size (runtime) | ~13KB | ~90KB | ~70KB | ~20KB |
-| Backend flexibility | ✅ Hono | ❌ Node.js only | ✅ Any | ✅ Any |
-| Signals | ✅ Built-in | ❌ | ❌ | ✅ Built-in |
-| Zero config | ✅ | ✅ | ✅ | ✅ |
+export default [
+    {
+        module: Root,
+        isRoot: true,
+        children: [
+            // Public routes
+            {
+                module: AuthLayout,
+                children: [
+                    { path: "/login", module: Login },
+                ],
+            },
+            // Authenticated routes
+            {
+                module: AdminLayout,
+                middlewares: [authMiddleware],
+                children: [
+                    { path: "/", module: Dashboard },
+                    { path: "/users", module: Users },
+                    { path: "/users/:id", module: UserDetail },
+                ],
+            },
+        ],
+    },
+] satisfies AppRoutes;
+```
 
-## Roadmap
+### Component nesting
 
-- [x] Core framework (Routes, Loaders, Actions)
-- [x] SSR with hydration
-- [x] Automatic code splitting
-- [x] Server Actions API
-- [x] Auto-generated entry points
-- [ ] Development mode with HMR
-- [ ] File-based routing with `[id]` params
-- [ ] Streaming SSR
-- [ ] Error boundaries
-- [ ] Metadata & SEO helpers
-- [ ] CLI (`create-velo`)
-- [ ] Deployment adapters (Cloudflare, Vercel, etc.)
+Routes with `children` act as **layouts**. Their `Component` receives `children` and wraps nested routes. VeloJS renders the full hierarchy from root to leaf:
 
-## Contributing
+```
+GET /users/123 renders:
 
-Contributions are welcome! Please read our [Contributing Guide](CONTRIBUTING.md).
+Root (isRoot — <html>, <head>, <body>)
+  └─ AdminLayout (sidebar, nav)
+       └─ UserDetail (page content)
+```
 
-## License
+```typescript
+// app/client-root.tsx — Root component
+import { Scripts } from "velojs";
 
-MIT © VeloJS Team
+export const Component = ({ children }: { children: any }) => (
+    <html>
+        <head><Scripts /></head>
+        <body>{children}</body>
+    </html>
+);
 
-## Credits
+// app/admin/Layout.tsx — Layout component
+export const Component = ({ children }: { children: any }) => (
+    <div class={css.layout}>
+        <nav class={css.sidebar}>...</nav>
+        <main class={css.content}>{children}</main>
+    </div>
+);
 
-Inspired by:
-- [React Router v7](https://reactrouter.com/) - Routing patterns
-- [Hono](https://hono.dev/) - Backend flexibility
-- [Preact](https://preactjs.com/) - Lightweight React alternative
-- [Remix](https://remix.run/) - Server Actions concept
-- [SolidStart](https://start.solidjs.com/) - Signals integration
+// app/admin/UserDetail.tsx — Page component (leaf, no children)
+export const Component = () => {
+    const { data } = useLoader<User>();
+    return <div>{data.value?.name}</div>;
+};
+```
+
+Every layout and page can have its own `loader`. On a request, **all loaders in the hierarchy run in parallel** — Root loader + AdminLayout loader + UserDetail loader all execute at the same time.
+
+### Route Node Properties
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `path` | `string` | URL path segment. Supports `:params` (e.g., `/users/:id`). |
+| `module` | `RouteModule` | Module with `Component`, `loader`, `action_*` |
+| `children` | `RouteNode[]` | Nested routes (module acts as layout) |
+| `middlewares` | `MiddlewareHandler[]` | Hono middlewares (server-only, inherited by children) |
+| `isRoot` | `boolean` | Marks the root node (renders `<html>`, `<head>`, `<body>`) |
+
+### Path resolution
+
+Paths are **relative segments** that concatenate with parent paths:
+
+```
+Root (no path)
+  └─ AdminLayout (no path)
+       ├─ Dashboard    → path: "/"           → fullPath: "/"
+       ├─ Users        → path: "/users"      → fullPath: "/users"
+       └─ UserDetail   → path: "/users/:id"  → fullPath: "/users/:id"
+```
+
+Nodes without `path` don't add a segment — they're pure layout wrappers. The Vite plugin parses `routes.tsx` at build-time and calculates both `fullPath` (absolute) and `path` (relative segment), injecting them into each module's `metadata` export.
+
+### Shared layouts, different paths
+
+You can reuse the same layout for different route groups:
+
+```typescript
+export default [
+    {
+        module: Root,
+        isRoot: true,
+        children: [
+            // Public pages — same layout, no auth
+            {
+                module: PublicLayout,
+                children: [
+                    { path: "/", module: Home },
+                    { path: "/about", module: About },
+                ],
+            },
+            // Dashboard — same root, different layout + auth
+            {
+                path: "/dashboard",
+                module: DashboardLayout,
+                middlewares: [authMiddleware],
+                children: [
+                    { path: "/", module: Overview },
+                    { path: "/settings", module: Settings },
+                ],
+            },
+        ],
+    },
+] satisfies AppRoutes;
+```
+
+---
+
+## Components
+
+### Conventions
+
+| Export | Purpose |
+|--------|---------|
+| `export const Component` | Preact component (required) |
+| `export const loader` | Server-side data loader |
+| `export const action_*` | Server-side actions (RPC) |
+
+### Example Page
+
+```typescript
+// app/admin/Users.tsx
+import type { LoaderArgs, ActionArgs } from "velojs";
+import { useLoader } from "velojs/hooks";
+
+interface User { id: string; name: string; }
+
+export const loader = async ({ params, query, c }: LoaderArgs) => {
+    const { getUsers } = await import("./user.service.js");
+    return getUsers();
+};
+
+export const action_delete = async ({
+    body,
+    c,
+}: ActionArgs<{ id: string }>) => {
+    const { deleteUser } = await import("./user.service.js");
+    await deleteUser(body.id);
+    return { ok: true };
+};
+
+export const Component = () => {
+    const { data, loading, refetch } = useLoader<User[]>();
+
+    if (loading.value) return <div>Loading...</div>;
+
+    return (
+        <ul>
+            {data.value?.map((u) => (
+                <li key={u.id}>
+                    {u.name}
+                    <button onClick={async () => {
+                        await action_delete({ body: { id: u.id } });
+                        refetch();
+                    }}>Delete</button>
+                </li>
+            ))}
+        </ul>
+    );
+};
+```
+
+### Server-only imports
+
+Loaders and actions run on the server, but the **file itself** is also bundled for the client (the Vite plugin strips the loader body and transforms actions into fetch stubs). This means **top-level imports are included in the client bundle**.
+
+Always use `await import()` inside loaders and actions for server-only code (database access, file system, secrets, etc.):
+
+```typescript
+// BAD — leaks server code into client bundle
+import { getUsers } from "./user.service.js";
+import { db } from "../db/engine.js";
+
+export const loader = async () => {
+    return db.collection("users").find().toArray();
+};
+
+// GOOD — dynamic import, only runs on server
+export const loader = async () => {
+    const { getUsers } = await import("./user.service.js");
+    return getUsers();
+};
+```
+
+This is the most important convention in VeloJS. If you top-level import a module that uses Node.js APIs (fs, crypto, database drivers), the client build will fail or include unnecessary code.
+
+---
+
+## Loaders
+
+Two patterns for consuming loader data:
+
+### `useLoader<T>()` — Component-level (SSR + SPA)
+
+Use for page-specific data. Supports SSR hydration and SPA navigation (auto-fetches on navigation).
+
+```typescript
+export const Component = () => {
+    const { data, loading, refetch } = useLoader<MyType>();
+    // data: Signal<T | null>
+    // loading: Signal<boolean>
+    // refetch: () => void — manually re-fetch data
+};
+```
+
+With dependencies (re-fetch when deps change):
+
+```typescript
+const params = useParams<{ id: string }>();
+const { data } = useLoader<User>([params.id]);
+```
+
+### `Loader<T>()` — Module-level (SSR only)
+
+Use for global/shared data loaded in a Layout and exported to child modules. Runs once on import — does **not** re-fetch on SPA navigation.
+
+```typescript
+// app/admin/Layout.tsx
+import { Loader } from "velojs/hooks";
+
+export const { data: globalData } = Loader<GlobalType>();
+
+export const Component = ({ children }) => (
+    <div>
+        <header>Hello, {globalData.value?.user.name}</header>
+        {children}
+    </div>
+);
+
+// app/admin/Home.tsx — import from Layout
+import { globalData } from "./Layout.js";
+
+export const Component = () => (
+    <div>Permissions: {globalData.value?.permissions.join(", ")}</div>
+);
+```
+
+### Data Flow
+
+```
+SSR:
+    loader() → server runs all loaders in parallel
+    → injects window.__PAGE_DATA__ = { moduleId: data, ... }
+    → Loader()/useLoader() hydrate from __PAGE_DATA__
+
+SPA navigation:
+    useLoader() → fetch(currentPath?_data=1) → JSON { moduleId: data }
+    Loader() → returns null (no re-fetch)
+```
+
+---
+
+## Actions
+
+Server-side functions callable from the client via RPC.
+
+### Definition
+
+```typescript
+export const action_login = async ({
+    body,
+    c,
+}: ActionArgs<{ email: string; password: string }>) => {
+    const { authenticate } = await import("./auth.service.js");
+    const token = await authenticate(body.email, body.password);
+
+    const { setCookie } = await import("velojs/cookie");
+    setCookie(c!, "session", token, { path: "/" });
+
+    return { ok: true };
+};
+```
+
+### Client-Side Behavior
+
+The Vite plugin transforms action bodies into fetch stubs at build time:
+
+```typescript
+// Original (server)
+export const action_login = async ({ body, c }: ActionArgs<LoginBody>) => {
+    // ... server logic
+};
+
+// Transformed (client)
+export const action_login = async ({ body }: { body: LoginBody }) => {
+    return fetch("/_action/auth/Login/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+    }).then(r => r.json());
+};
+```
+
+**Error handling**: Actions do NOT throw on server errors. They resolve with `{ error: "message" }`. Always check `result.error` explicitly.
+
+---
+
+## Hooks
+
+All hooks work in both SSR and client (via AsyncLocalStorage on server, wouter/DOM on client).
+
+| Hook | Description |
+|------|-------------|
+| `useLoader<T>(deps?)` | Loader data with SSR + SPA support. Returns `{ data, loading, refetch }` |
+| `Loader<T>()` | Module-level SSR-only loader. Returns `{ data, loading }` |
+| `useParams<T>()` | Route parameters (e.g., `:id`) |
+| `useQuery<T>()` | Query string parameters |
+| `useNavigate()` | Programmatic navigation. Returns `navigate(path)` function |
+| `usePathname()` | Absolute pathname (unlike wouter's `useLocation` which is relative to nest context) |
+| `touch(signal)` | Force signal notification after nested property mutation |
+
+### touch
+
+```typescript
+const items = useSignal<Item[]>([]);
+
+// Mutating nested properties doesn't trigger signal updates
+items.value[0].checked = true;
+
+// touch() forces the update
+touch(items);
+```
+
+---
+
+## Link Component
+
+Navigation with type-safe module references or string paths.
+
+```typescript
+import { Link } from "velojs";
+import * as UserPage from "./users/UserDetail.js";
+import * as LoginPage from "./auth/Login.js";
+
+// With route module (relative — uses metadata.path, works with wouter nest context)
+<Link to={UserPage} params={{ id: "123" }}>View</Link>
+
+// With route module (absolute — uses metadata.fullPath)
+<Link to={LoginPage} absolute>Login</Link>
+
+// With query string
+<Link to={UserPage} params={{ id: "123" }} search={{ tab: "settings" }}>
+    Settings
+</Link>
+
+// String path (relative to current nest context)
+<Link to="/users">Users</Link>
+
+// String path with ~/ prefix (absolute — escapes nest context)
+<Link to="~/stacks">Stacks</Link>
+<Link to={`~/stacks/apps/${appId}/edit`}>Edit App</Link>
+```
+
+### The `~/` prefix
+
+VeloJS uses wouter-preact for routing. When routes are nested (layouts wrapping children), wouter creates a **nest context** — relative paths resolve within the current layout's scope.
+
+The `~/` prefix escapes the nest context and navigates from the root. Use it when navigating between sections:
+
+```typescript
+// Inside /master/workers layout, these behave differently:
+<Link to="/details">   → resolves to /master/workers/details (relative)
+<Link to="~/stacks">   → resolves to /stacks (absolute from root)
+```
+
+**When to use `~/`**: anytime you navigate to a route outside the current layout's scope. In practice, most cross-section links use `~/`.
+
+### Props
+
+| Prop | Type | Description |
+|------|------|-------------|
+| `to` | `string \| RouteModule` | Destination path or module. String paths support `~/` prefix for absolute navigation |
+| `params` | `Record<string, string>` | URL parameter substitution (`:id` → value) |
+| `search` | `Record<string, string>` | Query string parameters |
+| `absolute` | `boolean` | When using module reference: use `fullPath` instead of `path` (default: `false`) |
+
+---
+
+## Scripts Component
+
+Injects necessary scripts and styles in `<head>`.
+
+```tsx
+import { Scripts } from "velojs";
+
+export const Component = ({ children }) => (
+    <html>
+        <head>
+            <Scripts />
+        </head>
+        <body>{children}</body>
+    </html>
+);
+```
+
+### Props
+
+| Prop | Type | Default | Description |
+|------|------|---------|-------------|
+| `basePath` | `string` | `process.env.STATIC_BASE_URL \|\| ""` | Base path for static assets |
+| `favicon` | `string \| false` | `"/favicon.ico"` | Favicon path, or `false` to disable |
+
+### Output
+
+**Development:**
+```html
+<link rel="icon" href="/favicon.ico" type="image/x-icon" />
+<script type="module" src="/@vite/client"></script>
+<script type="module" src="/__velo_client.js"></script>
+```
+
+**Production:**
+```html
+<link rel="icon" href="/favicon.ico" type="image/x-icon" />
+<link rel="stylesheet" href="/client.css" />
+<script type="module" src="/client.js"></script>
+```
+
+---
+
+## Middlewares
+
+Server-side only. Removed from client bundle at build time.
+
+### Creating a middleware
+
+Use `createMiddleware` from `velojs/factory` (wraps Hono's middleware):
+
+```typescript
+// app/modules/auth/auth.middleware.ts
+import { createMiddleware } from "velojs/factory";
+import { getCookie } from "velojs/cookie";
+
+export const authMiddleware = createMiddleware(async (c, next) => {
+    const token = getCookie(c, "session");
+
+    if (!token) {
+        if (c.req.method === "GET") return c.redirect("/login");
+        return c.json({ error: "unauthorized" }, 401);
+    }
+
+    // Set data on context — accessible in loaders and actions via c.get()
+    const user = await verifyToken(token);
+    c.set("user", user);
+
+    await next();
+});
+```
+
+### Using in routes
+
+Add `middlewares` to any route node. All children inherit the middleware:
+
+```typescript
+// app/routes.tsx
+import { authMiddleware } from "./modules/auth/auth.middleware.js";
+import { masterMiddleware } from "./modules/auth/master.middleware.js";
+
+export default [
+    {
+        module: Root,
+        isRoot: true,
+        children: [
+            // Public routes — no middleware
+            { path: "/login", module: AuthLayout, children: [{ module: Login }] },
+
+            // Authenticated routes
+            {
+                module: AdminLayout,
+                middlewares: [authMiddleware],
+                children: [
+                    { path: "/", module: Dashboard },     // authMiddleware applies
+                    { path: "/stacks", module: Stacks },  // authMiddleware applies
+
+                    // Admin-only routes — both middlewares apply
+                    {
+                        path: "/master",
+                        module: MasterLayout,
+                        middlewares: [masterMiddleware],
+                        children: [
+                            { path: "/workers", module: Workers },  // auth + master
+                            { path: "/settings", module: Settings },// auth + master
+                        ],
+                    },
+                ],
+            },
+        ],
+    },
+] satisfies AppRoutes;
+```
+
+### Inheritance
+
+Middlewares accumulate from parent to child. In the example above, `/master/workers` runs `authMiddleware` first, then `masterMiddleware`. This applies to both page loads (loaders) and action calls.
+
+### Accessing middleware data in loaders and actions
+
+Use Hono's `c.get()` / `c.set()`:
+
+```typescript
+// Middleware sets data
+c.set("user", { id: "123", name: "Mauro", role: "master" });
+
+// Loader reads it
+export const loader = async ({ c }: LoaderArgs) => {
+    const user = c.get("user");
+    return { greeting: `Hello, ${user.name}` };
+};
+
+// Action reads it
+export const action_save = async ({ body, c }: ActionArgs<{ name: string }>) => {
+    const user = c!.get("user");
+    // ...
+};
+```
+
+---
+
+## Server API
+
+### `addRoutes(fn)`
+
+Register custom Hono routes before page/action routes. Call in `app/server.tsx`. Use this for REST APIs, SSE streams, file uploads, webhooks, and any custom HTTP endpoints.
+
+```typescript
+// app/server.tsx
+import { addRoutes } from "velojs/server";
+import type { Hono } from "hono";
+
+addRoutes((app: Hono) => {
+    // REST API
+    app.get("/api/health", (c) => c.json({ ok: true }));
+
+    app.post("/api/upload", async (c) => {
+        const body = await c.req.parseBody();
+        const file = body.file;
+        // ...
+        return c.json({ ok: true });
+    });
+
+    // Middleware for a group of routes
+    app.use("/api/admin/*", async (c, next) => {
+        const token = c.req.header("Authorization");
+        if (!token) return c.json({ error: "Unauthorized" }, 401);
+        await next();
+    });
+});
+```
+
+### Server-Sent Events (SSE)
+
+Use Hono's `streamSSE` for real-time server-to-client communication.
+
+```typescript
+import { addRoutes } from "velojs/server";
+
+addRoutes((app) => {
+    app.get("/api/events", async (c) => {
+        const { streamSSE } = await import("hono/streaming");
+
+        return streamSSE(c, async (stream) => {
+            // Send snapshot on connect
+            await stream.writeSSE({ event: "snapshot", data: JSON.stringify({ count: 0 }) });
+
+            // Subscribe to updates
+            const unsubscribe = subscribe((data) => {
+                stream.writeSSE({ event: "update", data: JSON.stringify(data) });
+            });
+
+            // Cleanup on disconnect
+            stream.onAbort(() => { unsubscribe(); });
+
+            // Keep stream open
+            await new Promise<void>(() => {});
+        });
+    });
+});
+```
+
+Client-side consumption with `EventSource`:
+
+```typescript
+useEffect(() => {
+    const es = new EventSource("/api/events");
+
+    es.addEventListener("snapshot", (e) => {
+        state.value = JSON.parse(e.data);
+    });
+
+    es.addEventListener("update", (e) => {
+        state.value = JSON.parse(e.data);
+    });
+
+    return () => es.close();
+}, []);
+```
+
+### SSE with polling (live metrics)
+
+```typescript
+addRoutes((app) => {
+    app.get("/api/metrics/live", async (c) => {
+        const { streamSSE } = await import("hono/streaming");
+
+        return streamSSE(c, async (stream) => {
+            let running = true;
+            stream.onAbort(() => { running = false; });
+
+            while (running) {
+                const metrics = await collectMetrics();
+                await stream.writeSSE({ data: JSON.stringify(metrics) });
+                await new Promise((r) => setTimeout(r, 3000));
+            }
+        });
+    });
+});
+```
+
+### `onServer(fn)`
+
+Access the underlying Node.js HTTP server. Useful for WebSocket handlers.
+
+```typescript
+import { onServer } from "velojs/server";
+
+onServer((httpServer) => {
+    const { WebSocketServer } = await import("ws");
+    const wss = new WebSocketServer({ noServer: true });
+
+    httpServer.on("upgrade", (req, socket, head) => {
+        const url = new URL(req.url!, `http://${req.headers.host}`);
+
+        if (url.pathname === "/ws") {
+            wss.handleUpgrade(req, socket, head, (ws) => {
+                ws.on("message", (raw) => {
+                    const msg = JSON.parse(raw.toString());
+                    // Handle message
+                });
+
+                ws.on("close", () => {
+                    // Cleanup
+                });
+            });
+        }
+    });
+});
+```
+
+Callbacks queue until the server starts. If called after startup, executes immediately.
+
+### Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `SERVER_PORT` | `3000` | Server port |
+| `NODE_ENV` | — | `production` enables static file serving |
+| `STATIC_BASE_URL` | `""` | CDN/bucket prefix for static assets |
+
+---
+
+## Vite Plugin Architecture
+
+`veloPlugin()` returns 6 plugins:
+
+| Plugin | Purpose |
+|--------|---------|
+| `velo:config` | Build config (client/server modes, aliases, defines) |
+| `velo:transform` | AST transforms (metadata injection, action stubs, loader removal) |
+| `velo:static-url` | Rewrites CSS `url(/path)` to `url(STATIC_BASE_URL/path)` at build time |
+| `@preact/preset-vite` | Preact JSX support |
+| `@hono/vite-dev-server` | Dev server with SSR |
+| `velo:ws-bridge` | Exposes Vite's HTTP server for WebSocket handlers in dev mode |
+
+### AST Transformations
+
+Applied during Vite's `transform` hook to files in `appDirectory`:
+
+| # | Transform | When | What it does |
+|---|-----------|------|-------------|
+| 1 | `injectMetadata` | Server + Client | Adds `export const metadata = { moduleId, fullPath, path }` |
+| 2 | `transformLoaderFunctions` | Server + Client | Injects moduleId: `useLoader()` → `useLoader("moduleId")` |
+| 3 | `transformActionsForClient` | Client only | Replaces action body with `fetch()` stub |
+| 4 | `removeLoaders` | Client only | Removes `export const loader` entirely |
+| 5 | `removeMiddlewares` | Client only | Removes `middlewares: [...]` and related imports |
+
+### Build Process
+
+```bash
+velojs build
+# 1. vite build              → dist/client/ (client.js, client.css, manifest.json)
+# 2. vite build --mode server → dist/server.js (SSR entry)
+```
+
+### Virtual Modules
+
+| Module | Purpose |
+|--------|---------|
+| `virtual:velo/server-entry` | Server entry — imports `server.tsx` + routes, calls `startServer()` |
+| `virtual:velo/client-entry` | Client entry — imports `client.tsx` + routes, calls `startClient()` |
+| `/__velo_client.js` | Alias for client entry (used in dev) |
+
+### Hot Reload
+
+When `routes.tsx` changes, the plugin rebuilds the fullPath map and triggers a full page reload (not partial HMR).
+
+---
+
+## Request Isolation
+
+VeloJS uses Node's `AsyncLocalStorage` to isolate data per request. Each SSR render runs in its own storage context, preventing data leaks between concurrent requests.
+
+Hooks (`useParams`, `useQuery`, `usePathname`, `Loader`, `useLoader`) access this storage on the server via `globalThis.__veloServerData`.
+
+---
+
+## Subpath Exports
+
+| Import | Contents |
+|--------|----------|
+| `velojs` | Types (`AppRoutes`, `ActionArgs`, `LoaderArgs`, `Metadata`), `Scripts`, `Link`, `defineConfig` |
+| `velojs/server` | `startServer`, `createApp`, `addRoutes`, `onServer`, `serverDataStorage` |
+| `velojs/client` | `startClient` |
+| `velojs/hooks` | `Loader`, `useLoader`, `useParams`, `useQuery`, `useNavigate`, `usePathname`, `touch` |
+| `velojs/cookie` | `getCookie`, `setCookie`, `deleteCookie`, `getSignedCookie`, `setSignedCookie` |
+| `velojs/factory` | `createMiddleware`, `createFactory` |
+| `velojs/vite` | `veloPlugin` |
+| `velojs/config` | `defineConfig`, `VeloConfig` |
+
+---
+
+## Type Reference
+
+```typescript
+interface LoaderArgs {
+    params: Record<string, string>;
+    query: Record<string, string>;
+    c: Context; // Hono Context
+}
+
+interface ActionArgs<TBody = unknown> {
+    body: TBody;
+    params?: Record<string, string>;
+    query?: Record<string, string>;
+    c?: Context;
+}
+
+interface Metadata {
+    moduleId: string;
+    fullPath?: string;
+    path?: string;
+}
+
+interface RouteModule {
+    Component: ComponentType<any>;
+    loader?: (args: LoaderArgs) => Promise<any>;
+    metadata?: Metadata;
+    [key: `action_${string}`]: (args: ActionArgs) => Promise<any>;
+}
+
+interface RouteNode {
+    path?: string;
+    module: RouteModule;
+    children?: RouteNode[];
+    middlewares?: MiddlewareHandler[];
+    isRoot?: boolean;
+}
+
+type AppRoutes = RouteNode[];
+
+interface VeloConfig {
+    appDirectory?: string;   // default: "./app"
+    routesFile?: string;     // default: "routes.tsx"
+    serverInit?: string;     // default: "server.tsx"
+    clientInit?: string;     // default: "client.tsx"
+}
+```
+
+---
+
+## Docker / Production Deploy
+
+### Dockerfile
+
+```dockerfile
+FROM node:22-alpine AS builder
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci
+COPY app ./app
+COPY tsconfig.json vite.config.ts ./
+RUN npm run build
+
+FROM node:22-alpine
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev
+COPY --from=builder /app/dist ./dist
+
+ENV NODE_ENV=production
+ENV SERVER_PORT=3000
+EXPOSE 3000
+CMD ["node", "dist/server.js"]
+```
+
+### Build output
+
+```bash
+velojs build
+# dist/
+#   client/         # Static assets (JS, CSS, images)
+#     client.js
+#     client.css
+#   server.js       # SSR server entry (single file)
+```
+
+In production, VeloJS serves static files from `dist/client/` automatically when `NODE_ENV=production`.
+
+### Static assets on CDN
+
+Set `STATIC_BASE_URL` to serve static assets from a CDN or S3 bucket:
+
+```bash
+STATIC_BASE_URL=https://cdn.example.com/assets node dist/server.js
+```
+
+The `<Scripts />` component and CSS `url()` references will use this prefix automatically.
+
+---
+
+## Included Dependencies
+
+VeloJS includes everything you need. A single `npm install velojs` brings:
+
+- **Hono** — HTTP server and routing
+- **Preact** — UI rendering (SSR + client)
+- **@preact/signals** — Reactive state management
+- **wouter-preact** — Client-side routing
+- **Vite** — Build tool and dev server
+- **@preact/preset-vite** — Preact JSX support
+- **@hono/vite-dev-server** — SSR dev server
+
+No need to install these separately.

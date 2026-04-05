@@ -1,35 +1,19 @@
-/**
- * VeloJS - Full-stack framework with Server Actions, SSR and Signals
- *
- * @example
- * ```ts
- * import { route, layout } from "velojs";
- *
- * export default [
- *   layout("./admin/layout.tsx", {
- *     prefix: "/admin",
- *     routes: [
- *       route("/users", "./admin/users/page.tsx"),
- *     ],
- *   }),
- * ];
- * ```
- */
-
-// Core helpers
-export { route } from "./core/route.js";
-export { layout } from "./core/layout.js";
-
 // Types
 export type {
-  RouteDefinition,
-  LayoutDefinition,
-  RouteConfig,
-  LoaderArgs,
-  LoaderFunction,
-  ServerAction,
-  ServerActionContext,
-  VeloConfig,
+    AppRoutes,
+    RouteNode,
+    RouteModule,
+    LoaderArgs,
+    ActionArgs,
+    Metadata,
 } from "./types.js";
 
-export { isLayout } from "./types.js";
+// Config
+export type { VeloConfig } from "./config.js";
+export { defineConfig } from "./config.js";
+
+// Components
+export { Scripts, Link } from "./components.js";
+
+// Re-export Hono types
+export type { Context, MiddlewareHandler, Next } from "hono";
