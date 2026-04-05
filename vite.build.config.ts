@@ -13,6 +13,10 @@ for (const file of readdirSync(srcDir)) {
 }
 
 export default defineConfig({
+    define: {
+        // Preserve process.env.NODE_ENV for runtime resolution by consumer
+        "process.env.NODE_ENV": "process.env.NODE_ENV",
+    },
     build: {
         lib: {
             entry: entries,

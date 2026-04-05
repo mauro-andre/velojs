@@ -38,7 +38,7 @@ interface ScriptsProps {
  * ```
  */
 export function Scripts({ basePath, favicon = "/favicon.ico" }: ScriptsProps = {}) {
-    const isDev = import.meta.env.DEV;
+    const isDev = process.env.NODE_ENV !== "production";
     basePath = basePath || process.env.STATIC_BASE_URL || "";
 
     const faviconTag = favicon !== false && (
