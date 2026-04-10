@@ -6,7 +6,7 @@ import {
     useSignal,
     type Signal,
 } from "@preact/signals";
-import { useEffect } from "preact/hooks";
+import { useEffect, useRef } from "preact/hooks";
 import {
     useParams as wouterUseParams,
     useLocation as wouterUseLocation,
@@ -167,11 +167,14 @@ export function useLoader<T>(
             });
     };
 
-    // Se não tem dado, faz fetch (navegação SPA)
-    // Na hidratação initialData !== null, então pula o fetch
-    // Quando deps mudam (ex: troca de rota), initialData será null e dispara fetch
+    // Skip fetch on first render if hydrated from __PAGE_DATA__
+    // On subsequent dep changes (SPA navigation), always fetch
+    const isHydrated = useRef(initialData !== null);
     useEffect(() => {
-        if (initialData !== null) return;
+        if (isHydrated.current) {
+            isHydrated.current = false;
+            return;
+        }
         fetchData();
     }, resolvedDeps ?? []);
 
