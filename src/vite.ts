@@ -822,6 +822,7 @@ function veloConfigPlugin(): Plugin {
                     "process.env.NODE_ENV": JSON.stringify(isDev ? "development" : "production"),
                     "process.env.STATIC_BASE_URL": JSON.stringify(process.env.STATIC_BASE_URL || (isStatic ? "/client" : "")),
                     "__VELO_STATIC__": JSON.stringify(isStatic),
+                    "__VELO_BUILD_HASH__": JSON.stringify(Date.now().toString(36)),
                 },
                 resolve: {
                     alias: {

@@ -1,4 +1,5 @@
 declare const __VELO_STATIC__: boolean;
+declare const __VELO_BUILD_HASH__: string;
 
 import {
     signal,
@@ -154,14 +155,14 @@ export function useLoader<T>(
                 return `${currentPath}?${searchParams.toString()}`;
             })();
 
-        fetch(dataUrl)
+        const cacheBust = typeof __VELO_BUILD_HASH__ !== "undefined" ? `?v=${__VELO_BUILD_HASH__}` : "";
+        fetch(`${dataUrl}${cacheBust}`)
             .then((res) => res.json())
             .then((json: Record<string, unknown>) => {
                 data.value = json[moduleId] as T;
                 loading.value = false;
             })
-            .catch((err) => {
-                console.error("Erro ao carregar dados:", err);
+            .catch(() => {
                 loading.value = false;
             });
     };

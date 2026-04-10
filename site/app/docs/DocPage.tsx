@@ -1,8 +1,6 @@
 import { useLoader, useParams } from "../../../src/hooks.js";
 import type { LoaderArgs } from "../../../src/types.js";
 import { Link } from "../../../src/components.js";
-import manifest from "virtual:docs-manifest";
-import content from "virtual:docs-content";
 import * as css from "./Layout.css.js";
 
 interface DocPageData {
@@ -16,14 +14,18 @@ interface DocPageData {
 }
 
 export const staticPaths = async () => {
-    return manifest.map((entry) => ({ slug: entry.slug }));
+    const { default: manifest } = await import("virtual:docs-manifest");
+    return manifest.map((entry: any) => ({ slug: entry.slug }));
 };
 
 export const loader = async ({ params }: LoaderArgs) => {
+    const { default: manifest } = await import("virtual:docs-manifest");
+    const { default: content } = await import("virtual:docs-content");
+
     const slug = params.slug;
     const doc = content[slug];
-    const entry = manifest.find((m) => m.slug === slug);
-    const index = manifest.findIndex((m) => m.slug === slug);
+    const entry = manifest.find((m: any) => m.slug === slug);
+    const index = manifest.findIndex((m: any) => m.slug === slug);
 
     const prev = index > 0 ? manifest[index - 1] : null;
     const next = index < manifest.length - 1 ? manifest[index + 1] : null;

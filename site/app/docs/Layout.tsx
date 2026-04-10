@@ -2,24 +2,26 @@ import { useLoader, usePathname } from "../../../src/hooks.js";
 import type { LoaderArgs } from "../../../src/types.js";
 import { Link } from "../../../src/components.js";
 import { useSignal } from "@preact/signals";
-import manifest from "virtual:docs-manifest";
 import * as css from "./Layout.css.js";
 
-interface DocsLayoutData {
-    manifest: typeof manifest;
+interface DocEntry {
+    slug: string;
+    title: string;
+    order: number;
+    filename: string;
 }
 
 export const loader = async ({}: LoaderArgs) => {
-    return { manifest };
+    const { default: manifest } = await import("virtual:docs-manifest");
+    return { manifest: manifest as DocEntry[] };
 };
 
 export const Component = ({ children }: { children: any }) => {
     const sidebarOpen = useSignal(false);
     const pathname = usePathname();
-    const { data } = useLoader<DocsLayoutData>();
+    const { data } = useLoader<{ manifest: DocEntry[] }>([pathname]);
 
-    // Use loader data when available, fall back to static import
-    const entries = data.value?.manifest ?? manifest;
+    const entries = data.value?.manifest ?? [];
 
     return (
         <div class={css.layout}>
