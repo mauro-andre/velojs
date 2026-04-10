@@ -11,5 +11,5 @@
         "jsx": "react-jsx",
         "jsxImportSource": "preact"
     },
-    "include": ["src", "plugins"]
+    "include": ["src", "app", "plugins"]
 }

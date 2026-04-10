@@ -3,20 +3,33 @@
     "private": true,
     "type": "module",
     "scripts": {
-        "dev": "vite",
-        "build": "vite build && cd dist && zip -r ../site.zip . && cd .. && echo 'site.zip ready'"
+        "dev": "npx tsx ../src/cli.ts dev",
+        "build": "npx tsx ../src/cli.ts build --static && cd dist && zip -r ../site.zip . && cd .. && echo 'site.zip ready'"
     },
     "dependencies": {
         "@preact/signals": "^2.8.0",
-        "preact": "^10.29.0"
+        "hono": "^4.12.0",
+        "preact": "^10.29.0",
+        "preact-render-to-string": "^6.6.0",
+        "wouter-preact": "^3.9.0"
     },
     "devDependencies": {
-        "@preact/preset-vite": "^2.10.5",
+        "@babel/generator": "^7.28.5",
+        "@babel/parser": "^7.28.5",
+        "@babel/traverse": "^7.28.5",
+        "@babel/types": "^7.28.5",
+        "@hono/node-server": "^1.19.0",
+        "@hono/vite-dev-server": "^0.25.0",
+        "@preact/preset-vite": "^2.10.0",
+        "@types/archiver": "^7.0.0",
+        "@types/babel__generator": "^7.27.0",
+        "@types/babel__traverse": "^7.28.0",
         "@vanilla-extract/css": "^1.20.1",
         "@vanilla-extract/vite-plugin": "^5.2.2",
         "archiver": "^7.0.1",
         "marked": "^15.0.0",
         "shiki": "^3.0.0",
+        "tsx": "^4.19.0",
         "typescript": "^6.0.2",
         "vite": "^7.3.0"
     }

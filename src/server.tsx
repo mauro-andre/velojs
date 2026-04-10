@@ -320,7 +320,7 @@ export const startServer = async (options: StartServerOptions) => {
     const app = await createApp(routes);
 
     // Production: serve static files and start server
-    if (process.env.NODE_ENV === "production") {
+    if (process.env.NODE_ENV === "production" && !process.env.VELO_STATIC) {
         const { serve } = await import("@hono/node-server");
         const { serveStatic } = await import("@hono/node-server/serve-static");
         const { join } = await import("node:path");

@@ -24,6 +24,7 @@ export interface Metadata {
 export interface RouteModule {
     Component: ComponentType<any>;
     loader?: (args: LoaderArgs) => Promise<any>;
+    staticPaths?: () => Promise<Record<string, string>[]>;
     metadata?: Metadata;
     [key: `action_${string}`]: (args: ActionArgs<any>) => Promise<any>;
 }

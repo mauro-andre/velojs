@@ -1,3 +1,5 @@
+declare const __VELO_STATIC__: boolean;
+
 import {
     signal,
     useSignal,
@@ -139,11 +141,20 @@ export function useLoader<T>(
     const fetchData = () => {
         if (typeof window === "undefined" || !moduleId) return;
         const currentPath = window.location.pathname;
-        const searchParams = new URLSearchParams(window.location.search);
-        searchParams.set("_data", "1");
         loading.value = true;
 
-        fetch(`${currentPath}?${searchParams.toString()}`)
+        // Static mode: fetch pre-generated JSON file
+        // Dynamic mode: fetch from server with _data query param
+        const isStatic = typeof __VELO_STATIC__ !== "undefined" && __VELO_STATIC__;
+        const dataUrl = isStatic
+            ? `${currentPath === "/" ? "" : currentPath}/index.json`
+            : (() => {
+                const searchParams = new URLSearchParams(window.location.search);
+                searchParams.set("_data", "1");
+                return `${currentPath}?${searchParams.toString()}`;
+            })();
+
+        fetch(dataUrl)
             .then((res) => res.json())
             .then((json: Record<string, unknown>) => {
                 data.value = json[moduleId] as T;

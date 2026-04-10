@@ -709,6 +709,7 @@ import "${serverInitPath}";
 import routes from "${routesPath}";
 import { startServer } from "@mauroandre/velojs/server";
 
+export { routes };
 export default await startServer({ routes });
 `;
             }
@@ -814,10 +815,13 @@ function veloConfigPlugin(): Plugin {
             const isServer = mode === "server";
             const isDev = mode === "development";
 
+            const isStatic = !!process.env.VELO_STATIC;
+
             const config: UserConfig = {
                 define: {
                     "process.env.NODE_ENV": JSON.stringify(isDev ? "development" : "production"),
-                    "process.env.STATIC_BASE_URL": JSON.stringify(process.env.STATIC_BASE_URL || ""),
+                    "process.env.STATIC_BASE_URL": JSON.stringify(process.env.STATIC_BASE_URL || (isStatic ? "/client" : "")),
+                    "__VELO_STATIC__": JSON.stringify(isStatic),
                 },
                 resolve: {
                     alias: {
