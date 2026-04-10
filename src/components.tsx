@@ -39,7 +39,7 @@ interface ScriptsProps {
  */
 export function Scripts({ basePath, favicon = "/favicon.ico" }: ScriptsProps = {}) {
     const isDev = process.env.NODE_ENV !== "production";
-    basePath = basePath || process.env.STATIC_BASE_URL || "";
+    basePath = basePath || process.env.STATIC_BASE_URL || (process.env.VELO_STATIC ? "/client" : "");
 
     const faviconTag = favicon !== false && (
         <link rel="icon" href={`${basePath}${favicon}`} type="image/x-icon" />
