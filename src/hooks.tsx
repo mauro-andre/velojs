@@ -155,7 +155,8 @@ export function useLoader<T>(
                 return `${currentPath}?${searchParams.toString()}`;
             })();
 
-        const cacheBust = typeof __VELO_BUILD_HASH__ !== "undefined" ? `?v=${__VELO_BUILD_HASH__}` : "";
+        const separator = dataUrl.includes("?") ? "&" : "?";
+        const cacheBust = typeof __VELO_BUILD_HASH__ !== "undefined" ? `${separator}v=${__VELO_BUILD_HASH__}` : "";
         fetch(`${dataUrl}${cacheBust}`)
             .then((res) => res.json())
             .then((json: Record<string, unknown>) => {
