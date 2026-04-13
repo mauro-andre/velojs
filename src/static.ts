@@ -98,6 +98,30 @@ async function generateRoute(
 }
 
 /**
+ * Copies public/ folder contents to the output directory root.
+ * In static mode, HTML references assets like /logos/file.svg,
+ * but Vite copies public/ into dist/client/. We need them at dist/ too.
+ */
+function copyPublicDir(outDir: string): void {
+    const publicDir = path.resolve(process.cwd(), "public");
+    if (!fs.existsSync(publicDir)) return;
+
+    const copyRecursive = (src: string, dest: string) => {
+        const stat = fs.statSync(src);
+        if (stat.isDirectory()) {
+            fs.mkdirSync(dest, { recursive: true });
+            for (const entry of fs.readdirSync(src)) {
+                copyRecursive(path.join(src, entry), path.join(dest, entry));
+            }
+        } else {
+            fs.copyFileSync(src, dest);
+        }
+    };
+
+    copyRecursive(publicDir, outDir);
+}
+
+/**
  * Generates a fully static site from a VeloJS app.
  * Called by `velojs build --static` after the normal build.
  */
@@ -121,6 +145,8 @@ export async function generateStatic(
         console.log(`  ✓ ${route.fullPath}`);
     }
 
-    // Copy client assets to root dist (they're already in dist/client/)
+    // Copy public/ assets to dist/ root so HTML references like /logos/file.svg work
+    copyPublicDir(outDir);
+
     console.log(`\nGenerated ${staticRoutes.length} static pages.`);
 }

@@ -208,4 +208,70 @@ describe("generateStatic", () => {
         expect(fs.existsSync(path.join(TEST_DIR, "dist/index.html"))).toBe(true);
         expect(fs.existsSync(path.join(TEST_DIR, "dist/settings/index.html"))).toBe(true);
     });
+
+    it("copies public/ folder contents to dist/ root", async () => {
+        const app = createMockApp({
+            "/": {
+                html: '<html><body><img src="/logos/logo.svg"/></body></html>',
+                data: { "pages/Home": { title: "Home" } },
+            },
+        });
+
+        const routes: AppRoutes = [
+            {
+                module: {
+                    Component: () => null,
+                    metadata: { moduleId: "pages/Home", fullPath: "/" },
+                },
+            },
+        ];
+
+        // Create public/ with nested files
+        const publicDir = path.join(TEST_DIR, "public");
+        fs.mkdirSync(path.join(publicDir, "logos"), { recursive: true });
+        fs.writeFileSync(path.join(publicDir, "logos", "logo.svg"), "<svg>logo</svg>");
+        fs.writeFileSync(path.join(publicDir, "favicon.ico"), "icon");
+
+        const originalCwd = process.cwd;
+        process.cwd = () => TEST_DIR;
+        try {
+            await generateStatic(app, routes);
+        } finally {
+            process.cwd = originalCwd;
+        }
+
+        // Public assets should be at dist/ root (not dist/client/)
+        expect(fs.existsSync(path.join(TEST_DIR, "dist/logos/logo.svg"))).toBe(true);
+        expect(fs.readFileSync(path.join(TEST_DIR, "dist/logos/logo.svg"), "utf-8")).toBe("<svg>logo</svg>");
+        expect(fs.existsSync(path.join(TEST_DIR, "dist/favicon.ico"))).toBe(true);
+    });
+
+    it("works without a public/ folder", async () => {
+        const app = createMockApp({
+            "/": {
+                html: "<html><body>Home</body></html>",
+                data: { "pages/Home": { title: "Home" } },
+            },
+        });
+
+        const routes: AppRoutes = [
+            {
+                module: {
+                    Component: () => null,
+                    metadata: { moduleId: "pages/Home", fullPath: "/" },
+                },
+            },
+        ];
+
+        const originalCwd = process.cwd;
+        process.cwd = () => TEST_DIR;
+        try {
+            await generateStatic(app, routes);
+        } finally {
+            process.cwd = originalCwd;
+        }
+
+        // Should still generate HTML normally
+        expect(fs.existsSync(path.join(TEST_DIR, "dist/index.html"))).toBe(true);
+    });
 });
