@@ -3,7 +3,7 @@
  * Components that can be used in the app for script/style injection
  */
 
-import { Link as WouterLink } from "wouter-preact";
+import { Link as WouterLink, useRouter } from "wouter-preact";
 import type { ComponentChildren } from "preact";
 import { __veloUpdatePending } from "./hooks.js";
 
@@ -141,6 +141,7 @@ export function substituteParams(
  */
 export function Link({ to, params, search, absolute, ...rest }: LinkProps) {
     const isModule = typeof to !== "string";
+    const router = useRouter();
 
     // Default: path (relative), absolute: fullPath
     const basePath = isModule
@@ -162,11 +163,18 @@ export function Link({ to, params, search, absolute, ...rest }: LinkProps) {
 
     // If a newer build was deployed, do a full page navigation instead of SPA
     if (typeof window !== "undefined" && __veloUpdatePending.value) {
-        // Always use fullPath for full navigation to avoid relative path issues
-        const absolutePath = isModule
-            ? (to.metadata?.fullPath ?? basePath)
-            : basePath;
-        const fullHref = `${params ? substituteParams(absolutePath, params) : absolutePath}${queryString}`;
+        let fullHref: string;
+
+        if (isModule) {
+            // Module: always use fullPath (already absolute)
+            const absPath = to.metadata?.fullPath ?? basePath;
+            fullHref = `${params ? substituteParams(absPath, params) : absPath}${queryString}`;
+        } else {
+            // String: resolve with wouter's base for nest context
+            const path = finalPath.replace(/^~/, "");
+            const needsBase = !finalPath.startsWith("~") && router.base;
+            fullHref = `${needsBase ? router.base : ""}${path}${queryString}`;
+        }
 
         const { onClick, ...anchorRest } = rest as any;
         return (

@@ -158,9 +158,7 @@ export function useLoader<T>(
                 return `${currentPath}?${searchParams.toString()}`;
             })();
 
-        const separator = dataUrl.includes("?") ? "&" : "?";
-        const cacheBust = typeof __VELO_BUILD_HASH__ !== "undefined" ? `${separator}v=${__VELO_BUILD_HASH__}` : "";
-        fetch(`${dataUrl}${cacheBust}`)
+        fetch(dataUrl, { cache: "no-cache" })
             .then((res) => res.json())
             .then((json: Record<string, unknown>) => {
                 // Detect newer deploy by comparing build hashes
