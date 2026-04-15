@@ -162,15 +162,21 @@ export function Link({ to, params, search, absolute, ...rest }: LinkProps) {
 
     // If a newer build was deployed, do a full page navigation instead of SPA
     if (typeof window !== "undefined" && __veloUpdatePending.value) {
+        // Always use fullPath for full navigation to avoid relative path issues
+        const absolutePath = isModule
+            ? (to.metadata?.fullPath ?? basePath)
+            : basePath;
+        const fullHref = `${params ? substituteParams(absolutePath, params) : absolutePath}${queryString}`;
+
         const { onClick, ...anchorRest } = rest as any;
         return (
             <a
-                href={href.replace(/^~/, "")}
+                href={fullHref}
                 onClick={(e: MouseEvent) => {
                     if (onClick) onClick(e);
                     if (!e.defaultPrevented) {
                         e.preventDefault();
-                        window.location.href = href.replace(/^~/, "");
+                        window.location.href = fullHref;
                     }
                 }}
                 {...anchorRest}

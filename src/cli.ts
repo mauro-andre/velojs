@@ -17,9 +17,14 @@ const runVite = () => {
 };
 
 const runBuild = (isStatic: boolean) => {
-    const env = isStatic
-        ? { ...process.env, VELO_STATIC: "1" }
-        : process.env;
+    // Generate build hash once so client and server share the same value
+    const buildHash = Date.now().toString(36);
+
+    const env = {
+        ...process.env,
+        VELO_BUILD_HASH: buildHash,
+        ...(isStatic ? { VELO_STATIC: "1" } : {}),
+    };
 
     console.log("Building client...");
     spawnSync("npx", ["vite", "build"], {

@@ -837,7 +837,7 @@ function veloConfigPlugin(): Plugin {
                     "process.env.NODE_ENV": JSON.stringify(isDev ? "development" : "production"),
                     "process.env.STATIC_BASE_URL": JSON.stringify(process.env.STATIC_BASE_URL || (isStatic ? "/client" : "")),
                     "__VELO_STATIC__": JSON.stringify(isStatic),
-                    "__VELO_BUILD_HASH__": JSON.stringify(Date.now().toString(36)),
+                    "__VELO_BUILD_HASH__": JSON.stringify(process.env.VELO_BUILD_HASH || Date.now().toString(36)),
                     "__VELO_CLIENT_JS__": JSON.stringify(clientJs),
                     "__VELO_CLIENT_CSS__": JSON.stringify(clientCss),
                 },
