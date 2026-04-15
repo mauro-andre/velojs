@@ -2,7 +2,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, act, cleanup } from "@testing-library/preact";
 import { signal } from "@preact/signals";
-import { useLoader } from "../src/hooks.js";
+import { useLoader, __veloUpdatePending } from "../src/hooks.js";
 
 // Mock fetch
 const mockFetch = vi.fn();
@@ -17,6 +17,8 @@ describe("useLoader", () => {
         mockFetch.mockReset();
         // Clean __PAGE_DATA__
         (window as any).__PAGE_DATA__ = {};
+        // Reset update flag
+        __veloUpdatePending.value = false;
     });
 
     afterEach(() => {
@@ -106,5 +108,51 @@ describe("useLoader", () => {
         // After dep change, fetch should have been called and data updated
         expect(mockFetch).toHaveBeenCalled();
         expect(result.data.value).toEqual({ name: "Bob" });
+    });
+
+    it("sets __veloUpdatePending when server returns a different __buildHash", async () => {
+        mockFetch.mockResolvedValueOnce({
+            ok: true,
+            json: async () => ({
+                "pages/Home": { message: "Hello" },
+                __buildHash: "new-deploy-hash",
+            }),
+        });
+
+        function TestComponent() {
+            useLoader<{ message: string }>("pages/Home");
+            return <div>test</div>;
+        }
+
+        render(<TestComponent />);
+
+        await act(async () => {
+            await new Promise((r) => setTimeout(r, 10));
+        });
+
+        expect(__veloUpdatePending.value).toBe(true);
+    });
+
+    it("does NOT set __veloUpdatePending when __buildHash matches", async () => {
+        mockFetch.mockResolvedValueOnce({
+            ok: true,
+            json: async () => ({
+                "pages/Home": { message: "Hello" },
+                __buildHash: "test", // same as global __VELO_BUILD_HASH__
+            }),
+        });
+
+        function TestComponent() {
+            useLoader<{ message: string }>("pages/Home");
+            return <div>test</div>;
+        }
+
+        render(<TestComponent />);
+
+        await act(async () => {
+            await new Promise((r) => setTimeout(r, 10));
+        });
+
+        expect(__veloUpdatePending.value).toBe(false);
     });
 });

@@ -12,6 +12,9 @@ import {
     useLocation as wouterUseLocation,
 } from "wouter-preact";
 
+// Flag: true when a newer build has been deployed
+export const __veloUpdatePending = signal(false);
+
 /**
  * Força o signal a notificar mudanças após mutação de propriedades aninhadas
  *
@@ -160,6 +163,15 @@ export function useLoader<T>(
         fetch(`${dataUrl}${cacheBust}`)
             .then((res) => res.json())
             .then((json: Record<string, unknown>) => {
+                // Detect newer deploy by comparing build hashes
+                if (
+                    typeof __VELO_BUILD_HASH__ !== "undefined" &&
+                    json.__buildHash &&
+                    json.__buildHash !== __VELO_BUILD_HASH__
+                ) {
+                    __veloUpdatePending.value = true;
+                }
+
                 data.value = json[moduleId] as T;
                 loading.value = false;
             })

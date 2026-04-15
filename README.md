@@ -52,6 +52,7 @@ export default defineConfig({
     "scripts": {
         "dev": "velojs dev",
         "build": "velojs build",
+        "build:static": "velojs build --static",
         "start": "velojs start"
     }
 }
@@ -619,9 +620,11 @@ export const Component = ({ children }) => (
 **Production:**
 ```html
 <link rel="icon" href="/favicon.ico" type="image/x-icon" />
-<link rel="stylesheet" href="/client.css" />
-<script type="module" src="/client.js"></script>
+<link rel="stylesheet" href="/client.a1b2c3.css" />
+<script type="module" src="/client.x9y8z7.js"></script>
 ```
+
+Asset filenames include a content hash for cache busting. The hash changes only when the file content changes.
 
 ---
 
@@ -984,6 +987,87 @@ interface VeloConfig {
 
 ---
 
+## Static Site Generation (SSG)
+
+Build a fully static site with pre-rendered HTML and JSON files:
+
+```bash
+velojs build --static
+```
+
+### Output
+
+```
+dist/
+  index.html              # Pre-rendered HTML
+  index.json              # Loader data
+  about/
+    index.html
+    index.json
+  client/
+    client.a1b2c3.js
+    client.x9y8z7.css
+  logos/                   # Files from public/ are copied to dist/
+    logo.svg
+```
+
+### Public assets
+
+Files in the `public/` folder are automatically copied to `dist/` root during static generation. Reference them with absolute paths:
+
+```tsx
+<img src="/logos/logo.svg" />
+```
+
+This works in both dev mode (Vite serves `public/` at root) and static builds (`public/` is copied to `dist/`).
+
+### Dynamic routes
+
+For routes with `:params`, export a `staticPaths` function that returns all possible parameter combinations:
+
+```typescript
+// app/pages/UserDetail.tsx
+export const staticPaths = async () => {
+    const { getUsers } = await import("./user.service.js");
+    const users = await getUsers();
+    return users.map((u) => ({ id: u.id }));
+};
+```
+
+Routes without `staticPaths` are skipped with a warning.
+
+### Deploying
+
+The `dist/` folder is self-contained. Deploy to any static hosting (Nginx, Cloudflare Pages, S3, etc.). No server required.
+
+---
+
+## Cache Busting & Auto-Update Detection
+
+VeloJS has built-in cache management for zero-downtime deployments:
+
+### Content-hashed assets
+
+JS and CSS files are generated with content hashes (`client.a1b2c3.js`). When the content changes, the hash changes, and browsers automatically fetch the new version. Unchanged assets stay cached indefinitely.
+
+### HTML no-cache
+
+HTML responses include `Cache-Control: no-cache`, so browsers always check for the latest version. Since HTML is small (a few KB), this has negligible performance impact.
+
+### SPA deploy detection
+
+When a user is navigating a SPA and a new deploy happens, VeloJS detects it automatically:
+
+1. Each build generates a unique `__VELO_BUILD_HASH__`, embedded in the client JS
+2. JSON data responses (both SSR and SSG) include a `__buildHash` field
+3. On SPA navigation, `useLoader` compares the response hash with the client hash
+4. If they differ, an internal `__veloUpdatePending` flag is set
+5. On the next `<Link>` click, VeloJS does a full page navigation instead of SPA — loading the new HTML with updated asset references
+
+This means users get the new version without needing `Ctrl+Shift+R`. The transition is seamless — from the user's perspective, it looks like a normal page navigation.
+
+---
+
 ## Docker / Production Deploy
 
 ### Dockerfile
@@ -1014,12 +1098,15 @@ CMD ["npx", "velojs", "start"]
 velojs build
 # dist/
 #   client/         # Static assets (JS, CSS, images)
-#     client.js
-#     client.css
+#     client.a1b2c3.js
+#     client.x9y8z7.css
+#     .vite/manifest.json
 #   server.js       # SSR server entry (single file)
 ```
 
-In production, `velojs start` sets `NODE_ENV=production` automatically and serves static files from `dist/client/`.
+Asset filenames include content hashes for long-term browser caching. The server build reads the Vite manifest to inject the correct filenames into `<Scripts>`.
+
+In production, `velojs start` sets `NODE_ENV=production` automatically and serves static files from `dist/client/`. HTML responses are served with `Cache-Control: no-cache` so browsers always fetch the latest HTML (which references the current hashed assets).
 
 ### Static assets on CDN
 

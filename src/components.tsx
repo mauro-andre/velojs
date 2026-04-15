@@ -5,6 +5,10 @@
 
 import { Link as WouterLink } from "wouter-preact";
 import type { ComponentChildren } from "preact";
+import { __veloUpdatePending } from "./hooks.js";
+
+declare const __VELO_CLIENT_JS__: string;
+declare const __VELO_CLIENT_CSS__: string;
 
 // ============================================
 // SCRIPTS COMPONENT
@@ -55,11 +59,14 @@ export function Scripts({ basePath, favicon = "/favicon.ico" }: ScriptsProps = {
         );
     }
 
+    const jsFile = typeof __VELO_CLIENT_JS__ !== "undefined" ? __VELO_CLIENT_JS__ : "client.js";
+    const cssFile = typeof __VELO_CLIENT_CSS__ !== "undefined" ? __VELO_CLIENT_CSS__ : "client.css";
+
     return (
         <>
             {faviconTag}
-            <link rel="stylesheet" href={`${basePath}/client.css`} />
-            <script type="module" src={`${basePath}/client.js`}></script>
+            <link rel="stylesheet" href={`${basePath}/${cssFile}`} />
+            <script type="module" src={`${basePath}/${jsFile}`}></script>
         </>
     );
 }
@@ -151,5 +158,25 @@ export function Link({ to, params, search, absolute, ...rest }: LinkProps) {
         ? `?${new URLSearchParams(search).toString()}`
         : "";
 
-    return <WouterLink to={`${routePath}${queryString}`} {...rest} />;
+    const href = `${routePath}${queryString}`;
+
+    // If a newer build was deployed, do a full page navigation instead of SPA
+    if (typeof window !== "undefined" && __veloUpdatePending.value) {
+        const { onClick, ...anchorRest } = rest as any;
+        return (
+            <a
+                href={href.replace(/^~/, "")}
+                onClick={(e: MouseEvent) => {
+                    if (onClick) onClick(e);
+                    if (!e.defaultPrevented) {
+                        e.preventDefault();
+                        window.location.href = href.replace(/^~/, "");
+                    }
+                }}
+                {...anchorRest}
+            />
+        );
+    }
+
+    return <WouterLink to={href} {...rest} />;
 }

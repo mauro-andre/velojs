@@ -7,6 +7,8 @@ import type { ComponentType, VNode } from "preact";
 import type { RouteNode, RouteModule, LoaderArgs, AppRoutes } from "./types.js";
 import { AsyncLocalStorage } from "node:async_hooks";
 
+declare const __VELO_BUILD_HASH__: string;
+
 // ============================================
 // ASYNC LOCAL STORAGE - Dados isolados por request
 // ============================================
@@ -63,7 +65,9 @@ export function addRoutes(fn: (app: Hono) => void | Promise<void>): void {
 const renderPage = (c: Context, Component: VNode, data?: unknown) => {
     // Navegação SPA - retorna apenas JSON
     if (c.req.query("_data") === "1") {
-        return c.json(data ?? null);
+        const buildHash = typeof __VELO_BUILD_HASH__ !== "undefined" ? __VELO_BUILD_HASH__ : undefined;
+        const json = data ? { ...(data as Record<string, unknown>), __buildHash: buildHash } : { __buildHash: buildHash };
+        return c.json(json);
     }
 
     // SSR - renderiza HTML completo dentro do contexto isolado
@@ -74,6 +78,9 @@ const renderPage = (c: Context, Component: VNode, data?: unknown) => {
             return preactRender(<Router ssrPath={path}>{Component}</Router>);
         }
     );
+
+    // HTML should not be cached by the browser — assets use content hashes instead
+    c.header("Cache-Control", "no-cache");
 
     // Sem dados - retorna HTML simples
     if (!data) {

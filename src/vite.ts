@@ -817,12 +817,29 @@ function veloConfigPlugin(): Plugin {
 
             const isStatic = !!process.env.VELO_STATIC;
 
+            // In server build, read the client manifest to get hashed asset filenames
+            let clientJs = "client.js";
+            let clientCss = "client.css";
+            if (isServer) {
+                try {
+                    const manifestPath = path.resolve(process.cwd(), "dist/client/.vite/manifest.json");
+                    const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf-8"));
+                    const entry = manifest[VIRTUAL_CLIENT_ENTRY];
+                    if (entry) {
+                        clientJs = entry.file || clientJs;
+                        if (entry.css?.[0]) clientCss = entry.css[0];
+                    }
+                } catch {}
+            }
+
             const config: UserConfig = {
                 define: {
                     "process.env.NODE_ENV": JSON.stringify(isDev ? "development" : "production"),
                     "process.env.STATIC_BASE_URL": JSON.stringify(process.env.STATIC_BASE_URL || (isStatic ? "/client" : "")),
                     "__VELO_STATIC__": JSON.stringify(isStatic),
                     "__VELO_BUILD_HASH__": JSON.stringify(Date.now().toString(36)),
+                    "__VELO_CLIENT_JS__": JSON.stringify(clientJs),
+                    "__VELO_CLIENT_CSS__": JSON.stringify(clientCss),
                 },
                 resolve: {
                     alias: {
@@ -852,12 +869,12 @@ function veloConfigPlugin(): Plugin {
                     rollupOptions: {
                         input: VIRTUAL_CLIENT_ENTRY,
                         output: {
-                            entryFileNames: "client.js",
+                            entryFileNames: "client.[hash].js",
                             assetFileNames: (assetInfo) => {
                                 if (assetInfo.names?.[0]?.endsWith(".css")) {
-                                    return "client.css";
+                                    return "client.[hash].css";
                                 }
-                                return "[name][extname]";
+                                return "[name].[hash][extname]";
                             },
                         },
                     },
