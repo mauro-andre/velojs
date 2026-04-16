@@ -7,8 +7,6 @@ import type { ComponentType, VNode } from "preact";
 import type { RouteNode, RouteModule, LoaderArgs, AppRoutes } from "./types.js";
 import { AsyncLocalStorage } from "node:async_hooks";
 
-declare const __VELO_BUILD_HASH__: string;
-
 // ============================================
 // ASYNC LOCAL STORAGE - Dados isolados por request
 // ============================================
@@ -65,7 +63,7 @@ export function addRoutes(fn: (app: Hono) => void | Promise<void>): void {
 const renderPage = (c: Context, Component: VNode, data?: unknown) => {
     // Navegação SPA - retorna apenas JSON
     if (c.req.query("_data") === "1") {
-        const buildHash = typeof __VELO_BUILD_HASH__ !== "undefined" ? __VELO_BUILD_HASH__ : undefined;
+        const buildHash = (globalThis as any).__veloBuildHash || undefined;
         const json = data ? { ...(data as Record<string, unknown>), __buildHash: buildHash } : { __buildHash: buildHash };
         return c.json(json);
     }

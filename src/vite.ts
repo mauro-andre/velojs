@@ -705,6 +705,7 @@ function veloTransformPlugin(veloConfig: VeloConfig, appDirectory: string): Plug
 
             if (id === RESOLVED_VIRTUAL_SERVER) {
                 return `
+globalThis.__veloBuildHash = __VELO_BUILD_HASH__;
 import "${serverInitPath}";
 import routes from "${routesPath}";
 import { startServer } from "@mauroandre/velojs/server";
