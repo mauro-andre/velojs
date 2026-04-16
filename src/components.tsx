@@ -59,8 +59,8 @@ export function Scripts({ basePath, favicon = "/favicon.ico" }: ScriptsProps = {
         );
     }
 
-    const jsFile = typeof __VELO_CLIENT_JS__ !== "undefined" ? __VELO_CLIENT_JS__ : "client.js";
-    const cssFile = typeof __VELO_CLIENT_CSS__ !== "undefined" ? __VELO_CLIENT_CSS__ : "client.css";
+    const jsFile = (globalThis as any).__veloClientJs || (typeof __VELO_CLIENT_JS__ !== "undefined" ? __VELO_CLIENT_JS__ : "client.js");
+    const cssFile = (globalThis as any).__veloClientCss || (typeof __VELO_CLIENT_CSS__ !== "undefined" ? __VELO_CLIENT_CSS__ : "client.css");
 
     return (
         <>
