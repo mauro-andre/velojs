@@ -385,6 +385,60 @@ function adjustParamsForClient(
 }
 
 // ============================================
+// TRANSFORMAÇÃO 3.5: Streams → Client stub (client only)
+// ============================================
+
+/**
+ * Transforma `export const stream_xxx = createEventStream({...})` no client em
+ * um stub com apenas { __isVeloEventStream: true, __path: "/_event/{moduleId}/{name}" }.
+ *
+ * O body do `createEventStream` é descartado — listeners, snapshot, channel funcs etc.
+ * só rodam no server. O client precisa apenas do path para abrir o EventSource.
+ */
+export function transformStreamsForClient(code: string, moduleId: string): string {
+    const ast = parse(code, {
+        sourceType: "module",
+        plugins: ["typescript", "jsx"],
+    });
+
+    traverse(ast, {
+        ExportNamedDeclaration(nodePath) {
+            const declaration = nodePath.node.declaration;
+            if (!t.isVariableDeclaration(declaration)) return;
+
+            const declarator = declaration.declarations[0];
+            if (!declarator || !t.isIdentifier(declarator.id)) return;
+
+            const name = declarator.id.name;
+            if (!name.startsWith("stream_")) return;
+
+            const streamName = name.replace("stream_", "");
+            const path = `/_event/${moduleId}/${streamName}`;
+
+            // Substitui a init expression por um objeto stub
+            declarator.init = t.objectExpression([
+                t.objectProperty(
+                    t.identifier("__isVeloEventStream"),
+                    t.booleanLiteral(true)
+                ),
+                t.objectProperty(
+                    t.identifier("__path"),
+                    t.stringLiteral(path)
+                ),
+            ]);
+
+            // Remove anotação de tipo do declarador (se houver), já que o stub
+            // tem outra forma. O tipo original vai sobreviver via inferência do
+            // import do `EventStream` no caller.
+            declarator.id.typeAnnotation = null;
+        },
+    });
+
+    const output = generate(ast, { retainLines: true });
+    return output.code;
+}
+
+// ============================================
 // TRANSFORMAÇÃO 4: Remover loaders (client only)
 // ============================================
 
@@ -755,6 +809,7 @@ startClient({ routes });
             );
             const hasLoader = /export\s+(const|function)\s+loader/.test(code);
             const hasAction = /export\s+const\s+action_\w+/.test(code);
+            const hasStream = /export\s+const\s+stream_\w+/.test(code);
             const hasLoaderCall = /\bLoader\s*</.test(code) || /\bLoader\s*\(/.test(code);
             const hasUseLoaderCall = /\buseLoader\s*</.test(code) || /\buseLoader\s*\(/.test(code);
 
@@ -764,8 +819,8 @@ startClient({ routes });
                 hasTransformations = true;
             }
 
-            // Se tem Component, loader, action, ou chamadas de Loader/useLoader, aplica transformações
-            if (hasComponent || hasLoader || hasAction || hasLoaderCall || hasUseLoaderCall) {
+            // Se tem Component, loader, action, stream, ou chamadas de Loader/useLoader, aplica transformações
+            if (hasComponent || hasLoader || hasAction || hasStream || hasLoaderCall || hasUseLoaderCall) {
                 const moduleId = path
                     .relative(appDir, id)
                     .replace(/\.(tsx?|jsx?)$/, "")
@@ -783,6 +838,14 @@ startClient({ routes });
                 // 3. Transformar actions em fetch stubs (client only)
                 if (!isSSR) {
                     transformedCode = transformActionsForClient(
+                        transformedCode,
+                        moduleId
+                    );
+                }
+
+                // 3.5. Transformar streams em stubs (client only)
+                if (!isSSR && hasStream) {
+                    transformedCode = transformStreamsForClient(
                         transformedCode,
                         moduleId
                     );

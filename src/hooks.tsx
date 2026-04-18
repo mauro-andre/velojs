@@ -11,6 +11,7 @@ import {
     useParams as wouterUseParams,
     useLocation as wouterUseLocation,
 } from "wouter-preact";
+import type { EventStream } from "./events.js";
 
 // Flag: true when a newer build has been deployed
 export const __veloUpdatePending = signal(false);
@@ -289,4 +290,96 @@ export function usePathname(): string {
     // mas retorna window.location.pathname para o path absoluto
     wouterUseLocation(); // trigger re-render on navigation
     return window.location.pathname;
+}
+
+/**
+ * Subscribes to a server event stream (SSE) created with createEventStream.
+ *
+ * Returns:
+ * - `data`: Signal with the latest event received (null until first event)
+ * - `snapshot`: Signal with the initial snapshot if the server provided one
+ * - `closed`: Signal that becomes true when the stream is closed by the server
+ * - `error`: Signal with the connection error, if any
+ *
+ * Usage:
+ * ```tsx
+ * // Per-page stream (stream_* convention)
+ * const { data, snapshot } = useEventStream(stream_progress, { channel: deployId });
+ *
+ * // Standalone stream (no channel)
+ * const { data } = useEventStream(metricsStream);
+ * ```
+ *
+ * The connection closes automatically when the component unmounts or when
+ * the channel changes (re-opens with new channel).
+ */
+export function useEventStream<TEvent, TSnapshot = TEvent>(
+    stream: EventStream<TEvent, TSnapshot>,
+    options: { channel?: string; enabled?: boolean } = {}
+): {
+    data: Signal<TEvent | null>;
+    snapshot: Signal<TSnapshot | null>;
+    closed: Signal<boolean>;
+    error: Signal<Error | null>;
+} {
+    const data = useSignal<TEvent | null>(null);
+    const snapshot = useSignal<TSnapshot | null>(null);
+    const closed = useSignal(false);
+    const error = useSignal<Error | null>(null);
+
+    const { channel, enabled = true } = options;
+
+    useEffect(() => {
+        if (typeof window === "undefined") return;
+        if (!enabled) return;
+        if (!stream.__path) {
+            console.warn("[velojs] useEventStream: stream has no __path");
+            return;
+        }
+
+        // Reset signals when channel changes
+        data.value = null;
+        snapshot.value = null;
+        closed.value = false;
+        error.value = null;
+
+        const url = channel
+            ? `${stream.__path}?channel=${encodeURIComponent(channel)}`
+            : stream.__path;
+
+        const es = new EventSource(url);
+
+        es.addEventListener("snapshot", (e) => {
+            try {
+                snapshot.value = JSON.parse((e as MessageEvent).data) as TSnapshot;
+            } catch (err) {
+                error.value = err as Error;
+            }
+        });
+
+        es.addEventListener("message", (e) => {
+            try {
+                data.value = JSON.parse(e.data) as TEvent;
+            } catch (err) {
+                error.value = err as Error;
+            }
+        });
+
+        // Heartbeats are no-op on the client — they just keep the connection alive
+        es.addEventListener("heartbeat", () => {});
+
+        es.addEventListener("error", () => {
+            // EventSource auto-reconnects on errors. If readyState becomes CLOSED,
+            // the server closed the stream intentionally.
+            if (es.readyState === EventSource.CLOSED) {
+                closed.value = true;
+            }
+        });
+
+        return () => {
+            es.close();
+        };
+    }, [stream, channel, enabled]);
+
+    return { data, snapshot, closed, error };
 }

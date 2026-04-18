@@ -32,7 +32,9 @@ addRoutes((app: Hono) => {
 
 ## Server-Sent Events (SSE)
 
-SSE is a simple way to push real-time updates from server to client. Use Hono's `streamSSE`:
+> **Recommended:** For most real-time use cases, use [Event Streams](/docs/event-streams) (`createEventStream`). They handle channels, snapshots, auto-close, heartbeat, middleware inheritance, and type safety automatically. Drop down to raw `streamSSE` only when you need fine-grained control over the protocol.
+
+SSE is a simple way to push real-time updates from server to client. If you need raw control, use Hono's `streamSSE` directly:
 
 ```typescript
 import { addRoutes } from "@mauroandre/velojs/server";

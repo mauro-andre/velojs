@@ -284,6 +284,62 @@ const registerActionRoutes = (
 };
 
 // ============================================
+// REGISTER STREAM ROUTES - SSE streams (stream_*) por módulo
+// ============================================
+
+const registerStreamRoutes = async (
+    app: Hono,
+    nodes: RouteNode[],
+    parentMiddlewares: MiddlewareHandler[] = []
+) => {
+    const { registerStreamHandler } = await import("./events.js");
+
+    const visit = (subNodes: RouteNode[], inheritedMiddlewares: MiddlewareHandler[]) => {
+        for (const node of subNodes) {
+            const moduleId = node.module.metadata?.moduleId;
+            const currentMiddlewares = [
+                ...inheritedMiddlewares,
+                ...(node.middlewares || []),
+            ];
+
+            if (moduleId) {
+                // Encontra todas as exportações stream_* no módulo
+                const streamKeys = Object.keys(node.module).filter((k) =>
+                    k.startsWith("stream_")
+                );
+
+                for (const streamKey of streamKeys) {
+                    const streamName = streamKey.replace("stream_", "");
+                    const stream = (node.module as unknown as Record<string, unknown>)[
+                        streamKey
+                    ] as { __isVeloEventStream?: boolean; __path?: string } | undefined;
+
+                    if (stream?.__isVeloEventStream) {
+                        const streamPath = `/_event/${moduleId}/${streamName}`;
+                        // Atribui o path ao stream para que o servidor saiba onde está montado.
+                        // Não é estritamente necessário do lado do servidor, mas é útil para
+                        // simetria com o que o client espera.
+                        stream.__path = streamPath;
+                        registerStreamHandler(
+                            app,
+                            streamPath,
+                            stream as any,
+                            currentMiddlewares as any
+                        );
+                    }
+                }
+            }
+
+            if (node.children) {
+                visit(node.children, currentMiddlewares);
+            }
+        }
+    };
+
+    visit(nodes, parentMiddlewares);
+};
+
+// ============================================
 // CREATE APP - Cria app Hono com rotas
 // ============================================
 
@@ -306,6 +362,13 @@ export const createApp = async (routes: AppRoutes): Promise<Hono> => {
 
     // Action routes (dinâmico)
     registerActionRoutes(app, routes);
+
+    // Stream routes (SSE) — convenção stream_* por módulo
+    await registerStreamRoutes(app, routes);
+
+    // Standalone streams registrados via createEventStream({ path: ... })
+    const { flushPendingStreamRoutes } = await import("./events.js");
+    flushPendingStreamRoutes(app);
 
     // Dev mode: flush server callbacks using Vite's HTTP server
     if (process.env.NODE_ENV !== "production" && !activeServer) {

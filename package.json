@@ -53,6 +53,10 @@
             "types": "./dist/hooks.d.ts",
             "import": "./dist/hooks.js"
         },
+        "./events": {
+            "types": "./dist/events.d.ts",
+            "import": "./dist/events.js"
+        },
         "./cookie": {
             "types": "./dist/cookie.d.ts",
             "import": "./dist/cookie.js"

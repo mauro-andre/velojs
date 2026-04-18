@@ -3,6 +3,7 @@ import {
     injectMetadata,
     transformLoaderFunctions,
     transformActionsForClient,
+    transformStreamsForClient,
     removeLoaders,
     removeMiddlewares,
 } from "../src/vite.js";
@@ -216,5 +217,74 @@ const routes = {
         expect(output).not.toContain("authMw");
         expect(output).not.toContain("logMw");
         expect(output).not.toContain("middlewares");
+    });
+});
+
+// ============================================
+// transformStreamsForClient
+// ============================================
+
+describe("transformStreamsForClient", () => {
+    it("replaces createEventStream call with stub object", () => {
+        const input = `
+import { createEventStream } from "@mauroandre/velojs";
+
+export const stream_progress = createEventStream({
+    channel: (c) => c.req.param("id"),
+});
+`;
+        const output = transformStreamsForClient(input, "admin/Deploy");
+
+        expect(output).toContain("__isVeloEventStream: true");
+        expect(output).toContain("__path: \"/_event/admin/Deploy/progress\"");
+        // Body of createEventStream should be gone from the export expression
+        expect(output).not.toMatch(/stream_progress\s*=\s*createEventStream\s*\(/);
+    });
+
+    it("transforms multiple stream_* exports in same file", () => {
+        const input = `
+export const stream_foo = createEventStream({});
+export const stream_bar = createEventStream({});
+`;
+        const output = transformStreamsForClient(input, "pages/Multi");
+
+        expect(output).toContain("__path: \"/_event/pages/Multi/foo\"");
+        expect(output).toContain("__path: \"/_event/pages/Multi/bar\"");
+    });
+
+    it("ignores non-stream exports", () => {
+        const input = `
+export const stream_keep = createEventStream({ channel: (c) => "x" });
+export const helper = () => 42;
+export const SomeComponent = () => null;
+`;
+        const output = transformStreamsForClient(input, "x/Y");
+
+        expect(output).toContain("__path: \"/_event/x/Y/keep\"");
+        // Non-stream exports must remain
+        expect(output).toContain("helper");
+        expect(output).toContain("SomeComponent");
+    });
+
+    it("strips type annotations from the declarator id", () => {
+        const input = `
+export const stream_typed: EventStream<MyEvent> = createEventStream<MyEvent>({});
+`;
+        const output = transformStreamsForClient(input, "pages/Typed");
+
+        expect(output).toContain("__path: \"/_event/pages/Typed/typed\"");
+        // The result should have the stub literal
+        expect(output).toContain("__isVeloEventStream: true");
+    });
+
+    it("does nothing when there are no stream_* exports", () => {
+        const input = `
+export const Component = () => null;
+export const action_save = async () => ({ ok: true });
+`;
+        const output = transformStreamsForClient(input, "pages/X");
+        expect(output).toContain("Component");
+        expect(output).toContain("action_save");
+        expect(output).not.toContain("__isVeloEventStream");
     });
 });

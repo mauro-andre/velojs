@@ -78,7 +78,41 @@ Middlewares **accumulate** from parent to child. In the example above:
 - `/` and `/stacks` → only `authMiddleware` runs
 - `/master/workers` and `/master/settings` → `authMiddleware` runs first, then `masterMiddleware`
 
-This applies to both page loads (loaders) and action calls.
+### What middlewares protect
+
+A middleware on a layout guards **every request** that reaches a nested route, including:
+
+| Request type | URL pattern | When it happens |
+|--------------|-------------|-----------------|
+| Page load | `GET /stacks` | User opens the page directly (first visit, refresh) |
+| Data fetch | `GET /stacks?_data=1` | SPA navigation — `useLoader` fetches JSON |
+| Action call | `POST /_action/admin/Stacks/delete` | User triggers a server action |
+
+You don't need to add the middleware to each route manually — declaring it once on the layout covers all three paths automatically. This is especially important for authentication: without it, your API endpoints could be reached even if the page itself is protected.
+
+### Example: protecting an action via layout middleware
+
+```typescript
+// app/routes.tsx
+{
+    module: AdminLayout,
+    middlewares: [authMiddleware],
+    children: [
+        { path: "/stacks", module: Stacks },
+    ],
+}
+```
+
+```typescript
+// app/admin/Stacks.tsx
+export const action_delete = async ({ body, c }: ActionArgs<{ id: string }>) => {
+    // authMiddleware already ran — user is guaranteed to be authenticated
+    const user = c!.get("user");
+    // ... delete logic
+};
+```
+
+When the client calls `action_delete({ body: { id: "abc" } })`, it hits `POST /_action/admin/Stacks/delete`. Hono runs `authMiddleware` before the action executes. If the middleware returns an error (e.g., 401), the action never runs.
 
 ## Sharing data between middleware and handlers
 

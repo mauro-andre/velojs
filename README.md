@@ -501,6 +501,136 @@ export const action_login = async ({ body }: { body: LoginBody }) => {
 
 **Error handling**: Actions do NOT throw on server errors. They resolve with `{ error: "message" }`. Always check `result.error` explicitly.
 
+### Shared actions in Layouts
+
+Actions are tied to the module where they're declared — the route is always `/_action/{moduleId}/{actionName}`. Declare an action in a Layout and import it from any child module to share it across multiple pages.
+
+```typescript
+// app/admin/Layout.tsx — action declared once in the layout
+import type { ActionArgs } from "@mauroandre/velojs";
+
+export const action_logout = async ({ c }: ActionArgs) => {
+    const { deleteCookie } = await import("@mauroandre/velojs/cookie");
+    deleteCookie(c!, "session");
+    return { ok: true };
+};
+
+export const Component = ({ children }) => (/* layout with children */);
+```
+
+```typescript
+// app/admin/Dashboard.tsx — imports and uses the action from Layout
+import { action_logout } from "./Layout.js";
+
+export const Component = () => (
+    <button onClick={async () => {
+        await action_logout({});
+        window.location.href = "/login";
+    }}>Logout</button>
+);
+```
+
+The client-side transform rewrites the import to fetch `/_action/admin/Layout/logout`, so the action always points to the correct URL regardless of where it's imported. Middlewares on the Layout apply automatically.
+
+---
+
+## Event Streams
+
+Push real-time updates from server to client via Server-Sent Events (SSE). Useful for live progress, notifications, metrics, log streaming, AI tokens, and any server → client push scenario.
+
+### `stream_*` convention
+
+Declare a stream alongside `loader` / `action_*` in any page or layout module. The framework registers an SSE route at `/_event/{moduleId}/{name}` automatically:
+
+```typescript
+// app/admin/Deploy.tsx
+import { createEventStream } from "@mauroandre/velojs";
+import { useEventStream, useParams } from "@mauroandre/velojs/hooks";
+
+type DeployState = { step: string; status: "running" | "success" | "error" };
+
+const activeDeploys = new Map<string, DeployState>();
+
+export const stream_progress = createEventStream<DeployState>({
+    channel: (c) => c.req.query("channel") ?? "",
+    snapshot: (channel) => activeDeploys.get(channel ?? ""),
+    closeOn: (s) => s.status === "success" || s.status === "error",
+});
+
+export const Component = () => {
+    const params = useParams<{ id: string }>();
+    const { data, snapshot, closed } = useEventStream(stream_progress, {
+        channel: params.id,
+    });
+
+    const state = data.value ?? snapshot.value;
+    return <div>{state?.step ?? "waiting..."}</div>;
+};
+```
+
+Emit from any service that imports the stream:
+
+```typescript
+import { stream_progress } from "./Deploy.js";
+
+stream_progress.emit("app-123", { step: "building", status: "running" });
+```
+
+### Standalone streams
+
+For cross-cutting streams (global metrics, notifications) consumed by many pages, use an explicit `path`:
+
+```typescript
+// app/streams/metrics.ts
+export const metricsStream = createEventStream<Metric[]>({
+    path: "/api/metrics/containers",
+});
+
+setInterval(() => metricsStream.emit(collectMetrics()), 2000);
+```
+
+### Configuration
+
+| Option | Type | Description |
+|--------|------|-------------|
+| `path` | `string` | (Standalone) Explicit URL path |
+| `channel` | `(c: Context) => string` | Extract channel ID from request — subscribers only get matching events |
+| `snapshot` | `(channel) => TSnapshot \| undefined` | Returns current state on connect (and reconnect) |
+| `closeOn` | `(event: TEvent) => boolean` | Closes the SSE connection when matching event is sent |
+| `heartbeatMs` | `number \| false` | Keep-alive heartbeat interval, default `20000` (20s). `false` to disable |
+| `middlewares` | `MiddlewareHandler[]` | (Standalone) Hono middlewares applied to the SSE route |
+
+### Middleware inheritance
+
+Streams declared with `stream_*` automatically inherit middlewares from parent route nodes — same as pages and actions. A stream under an `AdminLayout` with `authMiddleware` is protected without extra wiring.
+
+For standalone streams, pass middlewares explicitly:
+
+```typescript
+export const metricsStream = createEventStream<Metric[]>({
+    path: "/api/metrics",
+    middlewares: [authMiddleware],
+});
+```
+
+### `useEventStream` hook
+
+```typescript
+const { data, snapshot, closed, error } = useEventStream(stream, {
+    channel: "deploy-123",  // optional
+    enabled: true,          // optional
+});
+```
+
+| Signal | Description |
+|--------|-------------|
+| `data` | Latest event received from the server |
+| `snapshot` | Initial state on connect (if `snapshot` is configured) |
+| `closed` | `true` when server closed the stream (`closeOn` matched) |
+| `error` | Parse or connection error, if any |
+
+The hook handles `EventSource` lifecycle automatically: opens on mount, closes on unmount, re-opens when `channel` changes.
+
 ---
 
 ## Hooks
@@ -511,6 +641,7 @@ All hooks work in both SSR and client (via AsyncLocalStorage on server, wouter/D
 |------|-------------|
 | `useLoader<T>(deps?)` | Loader data with SSR + SPA support. Returns `{ data, loading, refetch }` |
 | `Loader<T>()` | Module-level SSR-only loader. Returns `{ data, loading }` |
+| `useEventStream<T, S>(stream, opts?)` | Subscribe to a server-sent event stream. Returns `{ data, snapshot, closed, error }` |
 | `useParams<T>()` | Route parameters (e.g., `:id`) |
 | `useQuery<T>()` | Query string parameters |
 | `useNavigate()` | Programmatic navigation. Returns `navigate(path)` function |
@@ -701,7 +832,25 @@ export default [
 
 ### Inheritance
 
-Middlewares accumulate from parent to child. In the example above, `/master/workers` runs `authMiddleware` first, then `masterMiddleware`. This applies to both page loads (loaders) and action calls.
+Middlewares accumulate from parent to child and apply to **every nested route**, including:
+
+- **Page routes** (GET) — when loading a page
+- **Action routes** (POST `/_action/...`) — when calling a server action
+- **Data fetches** (GET with `?_data=1`) — during SPA navigation
+
+In the example above, `/master/workers` runs `authMiddleware` first, then `masterMiddleware`. The same applies when calling `action_*` functions from any page under `MasterLayout` — both middlewares run before the action executes.
+
+```typescript
+// This action, defined in app/master/Workers.tsx, is registered as
+// POST /_action/master/Workers/delete
+// with authMiddleware + masterMiddleware applied.
+export const action_delete = async ({ body, c }: ActionArgs<{ id: string }>) => {
+    const user = c!.get("user"); // set by authMiddleware
+    // ...
+};
+```
+
+A middleware on a Layout guards everything underneath it — pages, loaders, and actions — with no extra wiring.
 
 ### Accessing middleware data in loaders and actions
 
@@ -927,10 +1076,11 @@ Hooks (`useParams`, `useQuery`, `usePathname`, `Loader`, `useLoader`) access thi
 
 | Import | Contents |
 |--------|----------|
-| `@mauroandre/velojs` | Types (`AppRoutes`, `ActionArgs`, `LoaderArgs`, `Metadata`), `Scripts`, `Link`, `defineConfig` |
+| `@mauroandre/velojs` | Types (`AppRoutes`, `ActionArgs`, `LoaderArgs`, `Metadata`, `EventStream`, `EventStreamConfig`), `Scripts`, `Link`, `createEventStream`, `defineConfig` |
 | `@mauroandre/velojs/server` | `startServer`, `createApp`, `addRoutes`, `onServer`, `serverDataStorage` |
 | `@mauroandre/velojs/client` | `startClient` |
-| `@mauroandre/velojs/hooks` | `Loader`, `useLoader`, `useParams`, `useQuery`, `useNavigate`, `usePathname`, `touch` |
+| `@mauroandre/velojs/hooks` | `Loader`, `useLoader`, `useEventStream`, `useParams`, `useQuery`, `useNavigate`, `usePathname`, `touch` |
+| `@mauroandre/velojs/events` | `createEventStream`, `EventStream`, `EventStreamConfig` (also re-exported from root) |
 | `@mauroandre/velojs/cookie` | `getCookie`, `setCookie`, `deleteCookie`, `getSignedCookie`, `setSignedCookie` |
 | `@mauroandre/velojs/factory` | `createMiddleware`, `createFactory` |
 | `@mauroandre/velojs/vite` | `veloPlugin` |

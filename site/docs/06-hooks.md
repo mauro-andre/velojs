@@ -8,6 +8,7 @@ VeloJS provides a set of hooks that work identically on both server (SSR) and cl
 |------|---------|-------------|
 | `useLoader<T>(deps?)` | `{ data, loading, refetch }` | Page data with SSR + SPA support |
 | `Loader<T>()` | `{ data, loading }` | Module-level SSR-only data |
+| `useEventStream<T, S>(stream, opts?)` | `{ data, snapshot, closed, error }` | Real-time SSE stream subscription |
 | `useParams<T>()` | `T` | URL parameters (`:id`, etc) |
 | `useQuery<T>()` | `T` | Query string parameters |
 | `useNavigate()` | `navigate(path)` | Programmatic navigation |
@@ -59,6 +60,24 @@ const pathname = usePathname();
 ```
 
 This is useful when you need to know the exact URL, regardless of layout nesting.
+
+## useEventStream
+
+Subscribes to a server-sent event stream created with `createEventStream`. Returns reactive signals for the latest event, initial snapshot, close state, and errors.
+
+```typescript
+const { data, snapshot, closed, error } = useEventStream(stream, {
+    channel: "deploy-123",  // optional
+    enabled: true,          // optional, default true
+});
+
+// data.value     — latest event received from the server
+// snapshot.value — initial state on connect (if configured)
+// closed.value   — true when server closed the stream (closeOn matched)
+// error.value    — parse or connection error, if any
+```
+
+The hook handles `EventSource` lifecycle automatically: opens on mount, closes on unmount, re-opens when `channel` changes. See [Event Streams](/docs/event-streams) for the full guide.
 
 ## touch
 
