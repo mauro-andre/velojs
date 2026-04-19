@@ -581,11 +581,12 @@ One line to declare, three verbs to use. Route at `/_event/admin/Provision/logs`
 export const stream_progress = createEventStream<DeployState>();
 ```
 
-**Standalone** — for cross-cutting streams (global metrics, notifications). Pass `path` and (if needed) `middlewares` explicitly.
+**Standalone** — for cross-cutting streams (global metrics, notifications). Pass `path` and (if needed) `middlewares` explicitly. Use `broadcast: true` for streams without channels.
 
 ```typescript
 export const containerMetrics = createEventStream<Metric[]>({
     path: "/api/metrics/containers",
+    broadcast: true,
     middlewares: [authMiddleware],
 });
 ```
@@ -604,6 +605,7 @@ stream_logs.emit(sessionId, "Line", { snapshot: true });
 import { poll } from "@mauroandre/velojs";
 
 export const stream_metrics = createEventStream<Metric[]>({
+    broadcast: true,
     source: poll({
         intervalMs: 3000,
         tick: async (emit) => emit(await collectMetrics()),
@@ -626,7 +628,8 @@ export const stream_deploy = createEventStream<DeployState>({
 | Option | Type | Description |
 |--------|------|-------------|
 | `path` | `string` | (Standalone) Explicit URL path |
-| `channel` | `(c) => string` | Extract channel ID. Default: `?channel=...` query param |
+| `broadcast` | `boolean` | If true, every emit goes to all subscribers (no channels). Default: false |
+| `channel` | `(c) => string` | Extract channel ID. Default: `?channel=...` query param. Ignored when `broadcast: true` |
 | `snapshot` | `(channel) => TSnapshot` | Returns current state on connect (state-machine pattern) |
 | `closeOn` | `(event) => boolean` | Closes SSE when matching event is sent (declarative) |
 | `source` | `(emit, { abortSignal }) => Promise<void>` | Self-running producer, only runs while subscribed |

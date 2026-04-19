@@ -14,6 +14,12 @@ In a typical web app, the client asks the server for data. But sometimes you nee
 
 VeloJS picks SSE because it covers ~90% of real-time use cases with minimal complexity. For bidirectional needs (rare — interactive terminals, live cursors), drop down to a raw WebSocket via `onServer`.
 
+## Channels by default
+
+Streams are **channel-aware by default**. You don't need to configure anything — `useEventStream(stream, { channel })` on the client and `stream.emit(channel, value)` on the server just work together. The framework reads `?channel=...` from the URL automatically.
+
+For streams that should send the same event to everyone (broadcast), opt in with `{ broadcast: true }`.
+
 ## The shortest example
 
 ```typescript
@@ -91,11 +97,46 @@ import { authMiddleware } from "../middlewares/auth.js";
 
 export const containerMetrics = createEventStream<Metric[]>({
     path: "/api/metrics/containers",
-    middlewares: [authMiddleware],  // explicit, since not in a route
+    broadcast: true,                  // every subscriber gets every emit
+    middlewares: [authMiddleware],    // explicit, since not in a route
 });
 ```
 
 **When to use:** consumed by multiple unrelated pages, doesn't belong to one.
+
+## Channel-aware vs broadcast
+
+Streams come in two shapes:
+
+**Channel-aware (default)** — events are addressed to a specific channel ID. Subscribers only receive events for their channel.
+
+```typescript
+export const stream_deploy = createEventStream<DeployState>();
+
+stream_deploy.emit("app-123", state);  // only listeners with channel="app-123"
+```
+
+```typescript
+useEventStream(stream_deploy, { channel: appId });  // subscribes to that channel
+```
+
+This is the default because most real-time features are scoped to something — a deploy ID, a user ID, a session ID.
+
+**Broadcast** — opt in with `{ broadcast: true }`. Every event reaches every subscriber. No channels.
+
+```typescript
+export const stream_metrics = createEventStream<Metric[]>({
+    broadcast: true,
+});
+
+stream_metrics.emit(currentMetrics);  // all subscribers receive
+```
+
+```typescript
+useEventStream(stream_metrics);  // no channel option
+```
+
+Use broadcast for things like global metrics, system-wide notifications, or live counters that aren't tied to any specific entity.
 
 ## Three ways to emit events
 
@@ -182,7 +223,8 @@ Use this when the snapshot type is different from the event type, or when you on
 | Option | Type | Description |
 |--------|------|-------------|
 | `path` | `string` | (Standalone only) Explicit URL path for the SSE endpoint |
-| `channel` | `(c: Context) => string` | Extract a channel ID from the request. Defaults to `?channel=...` query param |
+| `broadcast` | `boolean` | If true, no channels — every emit goes to all subscribers. Default: false (channel-aware) |
+| `channel` | `(c: Context) => string` | Extract a channel ID from the request. Defaults to `?channel=...` query param. Ignored when `broadcast: true` |
 | `snapshot` | `(channel) => TSnapshot` | Returns the current state on connect (state-machine pattern) |
 | `closeOn` | `(event: TEvent) => boolean` | Closes the SSE connection when this returns true for an emitted event |
 | `source` | `(emit, { abortSignal }) => Promise<void>` | Self-running producer that runs only while subscribed |
@@ -381,12 +423,13 @@ Use cases: bootstrap logs, AI token streaming, container logs.
 
 ### Pattern 3 — Polling broadcast
 
-No channel, no manual emit. The framework runs the producer only while subscribed.
+`broadcast: true` + framework-driven `source`. Producer only runs while subscribed.
 
 ```typescript
 import { poll } from "@mauroandre/velojs";
 
 export const stream_metrics = createEventStream<Metric[]>({
+    broadcast: true,
     source: poll({
         intervalMs: 3000,
         tick: async (emit) => emit(await collectMetrics()),
@@ -402,6 +445,7 @@ Listen to a global bus, emit when something happens.
 
 ```typescript
 export const stream_notifications = createEventStream<Notification>({
+    broadcast: true,
     source: async (emit, { abortSignal }) => {
         const handler = (n: Notification) => emit(n);
         notificationBus.on("new", handler);

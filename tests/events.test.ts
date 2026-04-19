@@ -29,9 +29,9 @@ describe("createEventStream", () => {
         });
     });
 
-    describe("emit() — broadcast (no channel)", () => {
+    describe("emit() — broadcast (broadcast: true)", () => {
         it("delivers event to all broadcast listeners", () => {
-            const stream = createEventStream<number>();
+            const stream = createEventStream<number>({ broadcast: true });
             const received: number[] = [];
 
             const listener = Object.assign(
@@ -47,7 +47,7 @@ describe("createEventStream", () => {
         });
 
         it("delivers to multiple listeners on broadcast channel", () => {
-            const stream = createEventStream<string>();
+            const stream = createEventStream<string>({ broadcast: true });
             const received: string[] = [];
 
             const a = Object.assign(
@@ -66,12 +66,42 @@ describe("createEventStream", () => {
         });
 
         it("does nothing when no listeners exist", () => {
-            const stream = createEventStream<number>();
+            const stream = createEventStream<number>({ broadcast: true });
             expect(() => stream.emit(1)).not.toThrow();
+        });
+
+        it("warns when both broadcast: true and channel are set", () => {
+            const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+            createEventStream({
+                broadcast: true,
+                channel: (c) => c.req.query("foo") ?? "",
+            });
+            expect(warn).toHaveBeenCalledWith(
+                expect.stringContaining("ignores `channel`")
+            );
+            warn.mockRestore();
         });
     });
 
     describe("emit() — channel-targeted", () => {
+        // REGRESSION: bug found in 0.0.20 where stream without explicit channel function
+        // had inconsistent behavior — server handler used defaultChannelFn but emit
+        // treated first arg as event (broadcast). Channel-first as default fixes it.
+        it("default is channel-first (works without explicit channel config)", () => {
+            const stream = createEventStream<string>();
+            const received: string[] = [];
+
+            const listener = Object.assign(
+                (e: string) => received.push(e),
+                { close: () => {} }
+            );
+            stream.__listeners.set("session-1", new Set([listener]));
+
+            stream.emit("session-1", "hello");
+
+            expect(received).toEqual(["hello"]);
+        });
+
         it("delivers event only to matching channel listeners", () => {
             const stream = createEventStream<string>({
                 channel: (c) => c.req.query("channel") ?? "",
@@ -388,8 +418,8 @@ describe("per-emit snapshot buffer", () => {
         expect(stream.__buffers.get("b")).toEqual(["from-b"]);
     });
 
-    it("works for broadcast streams (no channel)", () => {
-        const stream = createEventStream<number>();
+    it("works for broadcast streams (broadcast: true)", () => {
+        const stream = createEventStream<number>({ broadcast: true });
         stream.emit(1, { snapshot: true });
         stream.emit(2, { snapshot: true });
 
@@ -557,6 +587,7 @@ describe("source lifecycle", () => {
     it("source can emit values via the provided emit fn", async () => {
         const received: number[] = [];
         const stream = createEventStream<number>({
+            broadcast: true,
             source: async (emit) => {
                 emit(1);
                 emit(2);
@@ -673,17 +704,6 @@ describe("poll() helper", () => {
 // ============================================
 
 describe("default channel function", () => {
-    it("uses ?channel= query when stream config has no channel function", async () => {
-        const app = new Hono();
-        const stream = createEventStream<string>();
-        registerStreamHandler(app, "/sse-default-chan", stream);
-
-        // Pre-populate buffer for "abc"
-        stream.emit("abc", "buffered-event", { snapshot: true });
-
-        // Wait, but emit uses BROADCAST_CHANNEL because no channel func — let me rebuild
-    });
-
     it("registers default channel handler that reads ?channel=...", async () => {
         const app = new Hono();
         // Stream without explicit channel function still works for client connections
@@ -703,5 +723,110 @@ describe("default channel function", () => {
 
         ctrl.abort();
         await fetchPromise.catch(() => {});
+    });
+});
+
+// ============================================
+// END-TO-END: zero-config channel-aware (regression for the 0.0.20 bug)
+// ============================================
+
+describe("end-to-end: zero-config channel-aware", () => {
+    it("emit(channel, value) reaches a real HTTP SSE subscriber on that channel", async () => {
+        // This is the exact scenario that broke in 0.0.20:
+        //   - createEventStream<string>() with no config
+        //   - HTTP client connects with ?channel=...
+        //   - Server-side service emits with stream.emit(channel, value, { snapshot: true })
+        //   - Client should receive the event via SSE (not silently drop into broadcast bucket)
+        const app = new Hono();
+        const stream = createEventStream<string>(); // ← zero config
+        registerStreamHandler(app, "/sse-e2e", stream);
+
+        const ctrl = new AbortController();
+        const res = await app.fetch(
+            new Request("http://localhost/sse-e2e?channel=session-1", {
+                signal: ctrl.signal,
+            })
+        );
+
+        // Wait until handler subscribes the listener
+        await new Promise((r) => setTimeout(r, 30));
+        expect(stream.__listeners.has("session-1")).toBe(true);
+
+        // Service emits to the same channel
+        stream.emit("session-1", "Connecting...", { snapshot: true });
+        stream.emit("session-1", "Worker ready", { snapshot: true });
+
+        // Read the SSE response body and check the data lines
+        const reader = res.body!.getReader();
+        const decoder = new TextDecoder();
+        const chunks: string[] = [];
+
+        // Read with a timeout so the test fails if nothing arrives
+        const readWithTimeout = async () => {
+            const start = Date.now();
+            while (Date.now() - start < 200) {
+                const result = await Promise.race([
+                    reader.read(),
+                    new Promise<{ done: true; value: undefined }>((r) =>
+                        setTimeout(() => r({ done: true, value: undefined }), 50)
+                    ),
+                ]);
+                if (result.done || !result.value) break;
+                chunks.push(decoder.decode(result.value));
+            }
+        };
+        await readWithTimeout();
+
+        const fullText = chunks.join("");
+        // Both events should arrive on the SSE stream as data: "..." lines
+        expect(fullText).toContain("Connecting...");
+        expect(fullText).toContain("Worker ready");
+
+        ctrl.abort();
+        await reader.cancel().catch(() => {});
+    });
+
+    it("emit(channel, value) does NOT leak to a different channel", async () => {
+        const app = new Hono();
+        const stream = createEventStream<string>();
+        registerStreamHandler(app, "/sse-iso", stream);
+
+        const ctrl = new AbortController();
+        const res = await app.fetch(
+            new Request("http://localhost/sse-iso?channel=alice", {
+                signal: ctrl.signal,
+            })
+        );
+
+        await new Promise((r) => setTimeout(r, 30));
+
+        // Emit to a different channel
+        stream.emit("bob", "for bob only", { snapshot: true });
+
+        const reader = res.body!.getReader();
+        const decoder = new TextDecoder();
+        const chunks: string[] = [];
+
+        const readWithTimeout = async () => {
+            const start = Date.now();
+            while (Date.now() - start < 100) {
+                const result = await Promise.race([
+                    reader.read(),
+                    new Promise<{ done: true; value: undefined }>((r) =>
+                        setTimeout(() => r({ done: true, value: undefined }), 30)
+                    ),
+                ]);
+                if (result.done || !result.value) break;
+                chunks.push(decoder.decode(result.value));
+            }
+        };
+        await readWithTimeout();
+
+        const fullText = chunks.join("");
+        // alice should NOT receive bob's event
+        expect(fullText).not.toContain("for bob only");
+
+        ctrl.abort();
+        await reader.cancel().catch(() => {});
     });
 });

@@ -89,8 +89,20 @@ export interface EventStreamConfig<TEvent, TSnapshot = TEvent> {
      * Subscribers only receive events emitted to their channel.
      * When omitted, defaults to `c.req.query("channel") ?? ""` so client-side
      * `useEventStream(stream, { channel })` works out of the box.
+     *
+     * Ignored when `broadcast: true` is set.
      */
     channel?: (c: Context) => string;
+
+    /**
+     * If true, this stream has no channels — every emit goes to all subscribers.
+     * - `emit(value, options?)` (no channel arg)
+     * - `useEventStream(stream)` (no channel option)
+     * - Server uses a single broadcast bucket regardless of `?channel=` query.
+     *
+     * Default: false (channel-aware — `emit(channel, value, options?)`).
+     */
+    broadcast?: boolean;
 
     /**
      * Returns the current state of a channel for snapshot-on-connect.
@@ -144,9 +156,12 @@ export interface EventStreamConfig<TEvent, TSnapshot = TEvent> {
 }
 
 export interface EventStream<TEvent, TSnapshot = TEvent> {
-    /** Broadcast emit (no channel) */
+    /**
+     * Emit an event.
+     * - For channel-aware streams (default): `emit(channel, value, options?)`
+     * - For broadcast streams (`config.broadcast: true`): `emit(value, options?)`
+     */
     emit(event: TEvent, options?: EmitOptions): void;
-    /** Channel-targeted emit */
     emit(channel: string, event: TEvent, options?: EmitOptions): void;
 
     /**
@@ -205,6 +220,14 @@ export function flushPendingStreamRoutes(app: Hono): void {
 export function createEventStream<TEvent, TSnapshot = TEvent>(
     config: EventStreamConfig<TEvent, TSnapshot> = {}
 ): EventStream<TEvent, TSnapshot> {
+    // Sanity: broadcast and channel are mutually exclusive concepts
+    if (config.broadcast && config.channel) {
+        console.warn(
+            "[velojs] createEventStream: `broadcast: true` ignores `channel`. " +
+            "Remove one of them — broadcast streams have no channels."
+        );
+    }
+
     const listeners = new Map<string, Set<StreamListener<TEvent>>>();
     const buffers = new Map<string, TEvent[]>();
     const closedChannels = new Set<string>();
@@ -243,17 +266,17 @@ export function createEventStream<TEvent, TSnapshot = TEvent>(
         let event: TEvent;
         let options: EmitOptions | undefined;
 
-        // Heuristic: stream has explicit channel function ⇒ first arg is channel
-        const streamHasChannel = !!config.channel;
+        // Default: channel-aware. Opt-in to broadcast via `broadcast: true`.
+        const isBroadcast = !!config.broadcast;
 
-        if (streamHasChannel) {
-            channel = eventOrChannel as string;
-            event = valueOrOptions as TEvent;
-            options = maybeOptions;
-        } else {
+        if (isBroadcast) {
             channel = BROADCAST_CHANNEL;
             event = eventOrChannel as TEvent;
             options = valueOrOptions as EmitOptions | undefined;
+        } else {
+            channel = eventOrChannel as string;
+            event = valueOrOptions as TEvent;
+            options = maybeOptions;
         }
 
         // Warn-and-ignore if emitting to a closed channel
@@ -409,8 +432,9 @@ export function registerStreamHandler<TEvent, TSnapshot>(
     const handler = async (c: Context) => {
         const { streamSSE } = await import("hono/streaming");
 
-        const channelFn = stream.__config.channel ?? defaultChannelFn;
-        const channelKey = channelFn(c);
+        const channelKey = stream.__config.broadcast
+            ? BROADCAST_CHANNEL
+            : (stream.__config.channel ?? defaultChannelFn)(c);
 
         const heartbeatMs = stream.__config.heartbeatMs;
         const heartbeatInterval =
