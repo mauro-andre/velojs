@@ -1,26 +1,31 @@
 /**
  * VeloJS Event Streams
- * Server-Sent Events (SSE) with snapshot, channels, and auto-close.
+ * Server-Sent Events (SSE) with snapshot, channels, source-driven emission, and auto-close.
  *
- * Two ways to use:
+ * Two ways to declare:
  *
- * 1. Standalone (cross-cutting streams like global metrics):
+ * 1. Convention `stream_*` (per-page or per-layout, route registered automatically):
+ * ```typescript
+ * // app/admin/Deploy.tsx
+ * export const stream_progress = createEventStream<DeployState>();
+ * ```
+ *
+ * 2. Standalone (cross-cutting streams like global metrics):
  * ```typescript
  * export const metricsStream = createEventStream<Metric[]>({
  *     path: "/api/metrics",
+ *     middlewares: [authMiddleware],
  * });
- * metricsStream.emit(currentMetrics);
  * ```
  *
- * 2. Convention `stream_*` (per-page streams, route registered automatically):
- * ```typescript
- * // app/admin/Deploy.tsx
- * export const stream_progress = createEventStream<DeployState>({
- *     channel: (c) => c.req.param("id"),
- *     snapshot: (id) => activeDeploys.get(id),
- *     closeOn: (s) => s.status === "success" || s.status === "error",
- * });
- * ```
+ * Three ways to emit (server-side):
+ *
+ * - Reactive (call from anywhere when something happens):
+ *   `stream.emit(channelId, value, { snapshot: true })`
+ * - Source-driven (framework runs your producer only when subscribed):
+ *   `createEventStream({ source: poll({ intervalMs, tick }) })`
+ * - Stateful snapshot via callback (for state-machine patterns):
+ *   `createEventStream({ snapshot: (channelId) => activeStates.get(channelId) })`
  */
 
 import type { Context, Hono, MiddlewareHandler } from "hono";
@@ -28,6 +33,48 @@ import type { Context, Hono, MiddlewareHandler } from "hono";
 // ============================================
 // TYPES
 // ============================================
+
+/** Function passed to `source` for emitting values. */
+export type EmitFn<TEvent> = {
+    /** Broadcast emit (no channel) */
+    (event: TEvent, options?: EmitOptions): void;
+    /** Channel-targeted emit */
+    (channel: string, event: TEvent, options?: EmitOptions): void;
+};
+
+/** Options accepted by `emit()` per call. */
+export interface EmitOptions {
+    /**
+     * If true, the value is appended to the stream's internal buffer for that channel.
+     * Late subscribers receive the full buffer as a snapshot on connect.
+     * Default: false (event is broadcast-only, not retained).
+     */
+    snapshot?: boolean;
+}
+
+/**
+ * A producer function that runs **only when there are active subscribers**.
+ * The framework passes an `AbortSignal` that fires when the last subscriber disconnects.
+ *
+ * Example (event-driven):
+ * ```typescript
+ * source: async (emit, { abortSignal }) => {
+ *     const handler = (e) => emit(e);
+ *     bus.on("event", handler);
+ *     abortSignal.addEventListener("abort", () => bus.off("event", handler));
+ *     await new Promise(r => abortSignal.addEventListener("abort", r));
+ * }
+ * ```
+ *
+ * For polling, use the `poll` helper instead of writing the loop yourself.
+ *
+ * **Anti-pattern**: ignoring `abortSignal` keeps the source running forever (and leaks
+ * resources). Only do this if the producer is meant to run independently of UI.
+ */
+export type SourceFn<TEvent> = (
+    emit: EmitFn<TEvent>,
+    ctx: { abortSignal: AbortSignal }
+) => void | Promise<void>;
 
 export interface EventStreamConfig<TEvent, TSnapshot = TEvent> {
     /**
@@ -40,21 +87,28 @@ export interface EventStreamConfig<TEvent, TSnapshot = TEvent> {
     /**
      * Channel selector — extracts a channel ID from the request.
      * Subscribers only receive events emitted to their channel.
-     * When omitted, the stream is a broadcast (all subscribers receive all events).
+     * When omitted, defaults to `c.req.query("channel") ?? ""` so client-side
+     * `useEventStream(stream, { channel })` works out of the box.
      */
     channel?: (c: Context) => string;
 
     /**
      * Returns the current state of a channel for snapshot-on-connect.
      * Sent before any new events to bring the client up to date.
-     * Must remain available even after the stream "closes" — clients reconnecting
-     * after a terminal event still need to see the final state.
+     *
+     * Use this for **state-machine patterns** where each emit is a complete state
+     * (deploy progress, migration status). The callback returns the latest state.
+     *
+     * For **append-only patterns** (logs, tokens), prefer `emit(..., { snapshot: true })`
+     * which uses an internal buffer managed by the framework.
      */
     snapshot?: (channel: string | undefined) => TSnapshot | undefined | Promise<TSnapshot | undefined>;
 
     /**
      * Returns true when an event marks the end of the stream for that channel.
      * The server closes the SSE connection after sending such an event.
+     *
+     * For imperative close from anywhere, use `stream.close(channel)` instead.
      */
     closeOn?: (event: TEvent) => boolean;
 
@@ -71,64 +125,151 @@ export interface EventStreamConfig<TEvent, TSnapshot = TEvent> {
      * parent route nodes automatically.
      */
     middlewares?: MiddlewareHandler[];
+
+    /**
+     * Self-running producer that emits values into the stream.
+     * The framework only invokes `source` while there are active subscribers.
+     * When the last subscriber disconnects, the AbortSignal fires.
+     *
+     * Use the `poll` helper for the common interval-based pattern.
+     */
+    source?: SourceFn<TEvent>;
+
+    /**
+     * Time (ms) the per-channel snapshot buffer is retained after `close()`.
+     * Reconnecting clients within this window still see the final state.
+     * Default: 5 * 60 * 1000 (5 minutes).
+     */
+    retainMs?: number;
 }
 
 export interface EventStream<TEvent, TSnapshot = TEvent> {
     /** Broadcast emit (no channel) */
-    emit(event: TEvent): void;
+    emit(event: TEvent, options?: EmitOptions): void;
     /** Channel-targeted emit */
-    emit(channel: string, event: TEvent): void;
+    emit(channel: string, event: TEvent, options?: EmitOptions): void;
+
+    /**
+     * Closes the stream (or a specific channel).
+     * - Notifies current subscribers so their `useEventStream().closed` becomes true.
+     * - Schedules cleanup of the per-channel buffer after `retainMs`.
+     * - Idempotent: calling close on an already-closed channel is a no-op.
+     */
+    close(channel?: string): void;
 
     /** Internal: marker for runtime detection */
     readonly __isVeloEventStream: true;
     /** Internal: configuration */
     readonly __config: EventStreamConfig<TEvent, TSnapshot>;
     /** Internal: registered listeners by channel ("" for broadcast) */
-    readonly __listeners: Map<string, Set<(event: TEvent) => void>>;
+    readonly __listeners: Map<string, Set<StreamListener<TEvent>>>;
+    /** Internal: per-channel buffer for { snapshot: true } emits */
+    readonly __buffers: Map<string, TEvent[]>;
     /** Internal: assigned URL path (set by standalone or by stream_* discovery) */
     __path: string | undefined;
+    /** Internal: source lifecycle hook */
+    __onConnect(channelKey: string, listener: StreamListener<TEvent>): void;
+    /** Internal: source lifecycle hook */
+    __onDisconnect(channelKey: string, listener: StreamListener<TEvent>): void;
+}
+
+/** Internal listener — receives events and a close signal. */
+interface StreamListener<TEvent> {
+    (event: TEvent): void;
+    close(): void;
+}
+
+// ============================================
+// CONSTANTS
+// ============================================
+
+const DEFAULT_HEARTBEAT_MS = 20000;
+const DEFAULT_RETAIN_MS = 5 * 60 * 1000;
+const BROADCAST_CHANNEL = "";
+
+// ============================================
+// PENDING ROUTES (standalone)
+// ============================================
+
+const pendingStreamRoutes: Array<(app: Hono) => void> = [];
+
+export function flushPendingStreamRoutes(app: Hono): void {
+    for (const fn of pendingStreamRoutes) fn(app);
+    pendingStreamRoutes.length = 0;
 }
 
 // ============================================
 // FACTORY
 // ============================================
 
-const DEFAULT_HEARTBEAT_MS = 20000;
-const BROADCAST_CHANNEL = "";
-
-/**
- * Pending standalone streams that need to be registered when the app starts.
- * Each entry registers a GET SSE handler at the stream's `path`.
- */
-const pendingStreamRoutes: Array<(app: Hono) => void> = [];
-
-/**
- * Returns and clears the queue of pending standalone streams.
- * Called by createApp to register their routes.
- */
-export function flushPendingStreamRoutes(app: Hono): void {
-    for (const fn of pendingStreamRoutes) fn(app);
-    pendingStreamRoutes.length = 0;
-}
-
-/**
- * Creates a typed event stream with optional channel, snapshot, and close-on-event.
- */
 export function createEventStream<TEvent, TSnapshot = TEvent>(
     config: EventStreamConfig<TEvent, TSnapshot> = {}
 ): EventStream<TEvent, TSnapshot> {
-    const listeners = new Map<string, Set<(event: TEvent) => void>>();
+    const listeners = new Map<string, Set<StreamListener<TEvent>>>();
+    const buffers = new Map<string, TEvent[]>();
+    const closedChannels = new Set<string>();
+    const cleanupTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
-    function emit(eventOrChannel: TEvent | string, maybeEvent?: TEvent): void {
+    // Source lifecycle: started on first subscriber across all channels,
+    // aborted when last subscriber disappears.
+    let sourceController: AbortController | null = null;
+    let totalSubscribers = 0;
+
+    const startSourceIfNeeded = () => {
+        if (!config.source) return;
+        if (sourceController) return; // already running
+        sourceController = new AbortController();
+        // Fire-and-forget; user controls lifecycle via abortSignal.
+        Promise.resolve(
+            config.source(emit as EmitFn<TEvent>, { abortSignal: sourceController.signal })
+        ).catch((err) => {
+            console.error("[velojs] event stream source threw:", err);
+        });
+    };
+
+    const stopSourceIfIdle = () => {
+        if (totalSubscribers > 0) return;
+        if (!sourceController) return;
+        sourceController.abort();
+        sourceController = null;
+    };
+
+    function emit(
+        eventOrChannel: TEvent | string,
+        valueOrOptions?: TEvent | EmitOptions,
+        maybeOptions?: EmitOptions
+    ): void {
         let channel: string;
         let event: TEvent;
+        let options: EmitOptions | undefined;
 
-        if (arguments.length === 1) {
+        // Heuristic: stream has explicit channel function ⇒ first arg is channel
+        const streamHasChannel = !!config.channel;
+
+        if (streamHasChannel) {
+            channel = eventOrChannel as string;
+            event = valueOrOptions as TEvent;
+            options = maybeOptions;
+        } else {
             channel = BROADCAST_CHANNEL;
             event = eventOrChannel as TEvent;
-        } else {
-            channel = eventOrChannel as string;
-            event = maybeEvent as TEvent;
+            options = valueOrOptions as EmitOptions | undefined;
+        }
+
+        // Warn-and-ignore if emitting to a closed channel
+        if (closedChannels.has(channel)) {
+            console.warn(
+                `[velojs] emit() called on closed channel "${channel}" — ignored. ` +
+                `Reopen the channel by emitting to a fresh ID, or remove the close() call.`
+            );
+            return;
+        }
+
+        // Append to buffer if snapshot:true
+        if (options?.snapshot) {
+            const buffer = buffers.get(channel) ?? [];
+            buffer.push(event);
+            buffers.set(channel, buffer);
         }
 
         const channelListeners = listeners.get(channel);
@@ -137,12 +278,56 @@ export function createEventStream<TEvent, TSnapshot = TEvent>(
         }
     }
 
+    function close(channel: string = BROADCAST_CHANNEL): void {
+        if (closedChannels.has(channel)) return;
+        closedChannels.add(channel);
+
+        // Notify current subscribers so client-side `closed.value = true`
+        const channelListeners = listeners.get(channel);
+        if (channelListeners) {
+            for (const listener of channelListeners) listener.close();
+        }
+
+        // Schedule buffer cleanup after retainMs
+        const retain = config.retainMs ?? DEFAULT_RETAIN_MS;
+        const existing = cleanupTimers.get(channel);
+        if (existing) clearTimeout(existing);
+        cleanupTimers.set(
+            channel,
+            setTimeout(() => {
+                buffers.delete(channel);
+                cleanupTimers.delete(channel);
+                closedChannels.delete(channel);
+            }, retain)
+        );
+    }
+
     const stream: EventStream<TEvent, TSnapshot> = {
         emit: emit as EventStream<TEvent, TSnapshot>["emit"],
+        close,
         __isVeloEventStream: true,
         __config: config,
         __listeners: listeners,
+        __buffers: buffers,
         __path: config.path,
+        __onConnect(channelKey: string, listener: StreamListener<TEvent>) {
+            let set = listeners.get(channelKey);
+            if (!set) {
+                set = new Set();
+                listeners.set(channelKey, set);
+            }
+            set.add(listener);
+            totalSubscribers++;
+            startSourceIfNeeded();
+        },
+        __onDisconnect(channelKey: string, listener: StreamListener<TEvent>) {
+            const set = listeners.get(channelKey);
+            if (!set) return;
+            set.delete(listener);
+            if (set.size === 0) listeners.delete(channelKey);
+            totalSubscribers--;
+            stopSourceIfIdle();
+        },
     };
 
     // Standalone usage: register the route immediately via the pending queue
@@ -156,8 +341,60 @@ export function createEventStream<TEvent, TSnapshot = TEvent>(
 }
 
 // ============================================
+// POLL HELPER
+// ============================================
+
+/**
+ * Creates a `source` function that runs `tick` every `intervalMs` while subscribed.
+ * The tick function is wrapped in try/catch — errors are logged but don't stop the loop.
+ *
+ * ```typescript
+ * export const stream_metrics = createEventStream<Metric[]>({
+ *     source: poll({
+ *         intervalMs: 3000,
+ *         tick: async (emit) => emit(await collectMetrics()),
+ *     }),
+ * });
+ * ```
+ */
+export function poll<TEvent>(opts: {
+    intervalMs: number;
+    tick: (emit: EmitFn<TEvent>) => void | Promise<void>;
+}): SourceFn<TEvent> {
+    return async (emit, { abortSignal }) => {
+        while (!abortSignal.aborted) {
+            try {
+                await opts.tick(emit);
+            } catch (err) {
+                console.error("[velojs] poll tick threw:", err);
+            }
+            // Cancellable sleep
+            await new Promise<void>((resolve) => {
+                const timer = setTimeout(resolve, opts.intervalMs);
+                abortSignal.addEventListener(
+                    "abort",
+                    () => {
+                        clearTimeout(timer);
+                        resolve();
+                    },
+                    { once: true }
+                );
+            });
+        }
+    };
+}
+
+// ============================================
 // SSE HANDLER
 // ============================================
+
+/**
+ * Default channel function: reads `?channel=...` from the request URL.
+ * Used when the stream config doesn't provide one.
+ */
+function defaultChannelFn(c: Context): string {
+    return c.req.query("channel") ?? BROADCAST_CHANNEL;
+}
 
 /**
  * Registers a GET SSE route for the given stream at the given path.
@@ -172,16 +409,25 @@ export function registerStreamHandler<TEvent, TSnapshot>(
     const handler = async (c: Context) => {
         const { streamSSE } = await import("hono/streaming");
 
-        const channelKey = stream.__config.channel
-            ? stream.__config.channel(c)
-            : BROADCAST_CHANNEL;
+        const channelFn = stream.__config.channel ?? defaultChannelFn;
+        const channelKey = channelFn(c);
 
         const heartbeatMs = stream.__config.heartbeatMs;
         const heartbeatInterval =
             heartbeatMs === false ? 0 : (heartbeatMs ?? DEFAULT_HEARTBEAT_MS);
 
         return streamSSE(c, async (sse) => {
-            // Send snapshot on connect (if configured)
+            // ---------- Snapshot-on-connect ----------
+            // 1. Buffered events from { snapshot: true } emits
+            const bufferedEvents = stream.__buffers.get(channelKey);
+            if (bufferedEvents && bufferedEvents.length > 0) {
+                await sse.writeSSE({
+                    event: "snapshot",
+                    data: JSON.stringify(bufferedEvents),
+                });
+            }
+
+            // 2. Custom snapshot callback (state-machine pattern)
             if (stream.__config.snapshot) {
                 const snapshot = await stream.__config.snapshot(
                     channelKey === BROADCAST_CHANNEL ? undefined : channelKey
@@ -194,49 +440,49 @@ export function registerStreamHandler<TEvent, TSnapshot>(
                 }
             }
 
-            // Promise resolved by cleanup() — replaces a polling loop.
+            // ---------- Connection lifecycle ----------
             let resolveDone: () => void;
             const done = new Promise<void>((resolve) => {
                 resolveDone = resolve;
             });
 
-            let closed = false;
+            let disposed = false;
             let heartbeat: ReturnType<typeof setInterval> | null = null;
-            let channelListeners: Set<(event: TEvent) => void> | undefined;
 
             const cleanup = () => {
-                if (closed) return;
-                closed = true;
+                if (disposed) return;
+                disposed = true;
                 if (heartbeat) clearInterval(heartbeat);
-                channelListeners?.delete(listener);
-                if (channelListeners?.size === 0) {
-                    stream.__listeners.delete(channelKey);
-                }
+                stream.__onDisconnect(channelKey, listener);
                 resolveDone();
             };
 
-            const listener = (event: TEvent) => {
-                if (closed) return;
+            // Listener function with attached `close()` for explicit close() signaling
+            const listener = ((event: TEvent) => {
+                if (disposed) return;
                 sse.writeSSE({ data: JSON.stringify(event) }).catch(() => {});
 
                 if (stream.__config.closeOn?.(event)) {
                     sse.close();
                     cleanup();
                 }
+            }) as StreamListener<TEvent>;
+
+            listener.close = () => {
+                if (disposed) return;
+                // Send close event so client distinguishes deliberate close from network drop
+                sse.writeSSE({ event: "close", data: "" }).catch(() => {});
+                sse.close();
+                cleanup();
             };
 
-            channelListeners = stream.__listeners.get(channelKey);
-            if (!channelListeners) {
-                channelListeners = new Set();
-                stream.__listeners.set(channelKey, channelListeners);
-            }
-            channelListeners.add(listener);
+            stream.__onConnect(channelKey, listener);
 
             // Heartbeat to keep idle proxies open
             heartbeat =
                 heartbeatInterval > 0
                     ? setInterval(() => {
-                          if (closed) return;
+                          if (disposed) return;
                           sse.writeSSE({ event: "heartbeat", data: "" }).catch(() => {});
                       }, heartbeatInterval)
                     : null;

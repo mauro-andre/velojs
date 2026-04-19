@@ -536,57 +536,89 @@ The client-side transform rewrites the import to fetch `/_action/admin/Layout/lo
 
 ## Event Streams
 
-Push real-time updates from server to client via Server-Sent Events (SSE). Useful for live progress, notifications, metrics, log streaming, AI tokens, and any server → client push scenario.
+Push real-time updates from server to client via Server-Sent Events (SSE). Live progress, notifications, metrics, log streaming, AI tokens — anything server → client.
 
-### `stream_*` convention
+Three verbs: `emit`, `close`, `useEventStream`. The framework handles routing, types, listener management, snapshots, lifecycle, reconnection, and cleanup.
 
-Declare a stream alongside `loader` / `action_*` in any page or layout module. The framework registers an SSE route at `/_event/{moduleId}/{name}` automatically:
+### Shortest example
 
 ```typescript
-// app/admin/Deploy.tsx
+// app/admin/Provision.tsx
 import { createEventStream } from "@mauroandre/velojs";
-import { useEventStream, useParams } from "@mauroandre/velojs/hooks";
+import { useEventStream } from "@mauroandre/velojs/hooks";
 
-type DeployState = { step: string; status: "running" | "success" | "error" };
-
-const activeDeploys = new Map<string, DeployState>();
-
-export const stream_progress = createEventStream<DeployState>({
-    channel: (c) => c.req.query("channel") ?? "",
-    snapshot: (channel) => activeDeploys.get(channel ?? ""),
-    closeOn: (s) => s.status === "success" || s.status === "error",
-});
+export const stream_logs = createEventStream<string>();
 
 export const Component = () => {
-    const params = useParams<{ id: string }>();
-    const { data, snapshot, closed } = useEventStream(stream_progress, {
-        channel: params.id,
-    });
-
-    const state = data.value ?? snapshot.value;
-    return <div>{state?.step ?? "waiting..."}</div>;
+    const { snapshot, data, closed } = useEventStream(stream_logs, { channel: sessionId });
+    const lines = [...(snapshot.value ?? []), ...(data.value ? [data.value] : [])];
+    return <pre>{lines.join("\n")}{closed.value && "\n[done]"}</pre>;
 };
 ```
 
-Emit from any service that imports the stream:
-
 ```typescript
-import { stream_progress } from "./Deploy.js";
+// app/admin/provision.service.ts
+import { stream_logs } from "./Provision.js";
 
-stream_progress.emit("app-123", { step: "building", status: "running" });
+export async function provision(sessionId: string) {
+    try {
+        stream_logs.emit(sessionId, "Connecting...", { snapshot: true });
+        // ... real work
+        stream_logs.emit(sessionId, "Worker ready.", { snapshot: true });
+    } finally {
+        stream_logs.close(sessionId);
+    }
+}
 ```
 
-### Standalone streams
+One line to declare, three verbs to use. Route at `/_event/admin/Provision/logs` is registered automatically. Middlewares inherited from parent route nodes.
 
-For cross-cutting streams (global metrics, notifications) consumed by many pages, use an explicit `path`:
+### Two ways to declare
+
+**Convention `stream_*`** (recommended) — for streams logically tied to a page/layout. Path derived from module ID, middlewares inherited.
 
 ```typescript
-// app/streams/metrics.ts
-export const metricsStream = createEventStream<Metric[]>({
-    path: "/api/metrics/containers",
-});
+export const stream_progress = createEventStream<DeployState>();
+```
 
-setInterval(() => metricsStream.emit(collectMetrics()), 2000);
+**Standalone** — for cross-cutting streams (global metrics, notifications). Pass `path` and (if needed) `middlewares` explicitly.
+
+```typescript
+export const containerMetrics = createEventStream<Metric[]>({
+    path: "/api/metrics/containers",
+    middlewares: [authMiddleware],
+});
+```
+
+### Three ways to emit
+
+**Reactive** — call `emit()` from anywhere when something happens. Most common:
+
+```typescript
+stream_logs.emit(sessionId, "Line", { snapshot: true });
+```
+
+**Source-driven** — pass a `source` function. Framework runs it only while subscribed (zero CPU when nobody is watching):
+
+```typescript
+import { poll } from "@mauroandre/velojs";
+
+export const stream_metrics = createEventStream<Metric[]>({
+    source: poll({
+        intervalMs: 3000,
+        tick: async (emit) => emit(await collectMetrics()),
+    }),
+});
+```
+
+**Stateful snapshot** — for state-machine patterns where each emit is the complete current state:
+
+```typescript
+const deploys = new Map<string, DeployState>();
+
+export const stream_deploy = createEventStream<DeployState>({
+    snapshot: (id) => deploys.get(id ?? ""),
+});
 ```
 
 ### Configuration
@@ -594,24 +626,48 @@ setInterval(() => metricsStream.emit(collectMetrics()), 2000);
 | Option | Type | Description |
 |--------|------|-------------|
 | `path` | `string` | (Standalone) Explicit URL path |
-| `channel` | `(c: Context) => string` | Extract channel ID from request — subscribers only get matching events |
-| `snapshot` | `(channel) => TSnapshot \| undefined` | Returns current state on connect (and reconnect) |
-| `closeOn` | `(event: TEvent) => boolean` | Closes the SSE connection when matching event is sent |
-| `heartbeatMs` | `number \| false` | Keep-alive heartbeat interval, default `20000` (20s). `false` to disable |
-| `middlewares` | `MiddlewareHandler[]` | (Standalone) Hono middlewares applied to the SSE route |
+| `channel` | `(c) => string` | Extract channel ID. Default: `?channel=...` query param |
+| `snapshot` | `(channel) => TSnapshot` | Returns current state on connect (state-machine pattern) |
+| `closeOn` | `(event) => boolean` | Closes SSE when matching event is sent (declarative) |
+| `source` | `(emit, { abortSignal }) => Promise<void>` | Self-running producer, only runs while subscribed |
+| `retainMs` | `number` | Buffer retention after `close()`. Default `300000` (5 min) |
+| `heartbeatMs` | `number \| false` | Heartbeat interval. Default `20000` (20s). `false` to disable |
+| `middlewares` | `MiddlewareHandler[]` | (Standalone) Hono middlewares for the SSE route |
 
-### Middleware inheritance
+### Snapshot mechanisms
 
-Streams declared with `stream_*` automatically inherit middlewares from parent route nodes — same as pages and actions. A stream under an `AdminLayout` with `authMiddleware` is protected without extra wiring.
+Two snapshot patterns for two cases:
 
-For standalone streams, pass middlewares explicitly:
+**Per-emit `{ snapshot: true }` — append pattern.** Framework keeps a buffer per channel. Late subscribers receive the array.
 
 ```typescript
-export const metricsStream = createEventStream<Metric[]>({
-    path: "/api/metrics",
-    middlewares: [authMiddleware],
-});
+stream_logs.emit(id, "line 1", { snapshot: true });
+stream_logs.emit(id, "line 2", { snapshot: true });
+// Late subscriber → snapshot.value = ["line 1", "line 2"]
 ```
+
+**`snapshot: callback` config — replace pattern.** You return the latest state from your own data structure.
+
+```typescript
+createEventStream({ snapshot: (id) => deploys.get(id ?? "") });
+// Late subscriber → snapshot.value = the latest DeployState
+```
+
+Both survive after `close()` for `retainMs` (default 5 min) so refresh-after-finish still shows final state.
+
+### Closing
+
+Two ways, choose either or both:
+
+```typescript
+// Imperative — call from anywhere
+stream.close(channelId);
+
+// Declarative — predicate on event
+createEventStream({ closeOn: (s) => s.status === "success" });
+```
+
+After close, subsequent `emit()` to that channel is ignored with a warning.
 
 ### `useEventStream` hook
 
@@ -624,12 +680,20 @@ const { data, snapshot, closed, error } = useEventStream(stream, {
 
 | Signal | Description |
 |--------|-------------|
-| `data` | Latest event received from the server |
-| `snapshot` | Initial state on connect (if `snapshot` is configured) |
-| `closed` | `true` when server closed the stream (`closeOn` matched) |
+| `data` | Latest event received |
+| `snapshot` | Initial state on connect (buffer or callback) |
+| `closed` | `true` when server closed the stream |
 | `error` | Parse or connection error, if any |
 
-The hook handles `EventSource` lifecycle automatically: opens on mount, closes on unmount, re-opens when `channel` changes.
+Lifecycle is automatic: opens on mount, closes on unmount, re-opens fresh when `channel` changes.
+
+### `poll` helper
+
+For interval-based polling sources. Wraps your tick function in a loop that respects the `AbortSignal`. Errors in tick are logged but don't stop the loop.
+
+```typescript
+poll({ intervalMs: 3000, tick: async (emit) => emit(await collect()) })
+```
 
 ---
 
@@ -1076,11 +1140,11 @@ Hooks (`useParams`, `useQuery`, `usePathname`, `Loader`, `useLoader`) access thi
 
 | Import | Contents |
 |--------|----------|
-| `@mauroandre/velojs` | Types (`AppRoutes`, `ActionArgs`, `LoaderArgs`, `Metadata`, `EventStream`, `EventStreamConfig`), `Scripts`, `Link`, `createEventStream`, `defineConfig` |
+| `@mauroandre/velojs` | Types (`AppRoutes`, `ActionArgs`, `LoaderArgs`, `Metadata`, `EventStream`, `EventStreamConfig`, `EmitFn`, `EmitOptions`, `SourceFn`), `Scripts`, `Link`, `createEventStream`, `poll`, `defineConfig` |
 | `@mauroandre/velojs/server` | `startServer`, `createApp`, `addRoutes`, `onServer`, `serverDataStorage` |
 | `@mauroandre/velojs/client` | `startClient` |
 | `@mauroandre/velojs/hooks` | `Loader`, `useLoader`, `useEventStream`, `useParams`, `useQuery`, `useNavigate`, `usePathname`, `touch` |
-| `@mauroandre/velojs/events` | `createEventStream`, `EventStream`, `EventStreamConfig` (also re-exported from root) |
+| `@mauroandre/velojs/events` | `createEventStream`, `poll`, `EventStream`, `EventStreamConfig`, `EmitFn`, `EmitOptions`, `SourceFn` (also re-exported from root) |
 | `@mauroandre/velojs/cookie` | `getCookie`, `setCookie`, `deleteCookie`, `getSignedCookie`, `setSignedCookie` |
 | `@mauroandre/velojs/factory` | `createMiddleware`, `createFactory` |
 | `@mauroandre/velojs/vite` | `veloPlugin` |

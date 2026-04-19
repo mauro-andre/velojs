@@ -368,6 +368,12 @@ export function useEventStream<TEvent, TSnapshot = TEvent>(
         // Heartbeats are no-op on the client — they just keep the connection alive
         es.addEventListener("heartbeat", () => {});
 
+        // Server signaled an explicit close (via stream.close(channel))
+        es.addEventListener("close", () => {
+            closed.value = true;
+            es.close();
+        });
+
         es.addEventListener("error", () => {
             // EventSource auto-reconnects on errors. If readyState becomes CLOSED,
             // the server closed the stream intentionally.

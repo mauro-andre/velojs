@@ -1,236 +1,266 @@
 # Event Streams
 
-Event Streams are how you push data from the server to the client in real time using **Server-Sent Events (SSE)**. They're perfect for live progress updates, notifications, metrics, log streaming, AI token generation, and any scenario where the server needs to notify the client of something happening.
+Event Streams are how you push data from the server to the client in real time using **Server-Sent Events (SSE)**. They cover live progress updates, notifications, metrics, log streaming, AI token generation, and any scenario where the server needs to notify clients of something happening.
 
-VeloJS makes event streams as simple as declaring a function — the framework handles routing, type safety, listener management, reconnection, and cleanup for you.
+VeloJS makes event streams as simple as declaring a function — the framework handles routing, type safety, listener management, snapshots, lifecycle, reconnection, and cleanup for you.
 
 ## Why Event Streams?
 
-In a typical web app, the client asks the server for data. But sometimes you need the **server to tell the client** something happened — without the client constantly asking ("is it done yet? is it done yet?"). Two options:
+In a typical web app, the client asks the server for data. But sometimes you need the **server to tell the client** something happened — without polling. Three options:
 
-- **Polling** — client asks every few seconds. Wastes bandwidth, has latency, doesn't scale.
-- **WebSocket** — bidirectional channel, but complex to set up, needs reconnection logic, doesn't go through some proxies.
-- **Server-Sent Events (SSE)** — one-way channel from server to client over plain HTTP. Auto-reconnect built into the browser, works through any proxy or CDN, dead simple.
+- **Polling** — wasteful and laggy
+- **WebSocket** — bidirectional, complex setup, proxy issues
+- **Server-Sent Events (SSE)** — one-way over plain HTTP, auto-reconnect built-in, works through any proxy
 
-VeloJS picks SSE because it covers ~90% of real-time use cases with the smallest amount of complexity. Want bidirectional? Use HTTP actions for client-to-server and event streams for server-to-client.
+VeloJS picks SSE because it covers ~90% of real-time use cases with minimal complexity. For bidirectional needs (rare — interactive terminals, live cursors), drop down to a raw WebSocket via `onServer`.
 
-## Quick example
-
-A deploy progress page:
+## The shortest example
 
 ```typescript
-// app/admin/Deploy.tsx
+// app/admin/Provision.tsx
 import { createEventStream } from "@mauroandre/velojs";
-import { useEventStream, useParams } from "@mauroandre/velojs/hooks";
+import { useEventStream } from "@mauroandre/velojs/hooks";
 
-type DeployState = {
-    step: string;
-    status: "running" | "success" | "error";
-};
+export const stream_logs = createEventStream<string>();
 
-// Declare the stream once
-export const stream_progress = createEventStream<DeployState>({
-    channel: (c) => c.req.query("channel") ?? "",
-    closeOn: (s) => s.status === "success" || s.status === "error",
-});
-
-// Use it in the component
 export const Component = () => {
-    const params = useParams<{ id: string }>();
-    const { data } = useEventStream(stream_progress, { channel: params.id });
+    const { snapshot, data, closed } = useEventStream(stream_logs, {
+        channel: sessionId,
+    });
 
-    return <div>Step: {data.value?.step ?? "waiting..."}</div>;
+    const allLines = [...(snapshot.value ?? []), ...(data.value ? [data.value] : [])];
+
+    return (
+        <pre>
+            {allLines.join("\n")}
+            {closed.value && "\n[done]"}
+        </pre>
+    );
 };
 ```
 
-And in your service:
-
 ```typescript
-// app/admin/deploy.service.ts
-import { stream_progress } from "./Deploy.js";
+// app/admin/provision.service.ts
+import { stream_logs } from "./Provision.js";
 
-export async function runDeploy(id: string) {
-    stream_progress.emit(id, { step: "building", status: "running" });
-    // ... build logic
-    stream_progress.emit(id, { step: "uploading", status: "running" });
-    // ... upload logic
-    stream_progress.emit(id, { step: "done", status: "success" });
+export async function provision(sessionId: string) {
+    try {
+        stream_logs.emit(sessionId, "Connecting...", { snapshot: true });
+        // ... real work
+        stream_logs.emit(sessionId, "Worker ready.", { snapshot: true });
+    } catch (err) {
+        stream_logs.emit(sessionId, `Error: ${err.message}`, { snapshot: true });
+    } finally {
+        stream_logs.close(sessionId);
+    }
 }
 ```
 
-That's it. No routes to register, no listeners to manage, no `EventSource` to set up, no cleanup to remember. The framework wires it all together.
+That's it. One line to declare. Three verbs to use (`emit`, `close`, `useEventStream`). The framework handles:
+- Route registration at `/_event/admin/Provision/logs`
+- Channel routing per `sessionId`
+- Internal buffer for `{ snapshot: true }` emits, sent to late subscribers
+- Auto-close signaling
+- Heartbeat to keep proxies happy
+- Cleanup of buffer 5 minutes after `close()`
 
 ## Two ways to declare a stream
 
-### 1. The `stream_*` convention (per-page)
+### 1. The `stream_*` convention (recommended for most cases)
 
-Declare a stream as a named export starting with `stream_` in any page or layout module. The framework discovers it and registers an SSE route at `/_event/{moduleId}/{name}`.
+Declare a stream as a named export starting with `stream_` in any page or layout module. The framework registers an SSE route at `/_event/{moduleId}/{name}` automatically.
 
 ```typescript
 // app/admin/Deploy.tsx
-export const stream_progress = createEventStream<DeployState>({...});
-
+export const stream_progress = createEventStream<DeployState>();
 // → registered at /_event/admin/Deploy/progress
 ```
 
-This is the same pattern as `loader` and `action_*` — colocate the stream with the page that uses it. The path is generated from the file's module ID, so you never have to think about URLs.
+This is the same pattern as `loader` and `action_*`. Middlewares from parent route nodes are inherited automatically.
 
-**When to use:** the stream is logically tied to a specific page or feature.
+**When to use:** logically tied to a specific page or feature.
 
-### 2. Standalone (cross-cutting)
+### 2. Standalone (cross-cutting streams)
 
-Some streams don't belong to any single page — like global metrics or notifications consumed by many screens. For these, pass an explicit `path`:
+Some streams don't belong to any single page — global metrics, app-wide notifications. Pass an explicit `path`:
 
 ```typescript
 // app/streams/metrics.ts
 import { createEventStream } from "@mauroandre/velojs";
+import { authMiddleware } from "../middlewares/auth.js";
 
-export const metricsStream = createEventStream<Metric[]>({
+export const containerMetrics = createEventStream<Metric[]>({
     path: "/api/metrics/containers",
+    middlewares: [authMiddleware],  // explicit, since not in a route
 });
 ```
 
-The route registers itself when the file is imported on the server.
+**When to use:** consumed by multiple unrelated pages, doesn't belong to one.
 
-**When to use:** the stream is consumed by multiple unrelated pages and doesn't belong to one.
+## Three ways to emit events
 
-## Configuration
+### Reactive — call `emit()` from anywhere (most common)
 
-`createEventStream` accepts these options:
-
-| Option | Type | Description |
-|--------|------|-------------|
-| `path` | `string` | (Standalone only) Explicit URL path for the SSE endpoint |
-| `channel` | `(c: Context) => string` | Extract a channel ID from the request — subscribers only get events for their channel |
-| `snapshot` | `(channel) => TSnapshot \| undefined` | Returns the current state to send on connect (and reconnect) |
-| `closeOn` | `(event: TEvent) => boolean` | Returns `true` to close the SSE connection after this event |
-| `heartbeatMs` | `number \| false` | Heartbeat interval in ms (default: `20000`). Set to `false` to disable |
-| `middlewares` | `MiddlewareHandler[]` | (Standalone only) Hono middlewares applied to the SSE route |
-
-Each is explained in detail below.
-
-## Channels — sending events to specific subscribers
-
-Most real-time features are scoped to a specific resource: a deploy ID, a user ID, a room ID. Channels let you target specific subscribers without making them filter on the client.
+The service does its work and calls `.emit()` whenever something happens:
 
 ```typescript
-export const stream_deploy = createEventStream<DeployState>({
-    // Extract channel from URL query: ?channel=app-123
-    channel: (c) => c.req.query("channel") ?? "",
+import { stream_progress } from "./Deploy.js";
+
+export async function runDeploy(id: string) {
+    stream_progress.emit(id, { step: "building", status: "running" }, { snapshot: true });
+    // ... build
+    stream_progress.emit(id, { step: "uploading", status: "running" }, { snapshot: true });
+    // ... upload
+    stream_progress.emit(id, { step: "done", status: "success" }, { snapshot: true });
+    stream_progress.close(id);
+}
+```
+
+This is the right pattern when emission is **caused by application logic** — a deploy starts, a payment confirms, a backup finishes.
+
+### Source-driven — let the framework call your producer
+
+For streams that **continuously generate data** (polling metrics, listening to a global event bus), pass a `source` function. The framework only invokes it while there are active subscribers.
+
+```typescript
+import { createEventStream, poll } from "@mauroandre/velojs";
+
+export const stream_workerMetrics = createEventStream<WorkerMetrics[]>({
+    source: poll({
+        intervalMs: 3000,
+        tick: async (emit) => {
+            const { collectMetrics } = await import("./metrics.service.js");
+            emit(await collectMetrics());
+        },
+    }),
 });
-
-// Server emits to a specific channel:
-stream_deploy.emit("app-123", { step: "building", status: "running" });
-// → Only subscribers with channel "app-123" receive this event
 ```
 
-On the client, pass the channel to the hook:
+When the first user opens the metrics page, the polling starts. When the last user closes it, polling stops. **Zero CPU when nobody is watching.** No `setInterval` in your code, no manual wiring, no leaks.
+
+For event-driven (non-polling) sources, write the function yourself with the `AbortSignal`:
 
 ```typescript
-const { data } = useEventStream(stream_deploy, { channel: "app-123" });
-```
-
-The hook automatically appends `?channel=app-123` to the URL.
-
-### Without channels — broadcast to everyone
-
-Skip the `channel` option for a broadcast stream — every connected client receives every event. Useful for global state like live metrics:
-
-```typescript
-export const metricsStream = createEventStream<Metric[]>({
-    path: "/api/metrics",
+export const stream_busEvents = createEventStream<BusEvent>({
+    source: async (emit, { abortSignal }) => {
+        const handler = (e: BusEvent) => emit(e);
+        bus.on("event", handler);
+        abortSignal.addEventListener("abort", () => bus.off("event", handler));
+        await new Promise((r) => abortSignal.addEventListener("abort", r));
+    },
 });
-
-// Sends to all subscribers
-metricsStream.emit(currentMetrics);
 ```
 
-## Snapshots — instant state on connect
+The `AbortSignal` fires when the last subscriber disconnects. Your code uses it to clean up listeners and exit gracefully.
 
-What happens if the user connects in the **middle** of an ongoing process? Without snapshots, they see "loading..." until the next event fires (which could be 30 seconds away).
+> **Anti-pattern**: ignoring `abortSignal` keeps your producer running forever, leaking resources every time someone opens and closes the page. Only do this if the producer is truly meant to run independently of UI (rare).
 
-Snapshots solve this by sending the current state immediately on connect:
+### Stateful snapshot — for state-machine patterns
+
+When **each emit is a complete state** (deploy progress, migration status), use the `snapshot` callback. It returns the current state to send on connect:
 
 ```typescript
 const activeDeploys = new Map<string, DeployState>();
 
 export const stream_deploy = createEventStream<DeployState>({
-    channel: (c) => c.req.query("channel") ?? "",
     snapshot: (channel) => activeDeploys.get(channel ?? ""),
 });
+
+// In service:
+function updateDeploy(id: string, state: DeployState) {
+    activeDeploys.set(id, state);
+    stream_deploy.emit(id, state);  // no { snapshot: true } needed
+}
 ```
 
-Now, when a client connects to channel `"app-123"`:
-1. Server immediately sends a `snapshot` event with `activeDeploys.get("app-123")`
-2. Then sends every new event as it happens
+Use this when the snapshot type is different from the event type, or when you only care about the **latest** state, not the full history.
 
-On the client, the hook exposes both signals:
+## Configuration
+
+`createEventStream` accepts these options — all optional:
+
+| Option | Type | Description |
+|--------|------|-------------|
+| `path` | `string` | (Standalone only) Explicit URL path for the SSE endpoint |
+| `channel` | `(c: Context) => string` | Extract a channel ID from the request. Defaults to `?channel=...` query param |
+| `snapshot` | `(channel) => TSnapshot` | Returns the current state on connect (state-machine pattern) |
+| `closeOn` | `(event: TEvent) => boolean` | Closes the SSE connection when this returns true for an emitted event |
+| `source` | `(emit, { abortSignal }) => Promise<void>` | Self-running producer that runs only while subscribed |
+| `retainMs` | `number` | Time (ms) the snapshot buffer is kept after `close()`. Default: `300000` (5 min) |
+| `heartbeatMs` | `number \| false` | Keep-alive heartbeat interval. Default: `20000` (20s). `false` to disable |
+| `middlewares` | `MiddlewareHandler[]` | (Standalone only) Hono middlewares applied to the SSE route |
+
+## Snapshots in depth
+
+There are **two snapshot mechanisms** for two different patterns:
+
+### Pattern A — Append (use `{ snapshot: true }` per emit)
+
+For logs, AI tokens, or anything where each emit is a small piece of a growing whole. The framework keeps a buffer per channel and sends it as a single snapshot to late subscribers.
 
 ```typescript
-const { data, snapshot } = useEventStream(stream_deploy, { channel: appId });
+export const stream_logs = createEventStream<string>();
 
-// snapshot.value — initial state on connect
-// data.value — latest event (after connect)
+stream_logs.emit("session-1", "Line 1", { snapshot: true });
+stream_logs.emit("session-1", "Line 2", { snapshot: true });
+// Late subscriber connects → receives ["Line 1", "Line 2"] as snapshot
 ```
 
-A common pattern: read snapshot first, then merge updates from `data`:
-
+On the client:
 ```typescript
-const currentState = data.value ?? snapshot.value;
+const { snapshot, data } = useEventStream(stream_logs, { channel: sessionId });
+// snapshot.value: string[] — all buffered lines
+// data.value: string — most recent line received after connect
 ```
 
-### Snapshots survive after the stream closes
+### Pattern B — Replace (use `snapshot: callback` config)
 
-Even after the stream closes (success or error), keep the state available for ~30 seconds. If the user refreshes the page right after a deploy completes, they should still see "Deploy succeeded", not a blank screen.
-
-```typescript
-// In your service, after the stream closes:
-setTimeout(() => activeDeploys.delete(deployId), 30000);
-```
-
-The `snapshot` function is called on every reconnect, so as long as the data is in the Map, the user sees it.
-
-### Two types: event vs snapshot
-
-Sometimes the snapshot has a different shape than individual events. For instance, events might be deltas (single log lines) while the snapshot is the accumulated buffer (array of all lines so far):
+For state-machine patterns where **each emit is the complete current state**. Only the latest matters. The callback returns whatever your application considers "the current state".
 
 ```typescript
-const sessions = new Map<string, string[]>();
+const deploys = new Map<string, DeployState>();
 
-export const stream_logs = createEventStream<string, string[]>({
-    //                                       ^^^^^^^^^^^^^^^
-    //                                       TEvent = string (single line)
-    //                                       TSnapshot = string[] (full history)
-    channel: (c) => c.req.param("sessionId"),
-    snapshot: (channel) => sessions.get(channel ?? ""),
+export const stream_deploy = createEventStream<DeployState>({
+    snapshot: (id) => deploys.get(id ?? ""),
 });
 
-// Service appends to buffer AND emits delta:
-const session = sessions.get(id)!;
-const line = "Connected to worker...";
-session.push(line);
-stream_logs.emit(id, line);
+// Late subscriber connects → snapshot.value = the latest DeployState
 ```
 
-On the client, you'd render the snapshot once, then append each new event:
+On the client:
+```typescript
+const { snapshot, data } = useEventStream(stream_deploy, { channel: deployId });
+// snapshot.value: DeployState — the latest snapshot returned by your callback
+// data.value: DeployState — most recent emitted state
+```
+
+### Snapshots survive after close
+
+When you call `stream.close(channel)`, the SSE connection closes for current subscribers but the **snapshot buffer persists for `retainMs`** (default 5 minutes). If a user refreshes the page right after a deploy fails, they still see "Deploy failed" — not a blank screen.
+
+After `retainMs`, the buffer is cleared. Adjust `retainMs` if you need longer (or shorter) retention.
+
+## Closing a stream
+
+There are **two ways** to close, for different needs:
+
+### `stream.close(channel?)` — imperative
+
+Call this when **your application** decides the stream is done. Useful for finally-blocks, manual close after a workflow finishes:
 
 ```typescript
-const { data, snapshot } = useEventStream(stream_logs, { channel: sessionId });
-
-const allLines = useSignal<string[]>([]);
-
-useEffect(() => {
-    if (snapshot.value) allLines.value = snapshot.value;
-}, [snapshot.value]);
-
-useEffect(() => {
-    if (data.value) allLines.value = [...allLines.value, data.value];
-}, [data.value]);
+try {
+    await runDeploy(id);
+} finally {
+    stream_deploy.close(id);  // always close, success or fail
+}
 ```
 
-## closeOn — auto-close on terminal events
+The current subscribers' `closed.value` becomes `true`. Subsequent `emit()` calls to that channel are ignored with a warning.
 
-Many streams have a clear "end" — a deploy succeeds or fails, a payment is confirmed, a backup finishes. You want the SSE connection to close automatically when that happens, instead of relying on the client to remember to call `close()`.
+### `closeOn` — declarative
+
+Configure a predicate. The framework closes automatically when an event matches:
 
 ```typescript
 export const stream_deploy = createEventStream<DeployState>({
@@ -238,76 +268,11 @@ export const stream_deploy = createEventStream<DeployState>({
 });
 ```
 
-When the server emits an event matching `closeOn`, it sends the event and then closes the connection. The client's `useEventStream` will set `closed.value = true`.
+Use this when the close decision is **a function of the event itself**, not external state.
 
-```typescript
-const { data, closed } = useEventStream(stream_deploy, { channel: appId });
+You can use either, both, or neither. They compose cleanly.
 
-if (closed.value) {
-    // Show "Deploy finished" message
-}
-```
-
-For streams that never close (live metrics, ongoing logs), simply omit `closeOn`.
-
-## Heartbeat — keeping connections alive through proxies
-
-Proxies and CDNs (Cloudflare, Nginx, AWS ALB) often close idle HTTP connections after 60–100 seconds. If your stream doesn't send anything for that long, the connection silently drops — and the client doesn't even know it's disconnected.
-
-VeloJS sends a `:heartbeat` SSE comment every 20 seconds by default to keep the connection warm:
-
-```typescript
-// Default: heartbeat every 20 seconds
-export const myStream = createEventStream({...});
-
-// Custom interval (e.g., 10 seconds for unstable networks)
-export const myStream = createEventStream({
-    heartbeatMs: 10000,
-});
-
-// Disable entirely (e.g., for short-lived streams)
-export const myStream = createEventStream({
-    heartbeatMs: false,
-});
-```
-
-Heartbeats are invisible to your application code — they don't trigger `data` updates, they just keep the pipe open.
-
-## Authentication and middlewares
-
-Streams declared with the `stream_*` convention **inherit middlewares** from their parent route nodes — the same way pages and actions do.
-
-```typescript
-// app/routes.tsx
-{
-    module: AdminLayout,
-    middlewares: [authMiddleware],
-    children: [
-        { path: "/deploy/:id", module: Deploy },
-    ],
-}
-```
-
-The `stream_progress` declared in `Deploy.tsx` is automatically protected by `authMiddleware`. If a client tries to connect without a valid session, the middleware rejects them with 401 before the stream even opens. No extra wiring needed.
-
-### Standalone streams: pass middlewares explicitly
-
-Standalone streams aren't part of the route tree, so they need middlewares declared directly:
-
-```typescript
-import { authMiddleware } from "../middlewares/auth.js";
-
-export const metricsStream = createEventStream<Metric[]>({
-    path: "/api/metrics/containers",
-    middlewares: [authMiddleware],
-});
-```
-
-The middlewares run before the SSE connection opens — exactly like middlewares on a regular Hono route. If the middleware short-circuits with `c.json(..., 401)`, the stream never starts.
-
-## The useEventStream hook
-
-The hook returns four signals:
+## The `useEventStream` hook
 
 ```typescript
 const { data, snapshot, closed, error } = useEventStream(stream, options);
@@ -316,128 +281,175 @@ const { data, snapshot, closed, error } = useEventStream(stream, options);
 | Signal | Type | Description |
 |--------|------|-------------|
 | `data` | `Signal<TEvent \| null>` | Latest event received from the server |
-| `snapshot` | `Signal<TSnapshot \| null>` | Initial state from the snapshot (if configured) |
-| `closed` | `Signal<boolean>` | `true` when the server closed the connection (via `closeOn`) |
-| `error` | `Signal<Error \| null>` | Set if there was a parse error or connection failure |
+| `snapshot` | `Signal<TSnapshot \| null>` | Initial state on connect (buffer or callback) |
+| `closed` | `Signal<boolean>` | `true` when server closed the stream (via `close()` or `closeOn`) |
+| `error` | `Signal<Error \| null>` | Set on parse or connection error |
 
-### Options
-
+Options:
 ```typescript
 useEventStream(stream, {
-    channel: "app-123",  // optional — only for streams with channel function
-    enabled: true,       // optional — set to false to skip opening the connection
+    channel: "app-123",  // sent as ?channel=app-123
+    enabled: true,       // skip the connection when false
 });
 ```
 
-The `enabled: false` option is useful when you want to wait for some condition before opening the connection:
+The hook handles `EventSource` lifecycle automatically: opens on mount, closes on unmount, re-opens with a fresh connection when `channel` changes.
+
+## Heartbeat
+
+VeloJS sends a `:heartbeat` SSE comment every 20 seconds by default. Without this, idle connections are closed by Cloudflare (~100s), Nginx (~60s), and AWS ALB (~60s) — and the client doesn't even notice.
+
+Configure if needed:
+```typescript
+createEventStream({ heartbeatMs: 10000 });   // every 10s
+createEventStream({ heartbeatMs: false });   // disabled
+```
+
+Heartbeats are invisible to your application — they just keep the pipe open.
+
+## Authentication and middlewares
+
+### Convention `stream_*`
+
+Streams declared with the `stream_*` convention **inherit middlewares** from parent route nodes:
 
 ```typescript
-const userId = useSignal<string | null>(null);
+// app/routes.tsx
+{
+    module: AdminLayout,
+    middlewares: [authMiddleware],
+    children: [
+        { path: "/deploy/:id", module: Deploy },  // stream_progress here is protected
+    ],
+}
+```
 
-const { data } = useEventStream(notificationsStream, {
-    enabled: userId.value !== null,
-    channel: userId.value ?? "",
+No extra wiring. The `stream_progress` declared in `Deploy.tsx` is automatically protected by `authMiddleware`. Unauthenticated clients get 401 before the SSE connection even opens.
+
+### Standalone
+
+Standalone streams aren't part of the route tree. Pass middlewares directly:
+
+```typescript
+export const containerMetrics = createEventStream<Metric[]>({
+    path: "/api/metrics/containers",
+    middlewares: [authMiddleware],  // ← required
 });
 ```
 
-### Lifecycle
-
-The hook handles everything automatically:
-- Opens an `EventSource` when the component mounts (or when `channel` changes)
-- Closes the connection when the component unmounts
-- Re-opens with a new connection if `channel` or `enabled` changes
-- Resets all signals to their initial state on each new connection
-
-You never need to call `EventSource.close()` manually.
+If the middleware short-circuits with `c.json(..., 401)`, the SSE never starts.
 
 ## Real-world patterns
 
 ### Pattern 1 — Replicated state machine
 
-The server maintains the authoritative state. Each event is the **complete** state, not a delta. Snapshots are trivial because state is always available.
-
-**Use cases:** deploy progress, migration progress, provisioning workflows.
+Server keeps the authoritative state. Each emit is the complete state.
 
 ```typescript
-const activeDeploys = new Map<string, DeployState>();
+const deploys = new Map<string, DeployState>();
 
 export const stream_deploy = createEventStream<DeployState>({
-    channel: (c) => c.req.query("channel") ?? "",
-    snapshot: (channel) => activeDeploys.get(channel ?? ""),
+    snapshot: (id) => deploys.get(id ?? ""),
     closeOn: (s) => s.status === "success" || s.status === "error",
 });
 
-// In the service:
-function updateDeploy(id: string, partial: Partial<DeployState>) {
-    const current = activeDeploys.get(id) ?? { step: "init", status: "running" };
-    const next = { ...current, ...partial };
-    activeDeploys.set(id, next);
-    stream_deploy.emit(id, next);
+function updateDeploy(id: string, state: DeployState) {
+    deploys.set(id, state);
+    stream_deploy.emit(id, state);
 }
 ```
+
+Use cases: deploy progress, migration status, provisioning workflows.
 
 ### Pattern 2 — Append-only log
 
-Events are individual lines or tokens. The snapshot is the accumulated buffer of everything sent so far.
-
-**Use cases:** worker bootstrap logs, AI token streaming, container logs.
+Each event is a delta. Snapshot is the accumulated buffer.
 
 ```typescript
-const logBuffers = new Map<string, string[]>();
+export const stream_logs = createEventStream<string>();
 
-export const stream_logs = createEventStream<string, string[]>({
-    channel: (c) => c.req.param("sessionId"),
-    snapshot: (channel) => logBuffers.get(channel ?? ""),
-    closeOn: (line) => line.startsWith("[done]") || line.startsWith("[error]"),
-});
-
-// In the service:
 function appendLog(sessionId: string, line: string) {
-    const buffer = logBuffers.get(sessionId) ?? [];
-    buffer.push(line);
-    logBuffers.set(sessionId, buffer);
-    stream_logs.emit(sessionId, line);
+    stream_logs.emit(sessionId, line, { snapshot: true });
+}
+
+function finishSession(sessionId: string) {
+    stream_logs.close(sessionId);
 }
 ```
 
-### Pattern 3 — Broadcast firehose
+Use cases: bootstrap logs, AI token streaming, container logs.
 
-No channel, no snapshot, never closes. Every connected client receives every event.
+### Pattern 3 — Polling broadcast
 
-**Use cases:** live metrics, presence indicators.
+No channel, no manual emit. The framework runs the producer only while subscribed.
 
 ```typescript
-// app/streams/metrics.ts
-export const containerMetrics = createEventStream<Metric[]>({
-    path: "/api/metrics/containers",
-    // No channel, no snapshot, no closeOn
-});
+import { poll } from "@mauroandre/velojs";
 
-// Periodic emission from a background job:
-setInterval(() => {
-    const metrics = collectMetrics();
-    containerMetrics.emit(metrics);
-}, 2000);
+export const stream_metrics = createEventStream<Metric[]>({
+    source: poll({
+        intervalMs: 3000,
+        tick: async (emit) => emit(await collectMetrics()),
+    }),
+});
 ```
+
+Use cases: live metrics, presence indicators.
+
+### Pattern 4 — Event-driven broadcast
+
+Listen to a global bus, emit when something happens.
+
+```typescript
+export const stream_notifications = createEventStream<Notification>({
+    source: async (emit, { abortSignal }) => {
+        const handler = (n: Notification) => emit(n);
+        notificationBus.on("new", handler);
+        abortSignal.addEventListener("abort", () => notificationBus.off("new", handler));
+        await new Promise((r) => abortSignal.addEventListener("abort", r));
+    },
+});
+```
+
+Use cases: cross-tab notifications, system-wide events.
 
 ## Frequently asked questions
 
-### Can I use this without `useEventStream` (raw `EventSource`)?
+### When does the source function run?
 
-Yes. The hook is just a convenience. You can construct the URL yourself and use `new EventSource(url)`. The framework still registers the route and handles emission.
+Only while there is at least one active SSE subscriber across any channel. As soon as the last subscriber disconnects, the `AbortSignal` fires. As soon as a new subscriber connects, the source is invoked fresh with a new signal.
+
+This means **zero CPU when nobody is watching**. You don't need to start/stop your polling job manually.
+
+### Can I emit before any subscribers exist?
+
+Yes — emits with `{ snapshot: true }` go to the buffer and reach the next subscriber. Emits without that flag are dropped (no listeners, nowhere to deliver). This is intentional: ephemeral events are for current observers only.
+
+### What happens if I call `emit` after `close()`?
+
+The emit is ignored and a warning is logged. After `retainMs`, the channel becomes "fresh" again — you can use the same channel ID for a new session.
+
+### Can I have multiple streams in the same module?
+
+Yes. Each `stream_*` export is its own SSE route:
+```typescript
+export const stream_progress = createEventStream<DeployState>();
+export const stream_logs = createEventStream<string>();
+// → /_event/.../progress and /_event/.../logs
+```
+
+### Does this work without `useEventStream` (raw EventSource)?
+
+Yes. The hook is just a convenience. You can construct the URL (`stream.__path` plus `?channel=...`) and use `new EventSource(url)`. The framework still handles routing and emission.
 
 ### What about WebSocket?
 
-VeloJS doesn't have first-class WebSocket helpers because most use cases (~90%) are server-to-client only, and SSE handles those better. For the rare cases where you need bidirectional (interactive terminals, live cursor positions), use `onServer` to access the raw HTTP server and attach a WebSocket library directly.
+VeloJS doesn't include WebSocket helpers because most real-time use cases (~90%) are server-to-client only, where SSE is simpler. For bidirectional needs (interactive terminals, live cursors), use `onServer` to attach a WebSocket library directly.
 
-### How many concurrent streams can the server handle?
+### How many concurrent subscribers can the server handle?
 
-SSE uses a long-lived HTTP connection per subscriber. Modern Node.js servers can comfortably handle thousands of concurrent SSE connections per process. If you need more, scale horizontally — VeloJS doesn't store state across connections (the framework's `Map` of listeners is per-process).
+Modern Node.js handles thousands of concurrent SSE connections per process. If you need more, scale horizontally — VeloJS state is per-process (the listener Map and buffers don't sync across instances).
 
 ### What happens during deploys when the server restarts?
 
-The browser's `EventSource` automatically reconnects when the connection drops. With snapshots configured, the client gets the current state immediately on reconnect, so the user experience is nearly seamless.
-
-### Does the client need any setup?
-
-No. The hook handles `EventSource` construction, event listeners, and cleanup. You just import the stream from the server file and pass it to `useEventStream`.
+The browser's `EventSource` auto-reconnects. With snapshots configured (callback or buffer), the client immediately sees the current state on reconnect, so the user experience is nearly seamless.

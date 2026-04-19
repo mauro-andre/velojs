@@ -16,8 +16,14 @@ export { defineConfig } from "./config.js";
 export { Scripts, Link } from "./components.js";
 
 // Event Streams (SSE)
-export { createEventStream } from "./events.js";
-export type { EventStream, EventStreamConfig } from "./events.js";
+export { createEventStream, poll } from "./events.js";
+export type {
+    EventStream,
+    EventStreamConfig,
+    EmitFn,
+    EmitOptions,
+    SourceFn,
+} from "./events.js";
 
 // Re-export Hono types
 export type { Context, MiddlewareHandler, Next } from "hono";

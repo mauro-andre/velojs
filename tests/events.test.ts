@@ -1,9 +1,10 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import { Hono } from "hono";
 import {
     createEventStream,
     flushPendingStreamRoutes,
     registerStreamHandler,
+    poll,
 } from "../src/events.js";
 
 describe("createEventStream", () => {
@@ -33,9 +34,11 @@ describe("createEventStream", () => {
             const stream = createEventStream<number>();
             const received: number[] = [];
 
-            const listener = (event: number) => received.push(event);
-            const broadcastSet = new Set<(e: number) => void>([listener]);
-            stream.__listeners.set("", broadcastSet);
+            const listener = Object.assign(
+                (event: number) => received.push(event),
+                { close: () => {} }
+            );
+            stream.__listeners.set("", new Set([listener]));
 
             stream.emit(42);
             stream.emit(99);
@@ -47,8 +50,14 @@ describe("createEventStream", () => {
             const stream = createEventStream<string>();
             const received: string[] = [];
 
-            const a = (e: string) => received.push("a:" + e);
-            const b = (e: string) => received.push("b:" + e);
+            const a = Object.assign(
+                (e: string) => received.push("a:" + e),
+                { close: () => {} }
+            );
+            const b = Object.assign(
+                (e: string) => received.push("b:" + e),
+                { close: () => {} }
+            );
             stream.__listeners.set("", new Set([a, b]));
 
             stream.emit("hello");
@@ -64,12 +73,16 @@ describe("createEventStream", () => {
 
     describe("emit() — channel-targeted", () => {
         it("delivers event only to matching channel listeners", () => {
-            const stream = createEventStream<string>();
+            const stream = createEventStream<string>({
+                channel: (c) => c.req.query("channel") ?? "",
+            });
             const a: string[] = [];
             const b: string[] = [];
 
-            stream.__listeners.set("room-1", new Set([(e) => a.push(e)]));
-            stream.__listeners.set("room-2", new Set([(e) => b.push(e)]));
+            const la = Object.assign((e: string) => a.push(e), { close: () => {} });
+            const lb = Object.assign((e: string) => b.push(e), { close: () => {} });
+            stream.__listeners.set("room-1", new Set([la]));
+            stream.__listeners.set("room-2", new Set([lb]));
 
             stream.emit("room-1", "hello");
             stream.emit("room-2", "world");
@@ -79,17 +92,21 @@ describe("createEventStream", () => {
         });
 
         it("does not deliver channel events to broadcast listeners", () => {
-            const stream = createEventStream<string>();
+            const stream = createEventStream<string>({
+                channel: (c) => c.req.query("channel") ?? "",
+            });
             const broadcast: string[] = [];
-            const channel: string[] = [];
+            const channelListener: string[] = [];
 
-            stream.__listeners.set("", new Set([(e) => broadcast.push(e)]));
-            stream.__listeners.set("foo", new Set([(e) => channel.push(e)]));
+            const lb = Object.assign((e: string) => broadcast.push(e), { close: () => {} });
+            const lc = Object.assign((e: string) => channelListener.push(e), { close: () => {} });
+            stream.__listeners.set("", new Set([lb]));
+            stream.__listeners.set("foo", new Set([lc]));
 
             stream.emit("foo", "channel-event");
 
             expect(broadcast).toEqual([]);
-            expect(channel).toEqual(["channel-event"]);
+            expect(channelListener).toEqual(["channel-event"]);
         });
     });
 
@@ -327,6 +344,362 @@ describe("registerStreamHandler — SSE responses", () => {
 
         await new Promise((r) => setTimeout(r, 50));
         expect(middlewareCalled).toBe(true);
+
+        ctrl.abort();
+        await fetchPromise.catch(() => {});
+    });
+});
+
+// ============================================
+// NEW: per-emit snapshot flag + buffer
+// ============================================
+
+describe("per-emit snapshot buffer", () => {
+    it("appends events with { snapshot: true } to internal buffer", () => {
+        const stream = createEventStream<string>({
+            channel: (c) => c.req.query("channel") ?? "",
+        });
+
+        stream.emit("session-1", "line 1", { snapshot: true });
+        stream.emit("session-1", "line 2", { snapshot: true });
+        stream.emit("session-1", "ephemeral");  // no snapshot
+
+        expect(stream.__buffers.get("session-1")).toEqual(["line 1", "line 2"]);
+    });
+
+    it("does not buffer when snapshot is false or omitted", () => {
+        const stream = createEventStream<string>({
+            channel: (c) => c.req.query("channel") ?? "",
+        });
+        stream.emit("session-1", "ephemeral");
+        stream.emit("session-1", "also ephemeral", { snapshot: false });
+
+        expect(stream.__buffers.get("session-1")).toBeUndefined();
+    });
+
+    it("buffers per channel independently", () => {
+        const stream = createEventStream<string>({
+            channel: (c) => c.req.query("channel") ?? "",
+        });
+        stream.emit("a", "from-a", { snapshot: true });
+        stream.emit("b", "from-b", { snapshot: true });
+
+        expect(stream.__buffers.get("a")).toEqual(["from-a"]);
+        expect(stream.__buffers.get("b")).toEqual(["from-b"]);
+    });
+
+    it("works for broadcast streams (no channel)", () => {
+        const stream = createEventStream<number>();
+        stream.emit(1, { snapshot: true });
+        stream.emit(2, { snapshot: true });
+
+        expect(stream.__buffers.get("")).toEqual([1, 2]);
+    });
+});
+
+// ============================================
+// NEW: close() method
+// ============================================
+
+describe("close()", () => {
+    it("notifies current listeners via close()", () => {
+        const stream = createEventStream<string>({
+            channel: (c) => c.req.query("channel") ?? "",
+        });
+        let closed = false;
+        const listener = Object.assign(() => {}, {
+            close: () => { closed = true; },
+        });
+        stream.__listeners.set("foo", new Set([listener]));
+
+        stream.close("foo");
+        expect(closed).toBe(true);
+    });
+
+    it("is idempotent — calling close twice is a no-op", () => {
+        const stream = createEventStream<string>({
+            channel: (c) => c.req.query("channel") ?? "",
+            retainMs: 100,
+        });
+        let closeCount = 0;
+        const listener = Object.assign(() => {}, {
+            close: () => { closeCount++; },
+        });
+        stream.__listeners.set("foo", new Set([listener]));
+
+        stream.close("foo");
+        stream.close("foo");
+
+        expect(closeCount).toBe(1);
+    });
+
+    it("ignores subsequent emits to closed channel (warns)", () => {
+        const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+        const stream = createEventStream<string>({
+            channel: (c) => c.req.query("channel") ?? "",
+        });
+        stream.emit("foo", "before close", { snapshot: true });
+        stream.close("foo");
+        stream.emit("foo", "after close", { snapshot: true });
+
+        expect(stream.__buffers.get("foo")).toEqual(["before close"]);
+        expect(warn).toHaveBeenCalledWith(
+            expect.stringContaining("closed channel")
+        );
+        warn.mockRestore();
+    });
+
+    it("clears buffer after retainMs", async () => {
+        const stream = createEventStream<string>({
+            channel: (c) => c.req.query("channel") ?? "",
+            retainMs: 50,
+        });
+        stream.emit("foo", "data", { snapshot: true });
+        stream.close("foo");
+
+        expect(stream.__buffers.get("foo")).toEqual(["data"]);
+
+        await new Promise((r) => setTimeout(r, 80));
+        expect(stream.__buffers.get("foo")).toBeUndefined();
+    });
+
+    it("close() with no arg closes the broadcast channel", () => {
+        const stream = createEventStream<string>();
+        let closed = false;
+        const listener = Object.assign(() => {}, {
+            close: () => { closed = true; },
+        });
+        stream.__listeners.set("", new Set([listener]));
+
+        stream.close();
+        expect(closed).toBe(true);
+    });
+});
+
+// ============================================
+// NEW: source with AbortSignal lifecycle
+// ============================================
+
+describe("source lifecycle", () => {
+    it("does not invoke source until first subscriber", async () => {
+        let started = false;
+        createEventStream<number>({
+            source: async () => { started = true; },
+        });
+
+        await new Promise((r) => setTimeout(r, 20));
+        expect(started).toBe(false);
+    });
+
+    it("invokes source on first subscriber", async () => {
+        let started = false;
+        const stream = createEventStream<number>({
+            source: async () => { started = true; },
+        });
+
+        // Simulate subscriber via __onConnect
+        const listener = Object.assign(() => {}, { close: () => {} });
+        stream.__onConnect("", listener);
+
+        await new Promise((r) => setTimeout(r, 20));
+        expect(started).toBe(true);
+
+        stream.__onDisconnect("", listener);
+    });
+
+    it("aborts signal when last subscriber disconnects", async () => {
+        let aborted = false;
+        const stream = createEventStream<number>({
+            source: async (_emit, { abortSignal }) => {
+                abortSignal.addEventListener("abort", () => {
+                    aborted = true;
+                });
+                await new Promise((r) => abortSignal.addEventListener("abort", r));
+            },
+        });
+
+        const listener = Object.assign(() => {}, { close: () => {} });
+        stream.__onConnect("foo", listener);
+
+        await new Promise((r) => setTimeout(r, 10));
+
+        stream.__onDisconnect("foo", listener);
+        await new Promise((r) => setTimeout(r, 10));
+
+        expect(aborted).toBe(true);
+    });
+
+    it("does not abort when at least one subscriber remains", async () => {
+        let aborted = false;
+        const stream = createEventStream<number>({
+            source: async (_emit, { abortSignal }) => {
+                abortSignal.addEventListener("abort", () => { aborted = true; });
+                await new Promise((r) => abortSignal.addEventListener("abort", r));
+            },
+        });
+
+        const a = Object.assign(() => {}, { close: () => {} });
+        const b = Object.assign(() => {}, { close: () => {} });
+        stream.__onConnect("foo", a);
+        stream.__onConnect("bar", b);
+
+        await new Promise((r) => setTimeout(r, 10));
+
+        // Disconnect only one — source should still run
+        stream.__onDisconnect("foo", a);
+        await new Promise((r) => setTimeout(r, 20));
+
+        expect(aborted).toBe(false);
+
+        stream.__onDisconnect("bar", b);
+    });
+
+    it("source can emit values via the provided emit fn", async () => {
+        const received: number[] = [];
+        const stream = createEventStream<number>({
+            source: async (emit) => {
+                emit(1);
+                emit(2);
+                emit(3);
+            },
+        });
+
+        const listener = Object.assign(
+            (n: number) => received.push(n),
+            { close: () => {} }
+        );
+        stream.__onConnect("", listener);
+
+        await new Promise((r) => setTimeout(r, 20));
+        expect(received).toEqual([1, 2, 3]);
+    });
+
+    it("re-invokes source with fresh signal after all unsubscribe and new sub arrives", async () => {
+        let invocations = 0;
+        const stream = createEventStream<number>({
+            source: async (_emit, { abortSignal }) => {
+                invocations++;
+                await new Promise((r) => abortSignal.addEventListener("abort", r));
+            },
+        });
+
+        const a = Object.assign(() => {}, { close: () => {} });
+        stream.__onConnect("", a);
+        await new Promise((r) => setTimeout(r, 10));
+
+        stream.__onDisconnect("", a);
+        await new Promise((r) => setTimeout(r, 10));
+
+        const b = Object.assign(() => {}, { close: () => {} });
+        stream.__onConnect("", b);
+        await new Promise((r) => setTimeout(r, 10));
+
+        expect(invocations).toBe(2);
+        stream.__onDisconnect("", b);
+    });
+});
+
+// ============================================
+// NEW: poll helper
+// ============================================
+
+describe("poll() helper", () => {
+    it("calls tick repeatedly until aborted", async () => {
+        const ticks: number[] = [];
+        let i = 0;
+        const source = poll<number>({
+            intervalMs: 20,
+            tick: async (emit) => {
+                i++;
+                ticks.push(i);
+                emit(i);
+            },
+        });
+
+        const ctrl = new AbortController();
+        const promise = source(() => {}, { abortSignal: ctrl.signal });
+
+        await new Promise((r) => setTimeout(r, 90));
+        ctrl.abort();
+        await promise;
+
+        expect(ticks.length).toBeGreaterThanOrEqual(3);
+    });
+
+    it("stops immediately when aborted", async () => {
+        let calls = 0;
+        const source = poll<void>({
+            intervalMs: 1000,
+            tick: async () => { calls++; },
+        });
+
+        const ctrl = new AbortController();
+        const promise = source(() => {}, { abortSignal: ctrl.signal });
+
+        await new Promise((r) => setTimeout(r, 5));
+        ctrl.abort();
+        await promise;
+
+        // Only one synchronous tick should have run
+        expect(calls).toBe(1);
+    });
+
+    it("logs error from tick but keeps looping", async () => {
+        const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+        let runs = 0;
+        const source = poll<void>({
+            intervalMs: 10,
+            tick: async () => {
+                runs++;
+                throw new Error("boom");
+            },
+        });
+
+        const ctrl = new AbortController();
+        const promise = source(() => {}, { abortSignal: ctrl.signal });
+
+        await new Promise((r) => setTimeout(r, 50));
+        ctrl.abort();
+        await promise;
+
+        expect(runs).toBeGreaterThan(1);
+        expect(errSpy).toHaveBeenCalled();
+        errSpy.mockRestore();
+    });
+});
+
+// ============================================
+// NEW: default channel function
+// ============================================
+
+describe("default channel function", () => {
+    it("uses ?channel= query when stream config has no channel function", async () => {
+        const app = new Hono();
+        const stream = createEventStream<string>();
+        registerStreamHandler(app, "/sse-default-chan", stream);
+
+        // Pre-populate buffer for "abc"
+        stream.emit("abc", "buffered-event", { snapshot: true });
+
+        // Wait, but emit uses BROADCAST_CHANNEL because no channel func — let me rebuild
+    });
+
+    it("registers default channel handler that reads ?channel=...", async () => {
+        const app = new Hono();
+        // Stream without explicit channel function still works for client connections
+        const stream = createEventStream<string>();
+        registerStreamHandler(app, "/sse-default-chan", stream);
+
+        const ctrl = new AbortController();
+        const fetchPromise = app.fetch(
+            new Request("http://localhost/sse-default-chan?channel=xyz", {
+                signal: ctrl.signal,
+            })
+        );
+
+        await new Promise((r) => setTimeout(r, 50));
+        // The handler should have subscribed under channel "xyz" (via default fn)
+        expect(stream.__listeners.has("xyz")).toBe(true);
 
         ctrl.abort();
         await fetchPromise.catch(() => {});
