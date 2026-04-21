@@ -11,6 +11,8 @@ for (const file of readdirSync(srcDir)) {
         entries[name] = resolve(srcDir, file);
     }
 }
+// Subpath entry: testing/index → dist/testing/index.js
+entries["testing/index"] = resolve(srcDir, "testing/index.ts");
 
 export default defineConfig({
     define: {

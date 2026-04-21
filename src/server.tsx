@@ -6,6 +6,7 @@ import { Router } from "wouter-preact";
 import type { ComponentType, VNode } from "preact";
 import type { RouteNode, RouteModule, LoaderArgs, AppRoutes } from "./types.js";
 import { AsyncLocalStorage } from "node:async_hooks";
+import { getAppContext } from "./app-context.js";
 
 // ============================================
 // ASYNC LOCAL STORAGE - Dados isolados por request
@@ -23,18 +24,18 @@ export const serverDataStorage = new AsyncLocalStorage<
 // ============================================
 
 type ServerCallback = (server: import("http").Server) => void;
-const serverCallbacks: ServerCallback[] = [];
 let activeServer: import("http").Server | null = null;
 
 export function onServer(fn: ServerCallback): void {
     if (activeServer) { fn(activeServer); return; }
-    serverCallbacks.push(fn);
+    getAppContext().serverCallbacks.push(fn);
 }
 
 function flushServerCallbacks(server: import("http").Server): void {
     activeServer = server;
-    for (const fn of serverCallbacks) fn(server);
-    serverCallbacks.length = 0;
+    const ctx = getAppContext();
+    for (const fn of ctx.serverCallbacks) fn(server);
+    ctx.serverCallbacks.length = 0;
 }
 
 // ============================================
@@ -50,10 +51,8 @@ export interface StartServerOptions {
 // ADD ROUTES - Permite registrar rotas custom
 // ============================================
 
-const pendingRoutes: Array<(app: Hono) => void | Promise<void>> = [];
-
 export function addRoutes(fn: (app: Hono) => void | Promise<void>): void {
-    pendingRoutes.push(fn);
+    getAppContext().pendingRoutes.push(fn);
 }
 
 // ============================================
@@ -353,7 +352,9 @@ export const createApp = async (routes: AppRoutes): Promise<Hono> => {
     }
 
     // Custom routes (registradas via addRoutes no server.tsx do app)
-    for (const fn of pendingRoutes) {
+    const ctx = getAppContext();
+    const pending = ctx.pendingRoutes.splice(0);
+    for (const fn of pending) {
         await fn(app);
     }
 

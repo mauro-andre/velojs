@@ -1188,6 +1188,60 @@ Hooks (`useParams`, `useQuery`, `usePathname`, `Loader`, `useLoader`) access thi
 
 ---
 
+## Testing
+
+VeloJS ships a backend testing toolkit at `@mauroandre/velojs/testing`. Spin up the app in memory, fire HTTP requests against the registered handlers, subscribe to event streams. No socket, no browser, no fragile mocks of framework internals.
+
+```typescript
+import { createTestApp } from "@mauroandre/velojs/testing";
+import { routes } from "../app/routes.js";
+import { stream_progress } from "../app/Deploy.js";
+import { action_startDeploy } from "../app/Deploy.js";
+
+const app = await createTestApp({
+    routes,
+    bootstrap: async () => { await connect(process.env.MONGO_URI!); },
+    getSessionCookie: async ({ user }) => ({ session: await sign(user) }),
+});
+
+// HTTP
+const res = await app.get("/api/health");
+
+// Convention helpers — pass the function, framework resolves the URL
+const data = await app.loader(homeLoader, { params: { id: "abc" } });
+await app.action(action_startDeploy, { body: { appId } });
+
+// Streams — TestSubscription with snapshot, next(), close, etc
+const sub = await app.subscribe(stream_progress, { channel: appId });
+expect(sub.status).toBe(200);
+const event = await sub.next({ timeoutMs: 2000 });
+
+// Auth — sub-client with cookies bound automatically
+const asAlice = app.as({ user: alice });
+await asAlice.subscribe(stream_progress, { channel: appId });
+
+await app.close();
+```
+
+**Prerequisite:** `vitest.config.ts` must include `veloPlugin()` so action/loader/stream metadata is injected.
+
+| API | Purpose |
+|-----|---------|
+| `createTestApp(options)` | Build isolated app with bootstrap + auth callback |
+| `app.get/post/put/patch/delete` | HTTP requests (cookies, headers, query, JSON/FormData body) |
+| `app.action(fn, opts)` | Invoke `action_*` by function reference |
+| `app.loader(fn, opts)` | Invoke `loader` and unwrap response data |
+| `app.subscribe(stream, opts)` | Subscribe to a stream; returns `TestSubscription` with `next/nextN/snapshot/close/closed` |
+| `app.as({ user })` | Sub-client with cookies bound to a user |
+| `app.sessionCookies({ user })` | Build cookies via `getSessionCookie` |
+| `app.mockContext(opts)` | Escape hatch — partial Hono Context for direct invocation |
+| `app.reset()` | Clear stream buffers/listeners between tests |
+| `app.close()` | Tear down everything (zero open handles guaranteed) |
+
+See [Testing docs](https://github.com/mauro-andre/velojs/blob/dev/site/docs/16-testing.md) for the full guide with patterns, isolation, and FAQ.
+
+---
+
 ## Subpath Exports
 
 | Import | Contents |
@@ -1197,6 +1251,7 @@ Hooks (`useParams`, `useQuery`, `usePathname`, `Loader`, `useLoader`) access thi
 | `@mauroandre/velojs/client` | `startClient` |
 | `@mauroandre/velojs/hooks` | `Loader`, `useLoader`, `useEventStream`, `useParams`, `useQuery`, `useNavigate`, `usePathname`, `touch` |
 | `@mauroandre/velojs/events` | `createEventStream`, `poll`, `EventStream`, `EventStreamConfig`, `EmitFn`, `EmitOptions`, `SourceFn`, `PerChannelSourceFn`, `ChannelResolver` (also re-exported from root) |
+| `@mauroandre/velojs/testing` | `createTestApp`, `TestApp`, `TestResponse`, `TestSubscription`, `CreateTestAppOptions`, `MockContextOptions` |
 | `@mauroandre/velojs/cookie` | `getCookie`, `setCookie`, `deleteCookie`, `getSignedCookie`, `setSignedCookie` |
 | `@mauroandre/velojs/factory` | `createMiddleware`, `createFactory` |
 | `@mauroandre/velojs/vite` | `veloPlugin` |

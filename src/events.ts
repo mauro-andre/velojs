@@ -29,6 +29,7 @@
  */
 
 import type { Context, Hono, MiddlewareHandler } from "hono";
+import { getAppContext, registerDisposer, unregisterDisposer } from "./app-context.js";
 
 // ============================================
 // TYPES
@@ -252,6 +253,8 @@ export interface EventStream<TEvent, TSnapshot = TEvent> {
     __onConnect(channelKey: string, listener: StreamListener<TEvent>): void;
     /** Internal: source lifecycle hook */
     __onDisconnect(channelKey: string, listener: StreamListener<TEvent>): void;
+    /** @internal Test-only: reset all transient state (buffers, listeners, controllers, timers). */
+    __reset(): void;
 }
 
 /** Internal listener — receives events and a close signal. */
@@ -272,11 +275,26 @@ const BROADCAST_CHANNEL = "";
 // PENDING ROUTES (standalone)
 // ============================================
 
-const pendingStreamRoutes: Array<(app: Hono) => void> = [];
-
 export function flushPendingStreamRoutes(app: Hono): void {
-    for (const fn of pendingStreamRoutes) fn(app);
-    pendingStreamRoutes.length = 0;
+    const ctx = getAppContext();
+    const pending = ctx.pendingStreamRoutes.splice(0);
+    for (const fn of pending) fn(app);
+}
+
+// ============================================
+// STREAM REGISTRY — for app.reset() in tests
+// ============================================
+
+/**
+ * Tracks every event stream created at runtime so test helpers can iterate
+ * and reset them between tests. Streams are objects, not values per-app, so
+ * the registry is process-global. `app.reset()` walks this set.
+ */
+const streamRegistry = new Set<EventStream<unknown, unknown>>();
+
+/** @internal Used by `@mauroandre/velojs/testing` to reset all streams. */
+export function getRegisteredStreams(): ReadonlySet<EventStream<unknown, unknown>> {
+    return streamRegistry;
 }
 
 // ============================================
@@ -466,14 +484,39 @@ export function createEventStream<TEvent, TSnapshot = TEvent>(
             totalSubscribers--;
             stopSourceIfIdle();
         },
+        __reset() {
+            // Notify subscribers and clear listeners
+            for (const set of listeners.values()) {
+                for (const l of set) {
+                    try { l.close(); } catch {}
+                }
+            }
+            listeners.clear();
+            buffers.clear();
+            closedChannels.clear();
+            // Clear pending retention timers
+            for (const t of cleanupTimers.values()) clearTimeout(t);
+            cleanupTimers.clear();
+            // Abort source / perChannelSources
+            if (sourceController) {
+                sourceController.abort();
+                sourceController = null;
+            }
+            for (const ctrl of perChannelControllers.values()) ctrl.abort();
+            perChannelControllers.clear();
+            totalSubscribers = 0;
+        },
     };
 
     // Standalone usage: register the route immediately via the pending queue
     if (config.path) {
-        pendingStreamRoutes.push((app) => {
+        getAppContext().pendingStreamRoutes.push((app) => {
             registerStreamHandler(app, config.path!, stream, config.middlewares ?? []);
         });
     }
+
+    // Register stream in the global registry so app.reset() can find it
+    streamRegistry.add(stream as EventStream<unknown, unknown>);
 
     return stream;
 }
