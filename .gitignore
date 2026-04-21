@@ -25,6 +25,8 @@ npm-debug.log*
 # Testing
 coverage/
 .nyc_output/
+tests/**/*.d.ts
+tests/**/*.js
 
 # Temporary
 *.tmp

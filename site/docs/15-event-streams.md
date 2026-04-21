@@ -224,10 +224,12 @@ Use this when the snapshot type is different from the event type, or when you on
 |--------|------|-------------|
 | `path` | `string` | (Standalone only) Explicit URL path for the SSE endpoint |
 | `broadcast` | `boolean` | If true, no channels — every emit goes to all subscribers. Default: false (channel-aware) |
-| `channel` | `(c: Context) => string` | Extract a channel ID from the request. Defaults to `?channel=...` query param. Ignored when `broadcast: true` |
+| `channel` | `(c) => string \| null \| Promise<...>` | Resolve channel ID from request. Sync or async. Return `null`/`undefined` to reject (403). Default: `?channel=...` query |
 | `snapshot` | `(channel) => TSnapshot` | Returns the current state on connect (state-machine pattern) |
 | `closeOn` | `(event: TEvent) => boolean` | Closes the SSE connection when this returns true for an emitted event |
-| `source` | `(emit, { abortSignal }) => Promise<void>` | Self-running producer that runs only while subscribed |
+| `source` | `(emit, { abortSignal }) => Promise<void>` | Self-running producer that runs only while subscribed (stream-wide) |
+| `perChannelSource` | `(channelKey, emit, { abortSignal }) => Promise<void>` | Per-channel producer. Mutually exclusive with `source` |
+| `bufferSize` | `number` | Max events kept in the snapshot buffer per channel (FIFO). Default: `Infinity` |
 | `retainMs` | `number` | Time (ms) the snapshot buffer is kept after `close()`. Default: `300000` (5 min) |
 | `heartbeatMs` | `number \| false` | Keep-alive heartbeat interval. Default: `20000` (20s). `false` to disable |
 | `middlewares` | `MiddlewareHandler[]` | (Standalone only) Hono middlewares applied to the SSE route |
@@ -349,6 +351,78 @@ createEventStream({ heartbeatMs: false });   // disabled
 
 Heartbeats are invisible to your application — they just keep the pipe open.
 
+## Per-channel sources (expensive resources per channel)
+
+Sometimes each channel needs its **own** producer — like an SSH connection per `(worker, container)` for log streaming, or a separate DB cursor per channel. Use `perChannelSource`:
+
+```typescript
+export const stream_logs = createEventStream<string>({
+    channel: (c) => `${c.req.param("worker")}:${c.req.param("container")}`,
+    perChannelSource: async (channelKey, emit, { abortSignal }) => {
+        const [worker, container] = channelKey.split(":");
+        const conn = await ssh.connect(worker);
+        const sshStream = conn.exec(`podman logs -f ${container}`);
+
+        sshStream.on("data", (d) => emit(d.toString(), { snapshot: true }));
+        abortSignal.addEventListener("abort", () => {
+            sshStream.close();
+            conn.end();
+        });
+    },
+    bufferSize: 500,  // ring buffer for log replay
+});
+```
+
+The framework guarantees:
+- Invoked **once per channel**, when the first subscriber of that channel connects
+- `emit` is **bound to the current channel** — pass only the value
+- `abortSignal` fires when the **last subscriber of that channel** disconnects
+- Re-invoked with a fresh signal if a new subscriber connects later
+
+This means resources scale with **active channels**, not total channels. When nobody is watching a specific log, no SSH connection is open for it.
+
+> Mutually exclusive with `source`. `source` is for stream-wide producers (e.g., a global metrics poll); `perChannelSource` is for per-channel producers.
+
+## Async channel resolver (auth + ownership in one place)
+
+The `channel` resolver can be **async** and return `null`/`undefined` to reject the connection. This lets you combine channel extraction with authorization in a single function:
+
+```typescript
+export const stream_appLogs = createEventStream<string>({
+    channel: async (c) => {
+        const user = c.get("user");
+        const appId = c.req.query("channel");
+        const app = await getApp({ id: appId });
+
+        if (app?.owner !== user.id) return null; // → framework responds 403
+        return appId;
+    },
+});
+```
+
+- Returns a string → connection proceeds with that channel
+- Returns `null` or `undefined` → server responds **403 Forbidden**
+- Throws → server responds **500 Internal Server Error** (logged)
+
+Use this instead of composite channels like `${userId}:${appId}` when you want to keep the public channel ID clean.
+
+## Buffer size limits
+
+For long-running log streams, the snapshot buffer can grow without bound. Use `bufferSize` to cap it (FIFO ring — oldest entries dropped first):
+
+```typescript
+export const stream_logs = createEventStream<string>({
+    channel: (c) => c.req.query("channel") ?? "",
+    bufferSize: 500,  // keep only the last 500 lines
+});
+```
+
+- Applies **per channel** (each channel has its own ring)
+- Only affects emits with `{ snapshot: true }` — ephemeral emits aren't counted
+- Default: `Infinity` (existing behavior)
+
+Snapshot replay on reconnect sends whatever is currently in the buffer.
+
 ## Authentication and middlewares
 
 ### Convention `stream_*`
@@ -438,6 +512,26 @@ export const stream_metrics = createEventStream<Metric[]>({
 ```
 
 Use cases: live metrics, presence indicators.
+
+### Pattern 5 — Per-channel resource (SSH log tail, DB cursor, pub/sub topic)
+
+Each channel owns an expensive resource. Open on first subscriber, close on last.
+
+```typescript
+export const stream_containerLogs = createEventStream<string>({
+    channel: (c) => `${c.req.param("worker")}:${c.req.param("container")}`,
+    bufferSize: 500,
+    perChannelSource: async (key, emit, { abortSignal }) => {
+        const [worker, container] = key.split(":");
+        const conn = await ssh.connect(worker);
+        const stream = conn.exec(`podman logs -f --tail 100 ${container}`);
+        stream.on("data", (d) => emit(d.toString(), { snapshot: true }));
+        abortSignal.addEventListener("abort", () => { stream.close(); conn.end(); });
+    },
+});
+```
+
+Use cases: container logs, journalctl tail, per-resource metrics, Redis pub/sub by topic.
 
 ### Pattern 4 — Event-driven broadcast
 

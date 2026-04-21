@@ -76,6 +76,44 @@ export type SourceFn<TEvent> = (
     ctx: { abortSignal: AbortSignal }
 ) => void | Promise<void>;
 
+/**
+ * A per-channel producer function. Invoked when the **first** subscriber connects
+ * to a specific channel. Aborted when the **last** subscriber of that channel disconnects.
+ *
+ * The provided `emit` function is bound to the current channel — call it with just
+ * the event value (no need to pass the channel ID again).
+ *
+ * Example (per-channel SSH log stream):
+ * ```typescript
+ * perChannelSource: async (channelKey, emit, { abortSignal }) => {
+ *     const conn = await ssh.connect(...);
+ *     const stream = conn.exec(`podman logs -f ${channelKey}`);
+ *     stream.on("data", (d) => emit(d.toString(), { snapshot: true }));
+ *     abortSignal.addEventListener("abort", () => { stream.close(); conn.end(); });
+ * }
+ * ```
+ *
+ * Use this for resources that are **per-channel and expensive** (SSH connections,
+ * DB cursors, external pub/sub subscriptions). Mutually exclusive with `source`.
+ */
+export type PerChannelSourceFn<TEvent> = (
+    channelKey: string,
+    emit: (event: TEvent, options?: EmitOptions) => void,
+    ctx: { abortSignal: AbortSignal }
+) => void | Promise<void>;
+
+/**
+ * Async-capable channel resolver. Returns a channel ID, or `null`/`undefined`
+ * to reject the connection (framework responds 403).
+ *
+ * Useful for combining channel extraction with authorization in one place.
+ */
+export type ChannelResolver = (c: Context) =>
+    | string
+    | null
+    | undefined
+    | Promise<string | null | undefined>;
+
 export interface EventStreamConfig<TEvent, TSnapshot = TEvent> {
     /**
      * Explicit URL path for the SSE endpoint (standalone usage).
@@ -90,9 +128,12 @@ export interface EventStreamConfig<TEvent, TSnapshot = TEvent> {
      * When omitted, defaults to `c.req.query("channel") ?? ""` so client-side
      * `useEventStream(stream, { channel })` works out of the box.
      *
+     * Can be **async** — return a Promise to perform DB lookups, auth checks, etc.
+     * Return `null` or `undefined` to reject the connection (framework responds 403).
+     *
      * Ignored when `broadcast: true` is set.
      */
-    channel?: (c: Context) => string;
+    channel?: ChannelResolver;
 
     /**
      * If true, this stream has no channels — every emit goes to all subscribers.
@@ -144,8 +185,22 @@ export interface EventStreamConfig<TEvent, TSnapshot = TEvent> {
      * When the last subscriber disconnects, the AbortSignal fires.
      *
      * Use the `poll` helper for the common interval-based pattern.
+     *
+     * Mutually exclusive with `perChannelSource`.
      */
     source?: SourceFn<TEvent>;
+
+    /**
+     * Per-channel producer. Invoked when the **first** subscriber of a channel connects.
+     * Aborted when the **last** subscriber of that channel disconnects.
+     *
+     * Use this for resources that scale per channel (SSH connections, DB cursors,
+     * external pub/sub subscriptions). The `emit` provided is bound to the current
+     * channel — call it with just the value.
+     *
+     * Mutually exclusive with `source`.
+     */
+    perChannelSource?: PerChannelSourceFn<TEvent>;
 
     /**
      * Time (ms) the per-channel snapshot buffer is retained after `close()`.
@@ -153,6 +208,17 @@ export interface EventStreamConfig<TEvent, TSnapshot = TEvent> {
      * Default: 5 * 60 * 1000 (5 minutes).
      */
     retainMs?: number;
+
+    /**
+     * Maximum number of events kept in the per-channel snapshot buffer
+     * (only applies to `emit(..., { snapshot: true })`).
+     *
+     * When the buffer reaches this size, the oldest entries are dropped (FIFO ring).
+     * Use this to prevent memory growth in long-running log streams.
+     *
+     * Default: `Infinity` (no limit, current behavior).
+     */
+    bufferSize?: number;
 }
 
 export interface EventStream<TEvent, TSnapshot = TEvent> {
@@ -228,6 +294,15 @@ export function createEventStream<TEvent, TSnapshot = TEvent>(
         );
     }
 
+    // Sanity: source and perChannelSource are mutually exclusive
+    if (config.source && config.perChannelSource) {
+        throw new Error(
+            "[velojs] createEventStream: `source` and `perChannelSource` are mutually " +
+            "exclusive. Use `source` for stream-wide producers or `perChannelSource` " +
+            "for per-channel resources, not both."
+        );
+    }
+
     const listeners = new Map<string, Set<StreamListener<TEvent>>>();
     const buffers = new Map<string, TEvent[]>();
     const closedChannels = new Set<string>();
@@ -237,6 +312,9 @@ export function createEventStream<TEvent, TSnapshot = TEvent>(
     // aborted when last subscriber disappears.
     let sourceController: AbortController | null = null;
     let totalSubscribers = 0;
+
+    // Per-channel source lifecycle: one AbortController per active channel.
+    const perChannelControllers = new Map<string, AbortController>();
 
     const startSourceIfNeeded = () => {
         if (!config.source) return;
@@ -255,6 +333,34 @@ export function createEventStream<TEvent, TSnapshot = TEvent>(
         if (!sourceController) return;
         sourceController.abort();
         sourceController = null;
+    };
+
+    const startPerChannelSource = (channelKey: string) => {
+        if (!config.perChannelSource) return;
+        if (perChannelControllers.has(channelKey)) return; // already running
+        const ctrl = new AbortController();
+        perChannelControllers.set(channelKey, ctrl);
+
+        // Channel-bound emit: user passes only the value
+        const channelEmit = (event: TEvent, options?: EmitOptions) => {
+            (stream.emit as any)(channelKey, event, options);
+        };
+
+        Promise.resolve(
+            config.perChannelSource(channelKey, channelEmit, { abortSignal: ctrl.signal })
+        ).catch((err) => {
+            console.error(
+                `[velojs] perChannelSource threw for channel "${channelKey}":`,
+                err
+            );
+        });
+    };
+
+    const stopPerChannelSource = (channelKey: string) => {
+        const ctrl = perChannelControllers.get(channelKey);
+        if (!ctrl) return;
+        ctrl.abort();
+        perChannelControllers.delete(channelKey);
     };
 
     function emit(
@@ -288,10 +394,14 @@ export function createEventStream<TEvent, TSnapshot = TEvent>(
             return;
         }
 
-        // Append to buffer if snapshot:true
+        // Append to buffer if snapshot:true (with optional FIFO ring limit)
         if (options?.snapshot) {
             const buffer = buffers.get(channel) ?? [];
             buffer.push(event);
+            const limit = config.bufferSize ?? Infinity;
+            if (buffer.length > limit) {
+                buffer.splice(0, buffer.length - limit);
+            }
             buffers.set(channel, buffer);
         }
 
@@ -335,6 +445,7 @@ export function createEventStream<TEvent, TSnapshot = TEvent>(
         __path: config.path,
         __onConnect(channelKey: string, listener: StreamListener<TEvent>) {
             let set = listeners.get(channelKey);
+            const wasFirstInChannel = !set || set.size === 0;
             if (!set) {
                 set = new Set();
                 listeners.set(channelKey, set);
@@ -342,12 +453,16 @@ export function createEventStream<TEvent, TSnapshot = TEvent>(
             set.add(listener);
             totalSubscribers++;
             startSourceIfNeeded();
+            if (wasFirstInChannel) startPerChannelSource(channelKey);
         },
         __onDisconnect(channelKey: string, listener: StreamListener<TEvent>) {
             const set = listeners.get(channelKey);
             if (!set) return;
             set.delete(listener);
-            if (set.size === 0) listeners.delete(channelKey);
+            if (set.size === 0) {
+                listeners.delete(channelKey);
+                stopPerChannelSource(channelKey);
+            }
             totalSubscribers--;
             stopSourceIfIdle();
         },
@@ -432,9 +547,24 @@ export function registerStreamHandler<TEvent, TSnapshot>(
     const handler = async (c: Context) => {
         const { streamSSE } = await import("hono/streaming");
 
-        const channelKey = stream.__config.broadcast
-            ? BROADCAST_CHANNEL
-            : (stream.__config.channel ?? defaultChannelFn)(c);
+        // Resolve channel (may be async, may reject the connection)
+        let channelKey: string;
+        if (stream.__config.broadcast) {
+            channelKey = BROADCAST_CHANNEL;
+        } else {
+            const resolver = stream.__config.channel ?? defaultChannelFn;
+            let resolved: string | null | undefined;
+            try {
+                resolved = await resolver(c);
+            } catch (err) {
+                console.error("[velojs] channel resolver threw:", err);
+                return c.json({ error: "internal" }, 500);
+            }
+            if (resolved == null) {
+                return c.json({ error: "forbidden" }, 403);
+            }
+            channelKey = resolved;
+        }
 
         const heartbeatMs = stream.__config.heartbeatMs;
         const heartbeatInterval =

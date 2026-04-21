@@ -629,10 +629,12 @@ export const stream_deploy = createEventStream<DeployState>({
 |--------|------|-------------|
 | `path` | `string` | (Standalone) Explicit URL path |
 | `broadcast` | `boolean` | If true, every emit goes to all subscribers (no channels). Default: false |
-| `channel` | `(c) => string` | Extract channel ID. Default: `?channel=...` query param. Ignored when `broadcast: true` |
+| `channel` | `(c) => string \| null \| Promise<...>` | Resolve channel ID. Sync or async. Return `null`/`undefined` to reject (403). Default: `?channel=...` |
 | `snapshot` | `(channel) => TSnapshot` | Returns current state on connect (state-machine pattern) |
 | `closeOn` | `(event) => boolean` | Closes SSE when matching event is sent (declarative) |
-| `source` | `(emit, { abortSignal }) => Promise<void>` | Self-running producer, only runs while subscribed |
+| `source` | `(emit, { abortSignal }) => Promise<void>` | Stream-wide producer, only runs while subscribed |
+| `perChannelSource` | `(channelKey, emit, { abortSignal }) => Promise<void>` | Per-channel producer. Mutually exclusive with `source` |
+| `bufferSize` | `number` | Max entries kept in snapshot buffer per channel (FIFO). Default `Infinity` |
 | `retainMs` | `number` | Buffer retention after `close()`. Default `300000` (5 min) |
 | `heartbeatMs` | `number \| false` | Heartbeat interval. Default `20000` (20s). `false` to disable |
 | `middlewares` | `MiddlewareHandler[]` | (Standalone) Hono middlewares for the SSE route |
@@ -697,6 +699,53 @@ For interval-based polling sources. Wraps your tick function in a loop that resp
 ```typescript
 poll({ intervalMs: 3000, tick: async (emit) => emit(await collect()) })
 ```
+
+### Per-channel sources
+
+Use `perChannelSource` for resources that scale per channel (SSH connections, DB cursors, pub/sub topics). Invoked once per channel on first subscriber, aborted when the last subscriber of that channel leaves.
+
+```typescript
+export const stream_logs = createEventStream<string>({
+    channel: (c) => `${c.req.param("worker")}:${c.req.param("container")}`,
+    bufferSize: 500,
+    perChannelSource: async (key, emit, { abortSignal }) => {
+        const conn = await ssh.connect(...);
+        const stream = conn.exec(`podman logs -f ${key.split(":")[1]}`);
+        stream.on("data", (d) => emit(d.toString(), { snapshot: true }));
+        abortSignal.addEventListener("abort", () => { stream.close(); conn.end(); });
+    },
+});
+```
+
+Mutually exclusive with `source`.
+
+### Async channel resolver (auth + ownership)
+
+The `channel` resolver can be async and reject the connection by returning `null`/`undefined`:
+
+```typescript
+createEventStream({
+    channel: async (c) => {
+        const user = c.get("user");
+        const appId = c.req.query("channel");
+        const app = await getApp({ id: appId });
+        if (app?.owner !== user.id) return null; // → 403
+        return appId;
+    },
+});
+```
+
+Combines auth and channel extraction in one place.
+
+### Buffer size limits
+
+Cap memory usage of long-running log streams via FIFO ring:
+
+```typescript
+createEventStream<string>({ bufferSize: 500 });  // keep last 500 entries per channel
+```
+
+Only affects emits with `{ snapshot: true }`.
 
 ---
 
@@ -1143,11 +1192,11 @@ Hooks (`useParams`, `useQuery`, `usePathname`, `Loader`, `useLoader`) access thi
 
 | Import | Contents |
 |--------|----------|
-| `@mauroandre/velojs` | Types (`AppRoutes`, `ActionArgs`, `LoaderArgs`, `Metadata`, `EventStream`, `EventStreamConfig`, `EmitFn`, `EmitOptions`, `SourceFn`), `Scripts`, `Link`, `createEventStream`, `poll`, `defineConfig` |
+| `@mauroandre/velojs` | Types (`AppRoutes`, `ActionArgs`, `LoaderArgs`, `Metadata`, `EventStream`, `EventStreamConfig`, `EmitFn`, `EmitOptions`, `SourceFn`, `PerChannelSourceFn`, `ChannelResolver`), `Scripts`, `Link`, `createEventStream`, `poll`, `defineConfig` |
 | `@mauroandre/velojs/server` | `startServer`, `createApp`, `addRoutes`, `onServer`, `serverDataStorage` |
 | `@mauroandre/velojs/client` | `startClient` |
 | `@mauroandre/velojs/hooks` | `Loader`, `useLoader`, `useEventStream`, `useParams`, `useQuery`, `useNavigate`, `usePathname`, `touch` |
-| `@mauroandre/velojs/events` | `createEventStream`, `poll`, `EventStream`, `EventStreamConfig`, `EmitFn`, `EmitOptions`, `SourceFn` (also re-exported from root) |
+| `@mauroandre/velojs/events` | `createEventStream`, `poll`, `EventStream`, `EventStreamConfig`, `EmitFn`, `EmitOptions`, `SourceFn`, `PerChannelSourceFn`, `ChannelResolver` (also re-exported from root) |
 | `@mauroandre/velojs/cookie` | `getCookie`, `setCookie`, `deleteCookie`, `getSignedCookie`, `setSignedCookie` |
 | `@mauroandre/velojs/factory` | `createMiddleware`, `createFactory` |
 | `@mauroandre/velojs/vite` | `veloPlugin` |

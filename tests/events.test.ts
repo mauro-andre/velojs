@@ -204,7 +204,7 @@ describe("createEventStream", () => {
             expect(middlewareCalled).toBe(true);
 
             ctrl.abort();
-            await fetchPromise.catch(() => {});
+            await Promise.resolve(fetchPromise).catch(() => {});
         });
 
         it("middleware can block the connection (e.g., 401)", async () => {
@@ -353,7 +353,7 @@ describe("registerStreamHandler — SSE responses", () => {
         expect(stream.__listeners.has("foo")).toBe(true);
 
         ctrl.abort();
-        await fetchPromise.catch(() => {});
+        await Promise.resolve(fetchPromise).catch(() => {});
     });
 
     it("applies middlewares when provided", async () => {
@@ -376,7 +376,7 @@ describe("registerStreamHandler — SSE responses", () => {
         expect(middlewareCalled).toBe(true);
 
         ctrl.abort();
-        await fetchPromise.catch(() => {});
+        await Promise.resolve(fetchPromise).catch(() => {});
     });
 });
 
@@ -722,7 +722,7 @@ describe("default channel function", () => {
         expect(stream.__listeners.has("xyz")).toBe(true);
 
         ctrl.abort();
-        await fetchPromise.catch(() => {});
+        await Promise.resolve(fetchPromise).catch(() => {});
     });
 });
 
@@ -828,5 +828,341 @@ describe("end-to-end: zero-config channel-aware", () => {
 
         ctrl.abort();
         await reader.cancel().catch(() => {});
+    });
+});
+
+// ============================================
+// NEW: bufferSize ring (FIFO)
+// ============================================
+
+describe("bufferSize (FIFO ring buffer)", () => {
+    it("keeps only the last N events when bufferSize is set", () => {
+        const stream = createEventStream<number>({
+            channel: (c) => c.req.query("channel") ?? "",
+            bufferSize: 3,
+        });
+
+        for (let i = 0; i < 10; i++) {
+            stream.emit("logs", i, { snapshot: true });
+        }
+
+        expect(stream.__buffers.get("logs")).toEqual([7, 8, 9]);
+    });
+
+    it("default Infinity preserves all events (existing behavior)", () => {
+        const stream = createEventStream<number>({
+            channel: (c) => c.req.query("channel") ?? "",
+        });
+        for (let i = 0; i < 100; i++) {
+            stream.emit("logs", i, { snapshot: true });
+        }
+        expect(stream.__buffers.get("logs")?.length).toBe(100);
+    });
+
+    it("applies per channel independently", () => {
+        const stream = createEventStream<string>({
+            channel: (c) => c.req.query("channel") ?? "",
+            bufferSize: 2,
+        });
+        stream.emit("a", "a1", { snapshot: true });
+        stream.emit("a", "a2", { snapshot: true });
+        stream.emit("a", "a3", { snapshot: true });
+        stream.emit("b", "b1", { snapshot: true });
+
+        expect(stream.__buffers.get("a")).toEqual(["a2", "a3"]);
+        expect(stream.__buffers.get("b")).toEqual(["b1"]);
+    });
+
+    it("does not affect ephemeral emits (snapshot:false)", () => {
+        const stream = createEventStream<number>({
+            channel: (c) => c.req.query("channel") ?? "",
+            bufferSize: 2,
+        });
+        for (let i = 0; i < 5; i++) {
+            stream.emit("x", i); // no snapshot
+        }
+        expect(stream.__buffers.get("x")).toBeUndefined();
+    });
+});
+
+// ============================================
+// NEW: async channel resolver
+// ============================================
+
+describe("async channel resolver", () => {
+    it("awaits an async channel function and uses the resolved value", async () => {
+        const app = new Hono();
+        const stream = createEventStream<string>({
+            channel: async (c) => {
+                await new Promise((r) => setTimeout(r, 10));
+                return c.req.query("channel") ?? "";
+            },
+        });
+        registerStreamHandler(app, "/sse-async-chan", stream);
+
+        const ctrl = new AbortController();
+        const fetchPromise = app.fetch(
+            new Request("http://localhost/sse-async-chan?channel=hello", {
+                signal: ctrl.signal,
+            })
+        );
+
+        await new Promise((r) => setTimeout(r, 60));
+        expect(stream.__listeners.has("hello")).toBe(true);
+
+        ctrl.abort();
+        await Promise.resolve(fetchPromise).catch(() => {});
+    });
+
+    it("responds 403 when resolver returns null", async () => {
+        const app = new Hono();
+        const stream = createEventStream<string>({
+            channel: async () => null,
+        });
+        registerStreamHandler(app, "/sse-deny", stream);
+
+        const res = await app.fetch(new Request("http://localhost/sse-deny"));
+        expect(res.status).toBe(403);
+    });
+
+    it("responds 403 when resolver returns undefined", async () => {
+        const app = new Hono();
+        const stream = createEventStream<string>({
+            channel: async () => undefined,
+        });
+        registerStreamHandler(app, "/sse-deny-undef", stream);
+
+        const res = await app.fetch(new Request("http://localhost/sse-deny-undef"));
+        expect(res.status).toBe(403);
+    });
+
+    it("responds 500 when resolver throws", async () => {
+        const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+        const app = new Hono();
+        const stream = createEventStream<string>({
+            channel: async () => {
+                throw new Error("boom");
+            },
+        });
+        registerStreamHandler(app, "/sse-err", stream);
+
+        const res = await app.fetch(new Request("http://localhost/sse-err"));
+        expect(res.status).toBe(500);
+        expect(errSpy).toHaveBeenCalled();
+        errSpy.mockRestore();
+    });
+
+    it("supports sync resolver returning string (backward compat)", async () => {
+        const app = new Hono();
+        const stream = createEventStream<string>({
+            channel: (c) => c.req.query("channel") ?? "",
+        });
+        registerStreamHandler(app, "/sse-sync-chan", stream);
+
+        const ctrl = new AbortController();
+        const fetchPromise = app.fetch(
+            new Request("http://localhost/sse-sync-chan?channel=foo", {
+                signal: ctrl.signal,
+            })
+        );
+
+        await new Promise((r) => setTimeout(r, 30));
+        expect(stream.__listeners.has("foo")).toBe(true);
+
+        ctrl.abort();
+        await Promise.resolve(fetchPromise).catch(() => {});
+    });
+
+    it("does not subscribe a listener when rejected", async () => {
+        const app = new Hono();
+        const stream = createEventStream<string>({
+            channel: async () => null,
+        });
+        registerStreamHandler(app, "/sse-deny-no-sub", stream);
+
+        await app.fetch(new Request("http://localhost/sse-deny-no-sub"));
+        expect(stream.__listeners.size).toBe(0);
+    });
+});
+
+// ============================================
+// NEW: perChannelSource lifecycle
+// ============================================
+
+describe("perChannelSource", () => {
+    it("does not invoke source until first subscriber on a channel", async () => {
+        let invoked = false;
+        createEventStream<string>({
+            channel: (c) => c.req.query("channel") ?? "",
+            perChannelSource: async () => {
+                invoked = true;
+            },
+        });
+
+        await new Promise((r) => setTimeout(r, 20));
+        expect(invoked).toBe(false);
+    });
+
+    it("invokes source with the channelKey when first subscriber connects", async () => {
+        const invocations: string[] = [];
+        const stream = createEventStream<string>({
+            channel: (c) => c.req.query("channel") ?? "",
+            perChannelSource: async (channelKey) => {
+                invocations.push(channelKey);
+            },
+        });
+
+        const a = Object.assign(() => {}, { close: () => {} });
+        stream.__onConnect("alpha", a);
+        await new Promise((r) => setTimeout(r, 10));
+
+        expect(invocations).toEqual(["alpha"]);
+
+        stream.__onDisconnect("alpha", a);
+    });
+
+    it("invokes source separately for each new channel", async () => {
+        const invocations: string[] = [];
+        const stream = createEventStream<string>({
+            channel: (c) => c.req.query("channel") ?? "",
+            perChannelSource: async (channelKey) => {
+                invocations.push(channelKey);
+            },
+        });
+
+        const a = Object.assign(() => {}, { close: () => {} });
+        const b = Object.assign(() => {}, { close: () => {} });
+        stream.__onConnect("alpha", a);
+        stream.__onConnect("beta", b);
+        await new Promise((r) => setTimeout(r, 10));
+
+        expect(invocations.sort()).toEqual(["alpha", "beta"]);
+
+        stream.__onDisconnect("alpha", a);
+        stream.__onDisconnect("beta", b);
+    });
+
+    it("does NOT invoke source again if same channel gets a second subscriber", async () => {
+        const invocations: string[] = [];
+        const stream = createEventStream<string>({
+            channel: (c) => c.req.query("channel") ?? "",
+            perChannelSource: async (channelKey, _emit, { abortSignal }) => {
+                invocations.push(channelKey);
+                await new Promise((r) => abortSignal.addEventListener("abort", r));
+            },
+        });
+
+        const a = Object.assign(() => {}, { close: () => {} });
+        const b = Object.assign(() => {}, { close: () => {} });
+        stream.__onConnect("ch", a);
+        await new Promise((r) => setTimeout(r, 10));
+        stream.__onConnect("ch", b);
+        await new Promise((r) => setTimeout(r, 10));
+
+        expect(invocations).toEqual(["ch"]);
+
+        stream.__onDisconnect("ch", a);
+        stream.__onDisconnect("ch", b);
+    });
+
+    it("aborts the per-channel signal when last subscriber of THAT channel leaves", async () => {
+        const aborted: string[] = [];
+        const stream = createEventStream<string>({
+            channel: (c) => c.req.query("channel") ?? "",
+            perChannelSource: async (channelKey, _emit, { abortSignal }) => {
+                abortSignal.addEventListener("abort", () => aborted.push(channelKey));
+                await new Promise((r) => abortSignal.addEventListener("abort", r));
+            },
+        });
+
+        const a = Object.assign(() => {}, { close: () => {} });
+        const b = Object.assign(() => {}, { close: () => {} });
+        stream.__onConnect("alpha", a);
+        stream.__onConnect("beta", b);
+        await new Promise((r) => setTimeout(r, 10));
+
+        // Disconnect alpha — only its source should abort
+        stream.__onDisconnect("alpha", a);
+        await new Promise((r) => setTimeout(r, 10));
+        expect(aborted).toEqual(["alpha"]);
+
+        // Now disconnect beta — its source aborts too
+        stream.__onDisconnect("beta", b);
+        await new Promise((r) => setTimeout(r, 10));
+        expect(aborted.sort()).toEqual(["alpha", "beta"]);
+    });
+
+    it("re-invokes source if same channel gets a fresh subscriber after all left", async () => {
+        const invocations: string[] = [];
+        const stream = createEventStream<string>({
+            channel: (c) => c.req.query("channel") ?? "",
+            perChannelSource: async (channelKey, _emit, { abortSignal }) => {
+                invocations.push(channelKey);
+                await new Promise((r) => abortSignal.addEventListener("abort", r));
+            },
+        });
+
+        const a = Object.assign(() => {}, { close: () => {} });
+        stream.__onConnect("ch", a);
+        await new Promise((r) => setTimeout(r, 10));
+        stream.__onDisconnect("ch", a);
+        await new Promise((r) => setTimeout(r, 10));
+
+        const b = Object.assign(() => {}, { close: () => {} });
+        stream.__onConnect("ch", b);
+        await new Promise((r) => setTimeout(r, 10));
+
+        expect(invocations).toEqual(["ch", "ch"]);
+        stream.__onDisconnect("ch", b);
+    });
+
+    it("channel-bound emit delivers to subscribers of the same channel", async () => {
+        const received: string[] = [];
+        const stream = createEventStream<string>({
+            channel: (c) => c.req.query("channel") ?? "",
+            perChannelSource: async (channelKey, emit) => {
+                emit("hello from " + channelKey);
+            },
+        });
+
+        const listener = Object.assign(
+            (e: string) => received.push(e),
+            { close: () => {} }
+        );
+        stream.__onConnect("xyz", listener);
+        await new Promise((r) => setTimeout(r, 20));
+
+        expect(received).toEqual(["hello from xyz"]);
+        stream.__onDisconnect("xyz", listener);
+    });
+
+    it("throws if both `source` and `perChannelSource` are provided", () => {
+        expect(() =>
+            createEventStream<string>({
+                source: async () => {},
+                perChannelSource: async () => {},
+            })
+        ).toThrow(/mutually exclusive/);
+    });
+
+    it("logs error if perChannelSource throws", async () => {
+        const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+        const stream = createEventStream<string>({
+            channel: (c) => c.req.query("channel") ?? "",
+            perChannelSource: async () => {
+                throw new Error("ssh failed");
+            },
+        });
+
+        const a = Object.assign(() => {}, { close: () => {} });
+        stream.__onConnect("x", a);
+        await new Promise((r) => setTimeout(r, 20));
+
+        expect(errSpy).toHaveBeenCalledWith(
+            expect.stringContaining("perChannelSource"),
+            expect.any(Error)
+        );
+        stream.__onDisconnect("x", a);
+        errSpy.mockRestore();
     });
 });

@@ -66,7 +66,7 @@ describe("useEventStream", () => {
         render(<TestComponent />);
 
         expect(MockEventSource.instances.length).toBe(1);
-        expect(MockEventSource.instances[0].url).toBe("/_event/test/foo");
+        expect(MockEventSource.instances[0]!.url).toBe("/_event/test/foo");
     });
 
     it("appends ?channel=X to URL when channel option is provided", () => {
@@ -79,7 +79,7 @@ describe("useEventStream", () => {
         }
         render(<TestComponent />);
 
-        expect(MockEventSource.instances[0].url).toBe(
+        expect(MockEventSource.instances[0]!.url).toBe(
             "/_event/test/bar?channel=abc-123"
         );
     });
@@ -94,7 +94,7 @@ describe("useEventStream", () => {
         }
         render(<TestComponent />);
 
-        expect(MockEventSource.instances[0].url).toContain(
+        expect(MockEventSource.instances[0]!.url).toContain(
             "channel=id%20with%20spaces%26stuff"
         );
     });
@@ -124,7 +124,7 @@ describe("useEventStream", () => {
         render(<TestComponent />);
 
         act(() => {
-            MockEventSource.instances[0].emit("message", { msg: "hello" });
+            MockEventSource.instances[0]!.emit("message", { msg: "hello" });
         });
 
         expect(result.data.value).toEqual({ msg: "hello" });
@@ -142,7 +142,7 @@ describe("useEventStream", () => {
         render(<TestComponent />);
 
         act(() => {
-            MockEventSource.instances[0].emit("snapshot", { current: 42 });
+            MockEventSource.instances[0]!.emit("snapshot", { current: 42 });
         });
 
         expect(result.snapshot.value).toEqual({ current: 42 });
@@ -160,7 +160,7 @@ describe("useEventStream", () => {
         render(<TestComponent />);
 
         act(() => {
-            MockEventSource.instances[0].emit("heartbeat", "");
+            MockEventSource.instances[0]!.emit("heartbeat", "");
         });
 
         expect(result.data.value).toBeNull();
@@ -178,7 +178,7 @@ describe("useEventStream", () => {
         render(<TestComponent />);
 
         act(() => {
-            MockEventSource.instances[0].triggerClose();
+            MockEventSource.instances[0]!.triggerClose();
         });
 
         expect(result.closed.value).toBe(true);
@@ -195,7 +195,7 @@ describe("useEventStream", () => {
         }
         render(<TestComponent />);
 
-        const es = MockEventSource.instances[0];
+        const es = MockEventSource.instances[0]!;
         act(() => {
             // Simulate transient error — readyState stays OPEN
             const handlers = es.listeners.get("error") ?? [];
@@ -218,7 +218,7 @@ describe("useEventStream", () => {
 
         act(() => {
             // Send invalid JSON
-            const handlers = MockEventSource.instances[0].listeners.get("message") ?? [];
+            const handlers = MockEventSource.instances[0]!.listeners.get("message") ?? [];
             for (const fn of handlers) fn({ data: "not valid json {" });
         });
 
@@ -235,7 +235,7 @@ describe("useEventStream", () => {
         }
         const { unmount } = render(<TestComponent />);
 
-        const es = MockEventSource.instances[0];
+        const es = MockEventSource.instances[0]!;
         expect(es.closed).toBe(false);
 
         unmount();
@@ -253,16 +253,16 @@ describe("useEventStream", () => {
 
         const { rerender } = render(<TestComponent channel="a" />);
         expect(MockEventSource.instances.length).toBe(1);
-        expect(MockEventSource.instances[0].url).toContain("channel=a");
+        expect(MockEventSource.instances[0]!.url).toContain("channel=a");
 
         act(() => {
             rerender(<TestComponent channel="b" />);
         });
 
         // Old EventSource closed, new one opened
-        expect(MockEventSource.instances[0].closed).toBe(true);
+        expect(MockEventSource.instances[0]!.closed).toBe(true);
         expect(MockEventSource.instances.length).toBe(2);
-        expect(MockEventSource.instances[1].url).toContain("channel=b");
+        expect(MockEventSource.instances[1]!.url).toContain("channel=b");
     });
 
     it("warns and does nothing when stream has no __path", () => {

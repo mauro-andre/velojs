@@ -288,7 +288,7 @@ describe("Build Integration", () => {
             // Extract the hash value
             const match = serverJs.match(/__veloBuildHash\s*=\s*"([^"]+)"/);
             expect(match).not.toBeNull();
-            expect(match![1].length).toBeGreaterThan(0);
+            expect(match![1]!.length).toBeGreaterThan(0);
         });
 
         it("server.js references hashed CSS and JS from manifest", () => {

@@ -23,6 +23,8 @@ export type {
     EmitFn,
     EmitOptions,
     SourceFn,
+    PerChannelSourceFn,
+    ChannelResolver,
 } from "./events.js";
 
 // Re-export Hono types

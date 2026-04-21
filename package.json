@@ -30,7 +30,7 @@
     ],
     "scripts": {
         "build": "vite build --config vite.build.config.ts && tsc --declaration --emitDeclarationOnly --outDir dist --noEmit false --rootDir src",
-        "typecheck": "tsc --noEmit",
+        "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.test.json",
         "test": "vitest run",
         "test:watch": "vitest"
     },
