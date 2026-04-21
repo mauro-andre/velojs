@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { render } from "@testing-library/preact";
+import { render, cleanup } from "@testing-library/preact";
 import { Scripts, Link } from "../src/components.js";
 import { __veloUpdatePending } from "../src/hooks.js";
 
@@ -8,6 +8,7 @@ describe("Scripts", () => {
     const originalEnv = { ...process.env };
 
     afterEach(() => {
+        cleanup();
         process.env = { ...originalEnv };
     });
 
@@ -100,6 +101,7 @@ describe("Scripts", () => {
 
 describe("Link", () => {
     afterEach(() => {
+        cleanup();
         __veloUpdatePending.value = false;
     });
 
