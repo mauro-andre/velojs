@@ -646,6 +646,17 @@ export function registerStreamHandler<TEvent, TSnapshot>(
             let disposed = false;
             let heartbeat: ReturnType<typeof setInterval> | null = null;
 
+            // Write chain — serializes sse.writeSSE calls so that a fast burst
+            // of emit(...) followed by sse.close() doesn't drop the tail.
+            // Writes are enqueued; close waits for the chain to drain.
+            let writeChain: Promise<void> = Promise.resolve();
+            const enqueueWrite = (payload: Parameters<typeof sse.writeSSE>[0]) => {
+                writeChain = writeChain
+                    .then(() => sse.writeSSE(payload))
+                    .catch(() => {});
+                return writeChain;
+            };
+
             const cleanup = () => {
                 if (disposed) return;
                 disposed = true;
@@ -657,30 +668,38 @@ export function registerStreamHandler<TEvent, TSnapshot>(
             // Listener function with attached `close()` for explicit close() signaling
             const listener = ((event: TEvent) => {
                 if (disposed) return;
-                sse.writeSSE({ data: JSON.stringify(event) }).catch(() => {});
+                enqueueWrite({ data: JSON.stringify(event) });
 
                 if (stream.__config.closeOn?.(event)) {
-                    sse.close();
-                    cleanup();
+                    // Wait for the event write (and any prior pending writes) to drain
+                    // before closing the writable, otherwise the tail is lost.
+                    writeChain.then(() => {
+                        sse.close();
+                        cleanup();
+                    });
                 }
             }) as StreamListener<TEvent>;
 
             listener.close = () => {
                 if (disposed) return;
                 // Send close event so client distinguishes deliberate close from network drop
-                sse.writeSSE({ event: "close", data: "" }).catch(() => {});
-                sse.close();
-                cleanup();
+                enqueueWrite({ event: "close", data: "" });
+                // Drain first — any emits queued before us must reach the client.
+                writeChain.then(() => {
+                    sse.close();
+                    cleanup();
+                });
             };
 
             stream.__onConnect(channelKey, listener);
 
-            // Heartbeat to keep idle proxies open
+            // Heartbeat to keep idle proxies open — also goes through the chain
+            // so it doesn't interleave mid-event with actual data writes.
             heartbeat =
                 heartbeatInterval > 0
                     ? setInterval(() => {
                           if (disposed) return;
-                          sse.writeSSE({ event: "heartbeat", data: "" }).catch(() => {});
+                          enqueueWrite({ event: "heartbeat", data: "" });
                       }, heartbeatInterval)
                     : null;
 

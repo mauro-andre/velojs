@@ -504,3 +504,95 @@ describe("mockContext", () => {
         await app.close();
     });
 });
+
+// ============================================
+// REGRESSION — write chain ordering (PodCubo bug 0.0.23)
+// ============================================
+
+describe("Streams — write chain preserves ordering (regression)", () => {
+    it("emit burst + close: all events reach the subscriber in order", async () => {
+        const stream_burst = createEventStream<string>({ path: "/_event/test/burst" });
+        const root = makeModule({ moduleId: "Root" });
+
+        const app = await createTestApp({
+            routes: [{ module: root, isRoot: true, children: [] }],
+        });
+
+        const sub = await app.subscribe(stream_burst, { channel: "c1" });
+        // Let the handler subscribe the listener
+        await new Promise((r) => setTimeout(r, 20));
+
+        stream_burst.emit("c1", "a");
+        stream_burst.emit("c1", "b");
+        stream_burst.emit("c1", "c");
+        stream_burst.close("c1");
+
+        // Drain — wait for closed + all queued writes to flush
+        await new Promise((r) => setTimeout(r, 50));
+        await sub.close();
+
+        expect(sub.events).toEqual(["a", "b", "c"]);
+        expect(sub.closed).toBe(true);
+
+        await app.close();
+    });
+
+    it("closeOn mid-burst: the triggering event is delivered, later emits are dropped", async () => {
+        const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+        const stream_co = createEventStream<string>({
+            path: "/_event/test/closeOn-tail",
+            closeOn: (e) => e === "X",
+        });
+        const root = makeModule({ moduleId: "Root" });
+
+        const app = await createTestApp({
+            routes: [{ module: root, isRoot: true, children: [] }],
+        });
+
+        const sub = await app.subscribe(stream_co, { channel: "c" });
+        await new Promise((r) => setTimeout(r, 20));
+
+        stream_co.emit("c", "a");
+        stream_co.emit("c", "X");        // triggers closeOn
+        stream_co.emit("c", "ignored");  // emit on closed channel — warned & dropped
+
+        await new Promise((r) => setTimeout(r, 50));
+        await sub.close();
+
+        expect(sub.events).toEqual(["a", "X"]);
+        expect(sub.closed).toBe(true);
+        warn.mockRestore();
+
+        await app.close();
+    });
+
+    it("race emit → close: tail event reaches the client (PodCubo provisioning flow)", async () => {
+        const stream_prov = createEventStream<string>({ path: "/_event/test/prov-flow" });
+        const root = makeModule({ moduleId: "Root" });
+
+        const app = await createTestApp({
+            routes: [{ module: root, isRoot: true, children: [] }],
+        });
+
+        const sub = await app.subscribe(stream_prov, { channel: "session" });
+        await new Promise((r) => setTimeout(r, 20));
+
+        // Exact PodCubo scenario: fast synchronous burst right before close
+        stream_prov.emit("session", "Configuring backup storage...");
+        stream_prov.emit("session", "Worker is ready.");
+        stream_prov.emit("session", "[done] Provisioning complete!");
+        stream_prov.close("session");
+
+        await new Promise((r) => setTimeout(r, 50));
+        await sub.close();
+
+        expect(sub.events.at(-1)).toBe("[done] Provisioning complete!");
+        expect(sub.events).toEqual([
+            "Configuring backup storage...",
+            "Worker is ready.",
+            "[done] Provisioning complete!",
+        ]);
+
+        await app.close();
+    });
+});
