@@ -7,6 +7,7 @@ import type { ComponentType, VNode } from "preact";
 import type { RouteNode, RouteModule, LoaderArgs, AppRoutes } from "./types.js";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { getAppContext } from "./app-context.js";
+import { flushPendingStreamRoutes, registerStreamHandler } from "./events.js";
 
 // ============================================
 // ASYNC LOCAL STORAGE - Dados isolados por request
@@ -291,8 +292,6 @@ const registerStreamRoutes = async (
     nodes: RouteNode[],
     parentMiddlewares: MiddlewareHandler[] = []
 ) => {
-    const { registerStreamHandler } = await import("./events.js");
-
     const visit = (subNodes: RouteNode[], inheritedMiddlewares: MiddlewareHandler[]) => {
         for (const node of subNodes) {
             const moduleId = node.module.metadata?.moduleId;
@@ -368,7 +367,6 @@ export const createApp = async (routes: AppRoutes): Promise<Hono> => {
     await registerStreamRoutes(app, routes);
 
     // Standalone streams registrados via createEventStream({ path: ... })
-    const { flushPendingStreamRoutes } = await import("./events.js");
     flushPendingStreamRoutes(app);
 
     // Dev mode: flush server callbacks using Vite's HTTP server
