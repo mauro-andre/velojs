@@ -1166,3 +1166,214 @@ describe("perChannelSource", () => {
         errSpy.mockRestore();
     });
 });
+
+// ============================================
+// pipe lifecycle (unified vocabulary)
+// ============================================
+
+describe("pipe (stream)", () => {
+    const makeMockCtx = (params: Record<string, string> = {}, query: Record<string, string> = {}) => ({
+        c: {
+            req: {
+                param: () => params,
+                query: () => query,
+                header: () => undefined,
+            },
+            get: () => undefined,
+            set: () => undefined,
+        } as any,
+        params,
+        query,
+    });
+
+    it("starts pipe when first subscriber connects to a channel", async () => {
+        const calls: string[] = [];
+        const stream = createEventStream<string>({
+            pipe: async ({ send, keepOpen, abortSignal, channel, params }) => {
+                calls.push(`start:${channel}:${params.id ?? "-"}`);
+                send(`hello-${channel}`);
+                keepOpen();
+                abortSignal.addEventListener("abort", () => {
+                    calls.push(`abort:${channel}`);
+                });
+            },
+        });
+
+        const received: string[] = [];
+        const listener = Object.assign(
+            (e: string) => received.push(e),
+            { close: () => {} }
+        );
+        const ctx = makeMockCtx({ id: "abc" });
+        stream.__onConnect("abc", listener, ctx);
+        await new Promise((r) => setTimeout(r, 10));
+
+        expect(calls).toEqual(["start:abc:abc"]);
+        expect(received).toEqual(["hello-abc"]);
+
+        stream.__onDisconnect("abc", listener);
+        await new Promise((r) => setTimeout(r, 10));
+        expect(calls).toContain("abort:abc");
+    });
+
+    it("does NOT restart pipe for a second subscriber on the same channel", async () => {
+        const calls: string[] = [];
+        const stream = createEventStream<string>({
+            pipe: async ({ send, keepOpen, abortSignal }) => {
+                calls.push("start");
+                send("hi");
+                keepOpen();
+                await new Promise<void>((r) =>
+                    abortSignal.addEventListener("abort", () => r())
+                );
+            },
+        });
+
+        const a = Object.assign(() => {}, { close: () => {} });
+        const b = Object.assign(() => {}, { close: () => {} });
+        const ctx = makeMockCtx();
+
+        stream.__onConnect("x", a, ctx);
+        await new Promise((r) => setTimeout(r, 5));
+        stream.__onConnect("x", b, ctx);
+        await new Promise((r) => setTimeout(r, 5));
+
+        expect(calls).toEqual(["start"]);
+        stream.__onDisconnect("x", a);
+        stream.__onDisconnect("x", b);
+    });
+
+    it("closes the channel automatically when pipe returns without keepOpen", async () => {
+        const closeSpy = vi.fn();
+        const stream = createEventStream<string>({
+            pipe: async ({ send }) => {
+                send("one");
+                send("two");
+                // no keepOpen → framework closes the channel
+            },
+        });
+
+        let closed = false;
+        const listener = Object.assign(
+            (_e: string) => {},
+            {
+                close: () => {
+                    closed = true;
+                    closeSpy();
+                },
+            }
+        );
+        stream.__onConnect("c1", listener, makeMockCtx());
+        await new Promise((r) => setTimeout(r, 15));
+
+        expect(closed).toBe(true);
+        stream.__onDisconnect("c1", listener);
+    });
+
+    it("keepOpen() keeps the channel alive after pipe returns", async () => {
+        const stream = createEventStream<string>({
+            pipe: async ({ send, keepOpen }) => {
+                send("setup");
+                keepOpen();
+                // return immediately, but channel stays
+            },
+        });
+
+        let closed = false;
+        const listener = Object.assign(
+            (_e: string) => {},
+            { close: () => { closed = true; } }
+        );
+        stream.__onConnect("k1", listener, makeMockCtx());
+        await new Promise((r) => setTimeout(r, 15));
+
+        expect(closed).toBe(false);
+        stream.__onDisconnect("k1", listener);
+    });
+
+    it("close() inside pipe notifies subscribers", async () => {
+        const stream = createEventStream<string>({
+            pipe: async ({ send, close, keepOpen }) => {
+                send("first");
+                keepOpen();
+                setTimeout(() => close(), 5);
+            },
+        });
+
+        let closed = false;
+        const listener = Object.assign(
+            (_e: string) => {},
+            { close: () => { closed = true; } }
+        );
+        stream.__onConnect("y", listener, makeMockCtx());
+        await new Promise((r) => setTimeout(r, 25));
+
+        expect(closed).toBe(true);
+        stream.__onDisconnect("y", listener);
+    });
+
+    it("pipe errors fall back to closing the channel and log", async () => {
+        const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+        const stream = createEventStream<string>({
+            pipe: async () => {
+                throw new Error("pipe failed");
+            },
+        });
+
+        let closed = false;
+        const listener = Object.assign(
+            (_e: string) => {},
+            { close: () => { closed = true; } }
+        );
+        stream.__onConnect("err", listener, makeMockCtx());
+        await new Promise((r) => setTimeout(r, 15));
+
+        expect(errSpy).toHaveBeenCalledWith(
+            expect.stringContaining("stream pipe threw"),
+            expect.any(Error)
+        );
+        expect(closed).toBe(true);
+        stream.__onDisconnect("err", listener);
+        errSpy.mockRestore();
+    });
+
+    it("throws if `pipe` is combined with `source`", () => {
+        expect(() =>
+            createEventStream<string>({
+                source: async () => {},
+                pipe: async () => {},
+            })
+        ).toThrow(/mutually exclusive/);
+    });
+
+    it("throws if `pipe` is combined with `perChannelSource`", () => {
+        expect(() =>
+            createEventStream<string>({
+                perChannelSource: async () => {},
+                pipe: async () => {},
+            })
+        ).toThrow(/mutually exclusive/);
+    });
+
+    it("external stream.emit still reaches subscribers even with pipe mode", async () => {
+        const stream = createEventStream<string>({
+            pipe: async ({ keepOpen }) => {
+                keepOpen();
+            },
+        });
+
+        const received: string[] = [];
+        const listener = Object.assign(
+            (e: string) => received.push(e),
+            { close: () => {} }
+        );
+        stream.__onConnect("ch", listener, makeMockCtx());
+        await new Promise((r) => setTimeout(r, 5));
+
+        // External emit from a service
+        stream.emit("ch", "from-service");
+        expect(received).toContain("from-service");
+
+        stream.__onDisconnect("ch", listener);
+    });
+});

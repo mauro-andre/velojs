@@ -439,6 +439,57 @@ export function transformStreamsForClient(code: string, moduleId: string): strin
 }
 
 // ============================================
+// TRANSFORMAÇÃO 3.6: Sockets → Client stub (client only)
+// ============================================
+
+/**
+ * Transforms `export const socket_xxx = async (...) => {...}` on the client
+ * into a stub with only `{ __isVeloSocket: true, __path: "/_socket/{moduleId}/{name}" }`.
+ *
+ * The body is discarded — the handler runs only on the server. The client
+ * needs just the path to open the WebSocket.
+ */
+export function transformSocketsForClient(code: string, moduleId: string): string {
+    const ast = parse(code, {
+        sourceType: "module",
+        plugins: ["typescript", "jsx"],
+    });
+
+    traverse(ast, {
+        ExportNamedDeclaration(nodePath) {
+            const declaration = nodePath.node.declaration;
+            if (!t.isVariableDeclaration(declaration)) return;
+
+            const declarator = declaration.declarations[0];
+            if (!declarator || !t.isIdentifier(declarator.id)) return;
+
+            const name = declarator.id.name;
+            if (!name.startsWith("socket_")) return;
+
+            const socketName = name.replace("socket_", "");
+            const path = `/_socket/${moduleId}/${socketName}`;
+
+            declarator.init = t.objectExpression([
+                t.objectProperty(
+                    t.identifier("__isVeloSocket"),
+                    t.booleanLiteral(true)
+                ),
+                t.objectProperty(
+                    t.identifier("__path"),
+                    t.stringLiteral(path)
+                ),
+            ]);
+
+            // Drop type annotation — the stub object has a different shape.
+            declarator.id.typeAnnotation = null;
+        },
+    });
+
+    const output = generate(ast, { retainLines: true });
+    return output.code;
+}
+
+// ============================================
 // TRANSFORMAÇÃO 4: Remover loaders (client only)
 // ============================================
 
@@ -964,6 +1015,7 @@ startClient({ routes });
             const hasLoader = /export\s+(const|function)\s+loader/.test(code);
             const hasAction = /export\s+const\s+action_\w+/.test(code);
             const hasStream = /export\s+const\s+stream_\w+/.test(code);
+            const hasSocket = /export\s+const\s+socket_\w+/.test(code);
             const hasLoaderCall = /\bLoader\s*</.test(code) || /\bLoader\s*\(/.test(code);
             const hasUseLoaderCall = /\buseLoader\s*</.test(code) || /\buseLoader\s*\(/.test(code);
             const hasEndpointHandler = /\bhandler\s*:/.test(code);
@@ -985,8 +1037,8 @@ startClient({ routes });
                 hasTransformations = true;
             }
 
-            // Se tem Component, loader, action, stream, ou chamadas de Loader/useLoader, aplica transformações
-            if (hasComponent || hasLoader || hasAction || hasStream || hasLoaderCall || hasUseLoaderCall) {
+            // Se tem Component, loader, action, stream, socket, ou chamadas de Loader/useLoader, aplica transformações
+            if (hasComponent || hasLoader || hasAction || hasStream || hasSocket || hasLoaderCall || hasUseLoaderCall) {
                 const moduleId = path
                     .relative(appDir, id)
                     .replace(/\.(tsx?|jsx?)$/, "")
@@ -1012,6 +1064,14 @@ startClient({ routes });
                 // 3.5. Transformar streams em stubs (client only)
                 if (!isSSR && hasStream) {
                     transformedCode = transformStreamsForClient(
+                        transformedCode,
+                        moduleId
+                    );
+                }
+
+                // 3.6. Transformar sockets em stubs (client only)
+                if (!isSSR && hasSocket) {
+                    transformedCode = transformSocketsForClient(
                         transformedCode,
                         moduleId
                     );

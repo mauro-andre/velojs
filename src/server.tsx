@@ -8,6 +8,7 @@ import type { RouteNode, RouteModule, LoaderArgs, AppRoutes, HTTPMethod } from "
 import { AsyncLocalStorage } from "node:async_hooks";
 import { getAppContext } from "./app-context.js";
 import { flushPendingStreamRoutes, registerStreamHandler } from "./events.js";
+import { registerSocketRoutes, injectWebSocketServer, abortAllSocketSessions } from "./sockets.js";
 
 // ============================================
 // ASYNC LOCAL STORAGE - Dados isolados por request
@@ -491,13 +492,20 @@ export const createApp = async (routes: AppRoutes): Promise<Hono> => {
     const pageGetPaths = collectPageGetPaths(routes);
     registerEndpointRoutes(app, routes, pageGetPaths);
 
+    // Socket routes (WebSocket) — convenção socket_* por módulo
+    await registerSocketRoutes(app, routes);
+
     // Standalone streams registrados via createEventStream({ path: ... })
     flushPendingStreamRoutes(app);
 
-    // Dev mode: flush server callbacks using Vite's HTTP server
+    // Dev mode: flush server callbacks using Vite's HTTP server AND
+    // inject the WebSocket adapter into the same server.
     if (process.env.NODE_ENV !== "production" && !activeServer) {
         const devServer = (globalThis as any).__veloDevServer;
-        if (devServer) flushServerCallbacks(devServer);
+        if (devServer) {
+            flushServerCallbacks(devServer);
+            await injectWebSocketServer(app, devServer);
+        }
     }
 
     return app;
@@ -527,6 +535,8 @@ export const startServer = async (options: StartServerOptions) => {
 
         console.log(`Server running on http://localhost:${port}`);
         const server = serve({ fetch: app.fetch, port });
+        // Inject the WebSocket adapter so upgrade requests are routed.
+        await injectWebSocketServer(app, server);
         flushServerCallbacks(server as unknown as import("http").Server);
     }
 

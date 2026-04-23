@@ -4,6 +4,7 @@ import {
     transformLoaderFunctions,
     transformActionsForClient,
     transformStreamsForClient,
+    transformSocketsForClient,
     removeLoaders,
     removeMiddlewares,
     removeEndpointRoutes,
@@ -459,5 +460,56 @@ export default [
         expect(output).not.toContain("/b");
         expect(output).toContain("Home");
         expect(output).toContain("/sub");
+    });
+});
+
+// ============================================
+// transformSocketsForClient
+// ============================================
+
+describe("transformSocketsForClient", () => {
+    it("replaces async socket handler with a stub object", () => {
+        const input = `
+export const socket_terminal = async ({ incoming, send }) => {
+    const session = openPtySession();
+    for await (const msg of incoming) session.write(msg);
+};
+`;
+        const output = transformSocketsForClient(input, "workers/Terminal");
+        expect(output).toContain("__isVeloSocket: true");
+        expect(output).toContain(`__path: "/_socket/workers/Terminal/terminal"`);
+        expect(output).not.toMatch(/socket_terminal\s*=\s*async/);
+        expect(output).not.toContain("openPtySession");
+    });
+
+    it("transforms multiple socket_* exports", () => {
+        const input = `
+export const socket_foo = async () => {};
+export const socket_bar = async () => {};
+`;
+        const output = transformSocketsForClient(input, "pages/Multi");
+        expect(output).toContain(`__path: "/_socket/pages/Multi/foo"`);
+        expect(output).toContain(`__path: "/_socket/pages/Multi/bar"`);
+    });
+
+    it("ignores non-socket exports", () => {
+        const input = `
+export const socket_keep = async () => {};
+export const helper = () => 42;
+export const Component = () => null;
+`;
+        const output = transformSocketsForClient(input, "x/Y");
+        expect(output).toContain(`__path: "/_socket/x/Y/keep"`);
+        expect(output).toContain("helper");
+        expect(output).toContain("Component");
+    });
+
+    it("strips type annotation from the declarator id", () => {
+        const input = `
+export const socket_typed: SocketHandler = async ({ send }) => {};
+`;
+        const output = transformSocketsForClient(input, "pages/Typed");
+        expect(output).toContain(`__path: "/_socket/pages/Typed/typed"`);
+        expect(output).toContain("__isVeloSocket: true");
     });
 });

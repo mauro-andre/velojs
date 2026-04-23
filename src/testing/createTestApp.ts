@@ -8,6 +8,7 @@
 
 import type { EventStream } from "../events.js";
 import { getRegisteredStreams } from "../events.js";
+import { abortAllSocketSessions } from "../sockets.js";
 import {
     createIsolatedContext,
     withAppContext,
@@ -24,7 +25,11 @@ import type {
     MockContextOptions,
     CreateTestAppOptions,
     TestSubscription,
+    TestSocketSession,
+    SocketTestOptions,
 } from "./types.js";
+import type { SocketHandler, SocketStub } from "../sockets.js";
+import { buildSocketSession } from "./socketSession.js";
 import {
     serializeCookies,
     parseSetCookies,
@@ -178,6 +183,13 @@ function buildTestAppApi(
             return await buildSubscription<TEvent, TSnapshot>({ response });
         },
 
+        async socket(
+            handlerInput: SocketHandler | SocketStub | { __path: string } | string,
+            o: SocketTestOptions = {}
+        ): Promise<TestSocketSession> {
+            return await buildSocketSession(hono, handlerInput as any, o);
+        },
+
         async sessionCookies({ user }) {
             if (!opts.getSessionCookie) {
                 throw new Error(
@@ -230,6 +242,7 @@ function buildTestAppApi(
                 action: wrap(api.action),
                 loader: wrap(api.loader),
                 subscribe: wrap(api.subscribe),
+                socket: wrap(api.socket),
                 sessionCookies: api.sessionCookies,
                 as: api.as, // chaining .as.as works — last wins
                 mockContext: api.mockContext,
@@ -257,6 +270,8 @@ function buildTestAppApi(
         async close() {
             // Reset streams (also aborts active sources / heartbeats per stream)
             await api.reset();
+            // Abort any open socket sessions on this app
+            abortAllSocketSessions(hono);
             // Run any disposers registered with the context
             for (const dispose of ctx.disposers) {
                 try { dispose(); } catch (err) {

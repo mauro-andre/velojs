@@ -571,7 +571,7 @@ Because endpoints live in `routes.tsx`, the testing toolkit sees them automatica
 const res = await app.post("/api/github/webhook", { body: {...}, headers: {...} });
 ```
 
-Full documentation: [site/docs/17-endpoints.md](./site/docs/17-endpoints.md).
+Full documentation: [site/docs/06-endpoints.md](./site/docs/06-endpoints.md).
 
 ---
 
@@ -787,6 +787,85 @@ createEventStream<string>({ bufferSize: 500 });  // keep last 500 entries per ch
 ```
 
 Only affects emits with `{ snapshot: true }`.
+
+---
+
+## Sockets
+
+Declarative WebSocket handlers, co-located with the page that needs bidirectional communication. Use for interactive terminals, collaborative editing, live cursors — anything where the client also sends messages.
+
+Export `socket_<name>` from a page or layout, and VeloJS registers a WebSocket route at `/_socket/{moduleId}/{name}` with middleware inheritance.
+
+### Shortest example
+
+```tsx
+// app/workers/WorkerTerminal.tsx
+import type { SocketHandler } from "@mauroandre/velojs";
+import { parseJson } from "@mauroandre/velojs/sockets";
+import { useSocket } from "@mauroandre/velojs/hooks";
+
+export const socket_terminal: SocketHandler = async ({
+    incoming, send, keepOpen, abortSignal, c, params,
+}) => {
+    const session = await createTerminal(params.workerId);
+    session.on("data", (chunk) => send({ type: "data", data: chunk }));
+    abortSignal.addEventListener("abort", () => session.destroy());
+    keepOpen();
+
+    for await (const msg of parseJson<{ type: string; data?: string; cols?: number; rows?: number }>(incoming)) {
+        if (msg.type === "data" && msg.data) session.write(msg.data);
+        if (msg.type === "resize") session.resize(msg.cols!, msg.rows!);
+    }
+};
+
+export const Component = () => {
+    const { send, status } = useSocket(socket_terminal, { channel: workerId });
+    // ...
+};
+```
+
+### Handler args
+
+| Arg | Description |
+|---|---|
+| `incoming` | `AsyncIterable<string \| Uint8Array>` — raw frames. Wrap with `parseJson<T>()` for JSON auto-parse. |
+| `send(msg)` | Send a frame. `string` / `Uint8Array` pass through; `object` → `JSON.stringify`. |
+| `close(code?, reason?)` | Server-initiated close. |
+| `keepOpen()` | Required for long-lived handlers. If you return without it, the socket closes. `for await (const m of incoming)` implicitly holds the handler. |
+| `abortSignal` | Fires on disconnect / `app.close()`. Register all cleanup here. |
+| `c`, `params`, `query` | Hono context, URL params, query. Auth via `c.get("user")` from middleware. |
+
+### Middleware inheritance
+
+Middleware runs **before** the WebSocket upgrade — an `authMiddleware` that rejects returns an HTTP error and the client never sees an open socket. Same `middlewares` array on parent route nodes as pages/actions/streams.
+
+### Client hook
+
+```ts
+const { send, status, lastMessage, close } = useSocket(socket_terminal, {
+    channel: workerId,
+    onMessage: (msg) => { /* ... */ },
+});
+```
+
+- `status: Signal<"connecting" | "open" | "closed">` — reactive.
+- **No auto-reconnect** — sockets are usually stateful (pty sessions, collaborative state); blind reconnect loses state silently. Re-mount or toggle `enabled` to reconnect.
+
+### Testing
+
+```ts
+const ws = await app.socket(socket_terminal, {
+    user: { id: "alice" },
+    params: { workerId: "w42" },
+});
+ws.send({ type: "data", data: "ls\n" });
+const reply = await ws.next({ timeoutMs: 500 });
+await ws.close();
+```
+
+`app.socket()` invokes the handler in-memory and aborts on `app.close()`. **Middleware does NOT run** — pass `user` via options to shortcut `c.get("user")`; test middleware via regular endpoint tests that use the same middleware.
+
+Full reference: [site/docs/12-sockets.md](./site/docs/12-sockets.md).
 
 ---
 
@@ -1279,7 +1358,7 @@ await app.close();
 | `app.reset()` | Clear stream buffers/listeners between tests |
 | `app.close()` | Tear down everything (zero open handles guaranteed) |
 
-See [Testing docs](https://github.com/mauro-andre/velojs/blob/dev/site/docs/16-testing.md) for the full guide with patterns, isolation, and FAQ.
+See [Testing docs](https://github.com/mauro-andre/velojs/blob/dev/site/docs/17-testing.md) for the full guide with patterns, isolation, and FAQ.
 
 ---
 

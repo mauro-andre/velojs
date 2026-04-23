@@ -169,12 +169,12 @@ expect(verify.status).toBe(302);
 expect(verify.headers.location).toBe("/stacks?verified=1");
 ```
 
-See [16-testing.md](./16-testing.md) for the full testing API.
+See [17-testing.md](./17-testing.md) for the full testing API.
 
 ## Related
 
 - [Routes](./02-routes.md) — page routing and layouts
 - [Loaders](./04-loaders.md) — page data fetching
 - [Actions](./05-actions.md) — mutations from pages
-- [Middlewares](./09-middlewares.md) — authentication, logging, rate limiting
-- [Testing](./16-testing.md) — the backend testing toolkit
+- [Middlewares](./07-middlewares.md) — authentication, logging, rate limiting
+- [Testing](./17-testing.md) — the backend testing toolkit

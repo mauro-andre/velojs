@@ -5,6 +5,7 @@
 import type { Hono, Context } from "hono";
 import type { AppRoutes } from "../types.js";
 import type { EventStream } from "../events.js";
+import type { SocketHandler, SocketStub } from "../sockets.js";
 
 export type Cookies = Record<string, string>;
 export type Headers = Record<string, string>;
@@ -72,6 +73,32 @@ export interface NextOptions {
     timeoutMs: number;
 }
 
+export interface SocketTestOptions extends RequestOptions {
+    /** Channel ID — sent as `?channel=...` on the WS URL. */
+    channel?: string;
+    /** URL params (for socket paths with `:param`). */
+    params?: Params;
+    /** `c.get("user")` value (shortcut — avoids a full middleware chain). */
+    user?: any;
+}
+
+export interface TestSocketSession {
+    /** Send a frame. Objects are `JSON.stringify`'d, strings/Uint8Array pass through. */
+    send(msg: string | Uint8Array | object): void;
+    /** Wait for the next incoming frame from the server. Rejects on timeout. */
+    next(opts: NextOptions): Promise<string | Uint8Array>;
+    /** Wait for N incoming frames total (order preserved). */
+    nextN(n: number, opts: NextOptions): Promise<(string | Uint8Array)[]>;
+    /** All frames received from the server so far. */
+    readonly messages: ReadonlyArray<string | Uint8Array>;
+    /** True once the server-side handler has finished (or the session was aborted). */
+    readonly closed: boolean;
+    /** Client-side close — aborts the server handler's abortSignal. */
+    close(code?: number, reason?: string): Promise<void>;
+    /** Resolves when the handler finishes or the session is aborted. */
+    readonly done: Promise<void>;
+}
+
 export interface TestSubscription<TEvent = any, TSnapshot = any> {
     /** HTTP status of the initial SSE response (200, 403, etc). */
     readonly status: number;
@@ -130,6 +157,20 @@ export interface TestApp {
         stream: EventStream<TEvent, TSnapshot> | string,
         opts?: SubscribeOptions
     ): Promise<TestSubscription<TEvent, TSnapshot>>;
+
+    // Sockets
+    /**
+     * Open an in-memory session against a `socket_*` handler.
+     *
+     * Accepts the socket handler function directly (server-imported), a
+     * `{ __path }` stub, or a string path. **Middleware is not simulated** —
+     * test middleware separately through a regular endpoint or page that uses
+     * it. Use `opts.user` to shortcut `c.get("user")`.
+     */
+    socket(
+        handler: SocketHandler | SocketStub | { __path: string } | string,
+        opts?: SocketTestOptions
+    ): Promise<TestSocketSession>;
 
     // Auth
     /** Build cookies for a user via `getSessionCookie` config. */

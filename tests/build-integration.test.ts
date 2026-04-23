@@ -141,6 +141,7 @@ import * as Root from "./client-root.js";
 import * as Home from "./pages/Home.js";
 import * as About from "./pages/About.js";
 import * as Deploy from "./pages/Deploy.js";
+import * as Terminal from "./pages/Terminal.js";
 import { githubWebhook } from "./webhooks/github.handler.js";
 
 export default [
@@ -151,6 +152,7 @@ export default [
             { path: "/", module: Home },
             { path: "/about", module: About },
             { path: "/deploy/:id", module: Deploy },
+            { path: "/terminal", module: Terminal },
             { path: "/api/github/webhook", method: "POST", handler: githubWebhook },
         ],
     },
@@ -201,6 +203,25 @@ export const Component = () => {
     fs.writeFileSync(
         path.join(TEST_APP_DIR, "app/pages/About.tsx"),
         `export const Component = () => <h1>About</h1>;
+`
+    );
+
+    // app/pages/Terminal.tsx — page with socket_* importing node-only code
+    fs.writeFileSync(
+        path.join(TEST_APP_DIR, "app/pages/Terminal.tsx"),
+        `import type { SocketHandler } from "@mauroandre/velojs";
+import { randomBytes } from "node:crypto";
+
+const TERMINAL_SECRET_SENTINEL = "SOCKET_TERMINAL_SECRET_ABC987";
+
+export const socket_terminal: SocketHandler = async ({ send, keepOpen, abortSignal }) => {
+    const sessionId = randomBytes(8).toString("hex") + ":" + TERMINAL_SECRET_SENTINEL;
+    send({ type: "hello", sessionId });
+    keepOpen();
+    abortSignal.addEventListener("abort", () => {});
+};
+
+export const Component = () => <div>terminal</div>;
 `
     );
 
@@ -453,6 +474,48 @@ describe("Build Integration", () => {
             expect(clientJs).not.toContain("GITHUB_WEBHOOK_SECRET_XYZ_12345");
             // node:crypto usage from the handler must not leak
             expect(clientJs).not.toContain("createHmac");
+        });
+
+        it("socket_* exports become stubs on the client bundle", () => {
+            const clientDir = path.join(TEST_APP_DIR, "dist/client");
+            const clientJsFile = fs
+                .readdirSync(clientDir)
+                .find((f) => f.startsWith("client.") && f.endsWith(".js"))!;
+            const clientJs = fs.readFileSync(
+                path.join(clientDir, clientJsFile),
+                "utf-8"
+            );
+
+            // Stub marker present and path derived by convention
+            expect(clientJs).toContain("__isVeloSocket");
+            expect(clientJs).toContain("/_socket/pages/Terminal/terminal");
+        });
+
+        it("socket_* handler body does NOT leak into the client bundle", () => {
+            const clientDir = path.join(TEST_APP_DIR, "dist/client");
+            const clientJsFile = fs
+                .readdirSync(clientDir)
+                .find((f) => f.startsWith("client.") && f.endsWith(".js"))!;
+            const clientJs = fs.readFileSync(
+                path.join(clientDir, clientJsFile),
+                "utf-8"
+            );
+
+            // The handler's secret sentinel (inside the async function body) must not appear
+            expect(clientJs).not.toContain("SOCKET_TERMINAL_SECRET_ABC987");
+            // node:crypto usage from the handler must not leak
+            expect(clientJs).not.toContain("randomBytes");
+        });
+
+        it("socket_* handler is present on the server bundle", () => {
+            const serverJs = fs.readFileSync(
+                path.join(TEST_APP_DIR, "dist/server.js"),
+                "utf-8"
+            );
+            // Secret sentinel from the handler body must be present on server
+            expect(serverJs).toContain("SOCKET_TERMINAL_SECRET_ABC987");
+            // randomBytes is the node:crypto import the handler uses
+            expect(serverJs).toContain("randomBytes");
         });
     });
 

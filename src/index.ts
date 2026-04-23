@@ -27,8 +27,19 @@ export type {
     EmitOptions,
     SourceFn,
     PerChannelSourceFn,
+    StreamPipeFn,
+    StreamPipeArgs,
     ChannelResolver,
 } from "./events.js";
+
+// Sockets (WebSocket) — types only on the public entry, since the runtime
+// module imports `@hono/node-ws` (server-only). Use `@mauroandre/velojs/sockets`
+// for the `parseJson` helper inside `socket_*` handlers.
+export type {
+    SocketHandler,
+    SocketHandlerArgs,
+    SocketStub,
+} from "./sockets.js";
 
 // Re-export Hono types
 export type { Context, MiddlewareHandler, Next } from "hono";

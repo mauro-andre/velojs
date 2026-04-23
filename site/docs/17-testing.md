@@ -131,7 +131,7 @@ const res = await app.post("/api/github/webhook", {
 });
 ```
 
-See [17-endpoints.md](./17-endpoints.md) for declaring endpoints.
+See [06-endpoints.md](./06-endpoints.md) for declaring endpoints.
 
 `TestResponse` mirrors the Fetch `Response`:
 
@@ -282,6 +282,63 @@ it("perChannelSource aborts when the last subscriber leaves", async () => {
     expect(activeSshConnections.get("session")).toBeUndefined();
 });
 ```
+
+## Sockets — `.socket(handler)`
+
+`app.socket(handlerOrStubOrPath, opts)` opens an **in-memory** WebSocket session against a `socket_*` handler — no real TCP, no upgrade handshake. The handler runs directly with a mock Context.
+
+```typescript
+import { socket_terminal } from "../app/workers/WorkerTerminal.js";
+
+const ws = await app.socket(socket_terminal, {
+    user: { id: "alice" },
+    params: { workerId: "w42" },
+    channel: "w42",
+});
+
+// Send frames client → server
+ws.send({ type: "data", data: "ls\n" });
+
+// Receive frames server → client
+const reply = await ws.next({ timeoutMs: 500 });
+expect(JSON.parse(reply as string)).toMatchObject({ type: "data" });
+
+// Consume a batch
+const batch = await ws.nextN(3, { timeoutMs: 1000 });
+
+// Close from the client — fires abortSignal inside the handler
+await ws.close();
+```
+
+| Field / method | Description |
+|---|---|
+| `ws.send(msg)` | Send a frame. `string` / `Uint8Array` pass through; objects → `JSON.stringify`. |
+| `ws.next({ timeoutMs })` | Wait for the next server-sent frame (cursor advances). |
+| `ws.nextN(n, { timeoutMs })` | Collect `n` consecutive frames (total timeout, not per-frame). |
+| `ws.messages` | All frames received so far. |
+| `ws.closed` | `true` when the handler finished or `close()` was called. |
+| `ws.done` | Promise that resolves when the handler finishes. |
+| `ws.close(code?, reason?)` | Client-initiated close. Aborts `abortSignal` inside the handler. |
+
+### What `app.socket()` does NOT do
+
+- **Middleware does not run.** If your socket handler reads `c.get("user")`, pass `user` via the option:
+  ```typescript
+  const ws = await app.socket(handler, { user: await buildUserForTest(...) });
+  ```
+  Test middleware correctness separately through a regular endpoint or page that exercises the same middleware.
+- **No real HTTP upgrade.** Binary frames (`Uint8Array`) pass through the queue, but the adapter is a buffered channel, not a socket.
+
+### Accepting multiple input shapes
+
+- **Function**: the server-imported `socket_*` handler.
+  `app.socket(socket_terminal, ...)`
+- **Path string**: resolve by route path.
+  `app.socket("/_socket/workers/WorkerTerminal/terminal", ...)`
+- **Stub**: the client stub `{ __path }` produced by the Vite plugin.
+  `app.socket(terminalStub, ...)`
+
+`app.close()` aborts every open socket session on the app — no leaked handlers between tests.
 
 ## mockContext — escape hatch
 

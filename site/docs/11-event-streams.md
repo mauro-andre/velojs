@@ -383,6 +383,68 @@ This means resources scale with **active channels**, not total channels. When no
 
 > Mutually exclusive with `source`. `source` is for stream-wide producers (e.g., a global metrics poll); `perChannelSource` is for per-channel producers.
 
+## `pipe` — unified vocabulary {#pipe-unified-vocabulary}
+
+`pipe` is a **newer per-channel producer** that shares the same vocabulary (`send / keepOpen / abortSignal / close`) used by [`socket_*` handlers](./12-sockets.md). Prefer `pipe` for new code — it's a cleaner API and transfers directly to sockets when the same team later needs bidirectional flow.
+
+```typescript
+export const stream_logs = createEventStream<string>({
+    channel: (c) => c.req.param("appId"),
+    pipe: async ({ send, keepOpen, abortSignal, c, params, channel }) => {
+        const user = c.get("user");
+        const conn = await ssh.connect(channel);
+        const sshStream = conn.exec(`podman logs -f ${channel}`);
+
+        sshStream.on("data", (line) => send(line.toString(), { snapshot: true }));
+        abortSignal.addEventListener("abort", () => {
+            sshStream.close();
+            conn.end();
+        });
+
+        keepOpen();
+    },
+    bufferSize: 500,
+});
+```
+
+Semantics mirror `perChannelSource`:
+
+- Invoked once per channel, when the first subscriber connects.
+- `abortSignal` fires when the last subscriber of that channel disconnects.
+- `c`, `params`, `query` come from the **first** subscriber's request (subsequent subscribers share the same pipe).
+- `channel` is the resolved channel key (empty string for broadcast streams).
+
+### `keepOpen` and auto-close
+
+If `pipe` returns without calling `keepOpen()`, the framework calls `stream.close(channel)` automatically — so one-shot producers don't leak channel state:
+
+```typescript
+pipe: async ({ send }) => {
+    send(await fetchSnapshot());   // one message
+    // no keepOpen → channel auto-closes
+},
+```
+
+For long-lived producers (the common case), call `keepOpen()`.
+
+### Coexists with external `stream.emit`
+
+`pipe` is the **internal** form of production. External services can still call `stream.emit(channel, value)` — both paths reach the same subscribers:
+
+```typescript
+// inside pipe
+send("tick");
+
+// from a service elsewhere
+stream_logs.emit("app-42", "notice: restarted", { snapshot: true });
+```
+
+### Mutual exclusion
+
+`pipe`, `source`, and `perChannelSource` are **mutually exclusive** — pick one. Combining them throws at `createEventStream` time.
+
+`perChannelSource` continues to work and isn't deprecated yet — migrate at your pace, or use `perChannelSource` when the `channelKey` argument is more ergonomic than `channel` on the args object.
+
 ## Async channel resolver (auth + ownership in one place)
 
 The `channel` resolver can be **async** and return `null`/`undefined` to reject the connection. This lets you combine channel extraction with authorization in a single function:

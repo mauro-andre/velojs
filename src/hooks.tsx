@@ -12,6 +12,7 @@ import {
     useLocation as wouterUseLocation,
 } from "wouter-preact";
 import type { EventStream } from "./events.js";
+import type { SocketStub } from "./sockets.js";
 
 // Flag: true when a newer build has been deployed
 export const __veloUpdatePending = signal(false);
@@ -388,4 +389,172 @@ export function useEventStream<TEvent, TSnapshot = TEvent>(
     }, [stream, channel, enabled]);
 
     return { data, snapshot, closed, error };
+}
+
+// ============================================
+// useSocket — WebSocket hook
+// ============================================
+
+type SocketStatus = "connecting" | "open" | "closed";
+
+export interface UseSocketOptions {
+    /** Optional channel; appended as `?channel=...` to the socket URL. */
+    channel?: string;
+    /** Called for every incoming message (text frame = string, binary frame = `Uint8Array`). */
+    onMessage?: (msg: string | Uint8Array) => void;
+    /** Called on successful connection. */
+    onOpen?: () => void;
+    /** Called on close (client or server). */
+    onClose?: (evt: CloseEvent) => void;
+    /** Called on socket error. */
+    onError?: (err: Event) => void;
+    /** When false, the connection is not opened. Flip to true to connect later. Default: true. */
+    enabled?: boolean;
+}
+
+export interface UseSocketApi {
+    /**
+     * Send a message. Strings and `Uint8Array` are sent as-is;
+     * objects are auto-serialized with `JSON.stringify`.
+     *
+     * Buffered if called before the socket is open — dropped once closed.
+     */
+    send: (msg: string | Uint8Array | object) => void;
+    /** Close the socket (client-initiated). */
+    close: (code?: number, reason?: string) => void;
+    /** `"connecting" | "open" | "closed"`. Reactive. */
+    status: Signal<SocketStatus>;
+    /** Last received message. Reactive. */
+    lastMessage: Signal<string | Uint8Array | null>;
+    /** Last socket error, if any. Reactive. */
+    error: Signal<Event | null>;
+}
+
+/**
+ * Subscribes to a WebSocket declared via the `socket_*` convention.
+ *
+ * The hook opens the connection on mount (when `enabled !== false`) and closes
+ * it on unmount or when `channel` / `stub` / `enabled` change.
+ *
+ * **No auto-reconnect.** If the server closes the socket, `status.value`
+ * becomes `"closed"` and stays that way — user flow decides whether to
+ * reconnect (typically by re-mounting or toggling `enabled`).
+ *
+ * ```tsx
+ * const { send, status, lastMessage } = useSocket(socket_terminal, {
+ *     channel: workerId,
+ *     onMessage: (msg) => { ... },
+ * });
+ *
+ * send({ type: "resize", cols: 80, rows: 24 });
+ * ```
+ */
+export function useSocket(
+    stub: SocketStub | { __path: string },
+    options: UseSocketOptions = {}
+): UseSocketApi {
+    const status = useSignal<SocketStatus>("connecting");
+    const lastMessage = useSignal<string | Uint8Array | null>(null);
+    const error = useSignal<Event | null>(null);
+
+    const wsRef = useRef<WebSocket | null>(null);
+    const pendingRef = useRef<(string | ArrayBufferLike | Uint8Array)[]>([]);
+
+    const { channel, onMessage, onOpen, onClose, onError, enabled = true } = options;
+
+    useEffect(() => {
+        if (typeof window === "undefined") return;
+        if (!enabled) return;
+        if (!stub.__path) {
+            console.warn("[velojs] useSocket: stub has no __path");
+            return;
+        }
+
+        // Reset state for a fresh connection
+        status.value = "connecting";
+        lastMessage.value = null;
+        error.value = null;
+
+        // Build ws:// or wss:// URL relative to origin
+        const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
+        const base = `${proto}//${window.location.host}`;
+        const url = channel
+            ? `${base}${stub.__path}?channel=${encodeURIComponent(channel)}`
+            : `${base}${stub.__path}`;
+
+        const ws = new WebSocket(url);
+        ws.binaryType = "arraybuffer";
+        wsRef.current = ws;
+
+        ws.addEventListener("open", () => {
+            status.value = "open";
+            // Flush anything queued while connecting
+            const pending = pendingRef.current;
+            pendingRef.current = [];
+            for (const msg of pending) {
+                try { ws.send(msg as any); } catch {}
+            }
+            onOpen?.();
+        });
+
+        ws.addEventListener("message", (evt) => {
+            let msg: string | Uint8Array;
+            if (typeof evt.data === "string") {
+                msg = evt.data;
+            } else if (evt.data instanceof ArrayBuffer) {
+                msg = new Uint8Array(evt.data);
+            } else {
+                // Blob or other — skip (we configured binaryType=arraybuffer so this shouldn't hit)
+                return;
+            }
+            lastMessage.value = msg;
+            onMessage?.(msg);
+        });
+
+        ws.addEventListener("close", (evt) => {
+            status.value = "closed";
+            wsRef.current = null;
+            onClose?.(evt);
+        });
+
+        ws.addEventListener("error", (evt) => {
+            error.value = evt;
+            onError?.(evt);
+        });
+
+        return () => {
+            wsRef.current = null;
+            try {
+                if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
+                    ws.close();
+                }
+            } catch {}
+        };
+    }, [stub.__path, channel, enabled]);
+
+    const send: UseSocketApi["send"] = (msg) => {
+        let payload: string | ArrayBufferLike | Uint8Array;
+        if (typeof msg === "string" || msg instanceof Uint8Array) {
+            payload = msg;
+        } else {
+            payload = JSON.stringify(msg);
+        }
+
+        const ws = wsRef.current;
+        if (ws && ws.readyState === WebSocket.OPEN) {
+            try { ws.send(payload as any); } catch {}
+        } else if (ws && ws.readyState === WebSocket.CONNECTING) {
+            // Queue until open
+            pendingRef.current.push(payload);
+        }
+        // Otherwise dropped (closed)
+    };
+
+    const close: UseSocketApi["close"] = (code, reason) => {
+        const ws = wsRef.current;
+        if (!ws) return;
+        try { ws.close(code, reason); } catch {}
+    };
+
+    return { send, close, status, lastMessage, error };
 }

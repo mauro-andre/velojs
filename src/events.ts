@@ -104,6 +104,49 @@ export type PerChannelSourceFn<TEvent> = (
 ) => void | Promise<void>;
 
 /**
+ * Arguments passed to a stream `pipe` handler.
+ *
+ * A `pipe` is a **per-channel producer** (same scoping as `perChannelSource`)
+ * with the unified vocabulary used across `stream_*` and `socket_*`:
+ * `send / keepOpen / close / abortSignal`. Prefer `pipe` for new code.
+ *
+ * `c`, `params`, `query` are captured from the **first** subscriber whose
+ * connect spawned the pipe on this channel. Subsequent subscribers share the
+ * same pipe instance.
+ */
+export interface StreamPipeArgs<TEvent> {
+    /** Emit an event to all current subscribers of this channel. */
+    send: (event: TEvent, options?: EmitOptions) => void;
+    /**
+     * Mark the pipe as long-running. If `pipe` returns **without** calling
+     * `keepOpen()`, the framework closes this channel (cleanup + notify subs).
+     * If `keepOpen()` is called, the pipe stays alive until the abort signal
+     * fires (last subscriber disconnected, or external `stream.close`).
+     */
+    keepOpen: () => void;
+    /** Close this channel imperatively (fires notify + schedules cleanup). */
+    close: () => void;
+    /** Fires when the last subscriber of this channel disconnects. */
+    abortSignal: AbortSignal;
+    /** Hono Context from the first subscriber's request. */
+    c: Context;
+    /** URL params from the first subscriber's request. */
+    params: Record<string, string>;
+    /** Query params from the first subscriber's request. */
+    query: Record<string, string>;
+    /** The channel key this pipe is running for. Empty string for broadcast streams. */
+    channel: string;
+}
+
+/**
+ * A `pipe` handler — per-channel producer with unified vocabulary.
+ * Mutually exclusive with `source` and `perChannelSource`.
+ */
+export type StreamPipeFn<TEvent> = (
+    args: StreamPipeArgs<TEvent>
+) => void | Promise<void>;
+
+/**
  * Async-capable channel resolver. Returns a channel ID, or `null`/`undefined`
  * to reject the connection (framework responds 403).
  *
@@ -199,9 +242,22 @@ export interface EventStreamConfig<TEvent, TSnapshot = TEvent> {
      * external pub/sub subscriptions). The `emit` provided is bound to the current
      * channel — call it with just the value.
      *
-     * Mutually exclusive with `source`.
+     * Mutually exclusive with `source` and `pipe`.
      */
     perChannelSource?: PerChannelSourceFn<TEvent>;
+
+    /**
+     * Per-channel producer with the unified `send / keepOpen / abortSignal`
+     * vocabulary shared with `socket_*`. Invoked when the first subscriber of a
+     * channel connects. Aborted when the last subscriber of that channel
+     * disconnects.
+     *
+     * Prefer `pipe` for new code. `source` and `perChannelSource` remain for
+     * backwards compatibility.
+     *
+     * Mutually exclusive with `source` and `perChannelSource`.
+     */
+    pipe?: StreamPipeFn<TEvent>;
 
     /**
      * Time (ms) the per-channel snapshot buffer is retained after `close()`.
@@ -249,8 +305,12 @@ export interface EventStream<TEvent, TSnapshot = TEvent> {
     readonly __buffers: Map<string, TEvent[]>;
     /** Internal: assigned URL path (set by standalone or by stream_* discovery) */
     __path: string | undefined;
-    /** Internal: source lifecycle hook */
-    __onConnect(channelKey: string, listener: StreamListener<TEvent>): void;
+    /** Internal: source lifecycle hook. `ctx` is used to seed `pipe` when it spawns. */
+    __onConnect(
+        channelKey: string,
+        listener: StreamListener<TEvent>,
+        ctx?: { c: Context; params: Record<string, string>; query: Record<string, string> }
+    ): void;
     /** Internal: source lifecycle hook */
     __onDisconnect(channelKey: string, listener: StreamListener<TEvent>): void;
     /** @internal Test-only: reset all transient state (buffers, listeners, controllers, timers). */
@@ -312,12 +372,16 @@ export function createEventStream<TEvent, TSnapshot = TEvent>(
         );
     }
 
-    // Sanity: source and perChannelSource are mutually exclusive
-    if (config.source && config.perChannelSource) {
+    // Sanity: source, perChannelSource, and pipe are mutually exclusive
+    const producerCount =
+        (config.source ? 1 : 0) +
+        (config.perChannelSource ? 1 : 0) +
+        (config.pipe ? 1 : 0);
+    if (producerCount > 1) {
         throw new Error(
-            "[velojs] createEventStream: `source` and `perChannelSource` are mutually " +
-            "exclusive. Use `source` for stream-wide producers or `perChannelSource` " +
-            "for per-channel resources, not both."
+            "[velojs] createEventStream: `source`, `perChannelSource`, and `pipe` are " +
+            "mutually exclusive — pick one. `source` is stream-wide, `perChannelSource` " +
+            "and `pipe` are per-channel (prefer `pipe` for new code)."
         );
     }
 
@@ -333,6 +397,9 @@ export function createEventStream<TEvent, TSnapshot = TEvent>(
 
     // Per-channel source lifecycle: one AbortController per active channel.
     const perChannelControllers = new Map<string, AbortController>();
+
+    // Pipe lifecycle: one AbortController per active channel.
+    const pipeControllers = new Map<string, AbortController>();
 
     const startSourceIfNeeded = () => {
         if (!config.source) return;
@@ -379,6 +446,62 @@ export function createEventStream<TEvent, TSnapshot = TEvent>(
         if (!ctrl) return;
         ctrl.abort();
         perChannelControllers.delete(channelKey);
+    };
+
+    const startPipe = (
+        channelKey: string,
+        ctx: { c: Context; params: Record<string, string>; query: Record<string, string> } | undefined
+    ) => {
+        if (!config.pipe) return;
+        if (pipeControllers.has(channelKey)) return;
+        if (!ctx) {
+            // ctx is provided by registerStreamHandler on connect. If someone
+            // invokes __onConnect without ctx, they've skipped the normal
+            // request flow — skip pipe (would crash without Context).
+            return;
+        }
+        const ctrl = new AbortController();
+        pipeControllers.set(channelKey, ctrl);
+
+        let kept = false;
+        const pipeSend = (event: TEvent, options?: EmitOptions) => {
+            (stream.emit as any)(channelKey, event, options);
+        };
+        const pipeClose = () => stream.close(channelKey);
+        const pipeKeepOpen = () => {
+            kept = true;
+        };
+
+        Promise.resolve(
+            config.pipe!({
+                send: pipeSend,
+                keepOpen: pipeKeepOpen,
+                close: pipeClose,
+                abortSignal: ctrl.signal,
+                c: ctx.c,
+                params: ctx.params,
+                query: ctx.query,
+                channel: channelKey,
+            })
+        )
+            .then(() => {
+                if (ctrl.signal.aborted) return;
+                if (!kept) stream.close(channelKey);
+            })
+            .catch((err) => {
+                console.error(
+                    `[velojs] stream pipe threw for channel "${channelKey}":`,
+                    err
+                );
+                if (!ctrl.signal.aborted) stream.close(channelKey);
+            });
+    };
+
+    const stopPipe = (channelKey: string) => {
+        const ctrl = pipeControllers.get(channelKey);
+        if (!ctrl) return;
+        ctrl.abort();
+        pipeControllers.delete(channelKey);
     };
 
     function emit(
@@ -461,7 +584,11 @@ export function createEventStream<TEvent, TSnapshot = TEvent>(
         __listeners: listeners,
         __buffers: buffers,
         __path: config.path,
-        __onConnect(channelKey: string, listener: StreamListener<TEvent>) {
+        __onConnect(
+            channelKey: string,
+            listener: StreamListener<TEvent>,
+            ctx?: { c: Context; params: Record<string, string>; query: Record<string, string> }
+        ) {
             let set = listeners.get(channelKey);
             const wasFirstInChannel = !set || set.size === 0;
             if (!set) {
@@ -471,7 +598,10 @@ export function createEventStream<TEvent, TSnapshot = TEvent>(
             set.add(listener);
             totalSubscribers++;
             startSourceIfNeeded();
-            if (wasFirstInChannel) startPerChannelSource(channelKey);
+            if (wasFirstInChannel) {
+                startPerChannelSource(channelKey);
+                startPipe(channelKey, ctx);
+            }
         },
         __onDisconnect(channelKey: string, listener: StreamListener<TEvent>) {
             const set = listeners.get(channelKey);
@@ -480,6 +610,7 @@ export function createEventStream<TEvent, TSnapshot = TEvent>(
             if (set.size === 0) {
                 listeners.delete(channelKey);
                 stopPerChannelSource(channelKey);
+                stopPipe(channelKey);
             }
             totalSubscribers--;
             stopSourceIfIdle();
@@ -497,13 +628,15 @@ export function createEventStream<TEvent, TSnapshot = TEvent>(
             // Clear pending retention timers
             for (const t of cleanupTimers.values()) clearTimeout(t);
             cleanupTimers.clear();
-            // Abort source / perChannelSources
+            // Abort source / perChannelSources / pipes
             if (sourceController) {
                 sourceController.abort();
                 sourceController = null;
             }
             for (const ctrl of perChannelControllers.values()) ctrl.abort();
             perChannelControllers.clear();
+            for (const ctrl of pipeControllers.values()) ctrl.abort();
+            pipeControllers.clear();
             totalSubscribers = 0;
         },
     };
@@ -691,7 +824,11 @@ export function registerStreamHandler<TEvent, TSnapshot>(
                 });
             };
 
-            stream.__onConnect(channelKey, listener);
+            stream.__onConnect(channelKey, listener, {
+                c,
+                params: c.req.param(),
+                query: c.req.query(),
+            });
 
             // Heartbeat to keep idle proxies open — also goes through the chain
             // so it doesn't interleave mid-event with actual data writes.

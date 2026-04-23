@@ -185,9 +185,9 @@ export const featureCard = style({
 });
 
 export const featureIcon = style({
-    fontSize: "2rem",
     display: "block",
-    marginBottom: "12px",
+    marginBottom: "16px",
+    color: vars.color.primary,
 });
 
 export const featureTitle = style({

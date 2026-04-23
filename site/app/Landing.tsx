@@ -1,34 +1,42 @@
+import type { ComponentType } from "preact";
 import { Link } from "../../src/components.js";
 import * as css from "./Landing.css.js";
+import { GitBranch, Zap, Repeat, Rss, Box, Lock } from "./icons/scarlab.js";
 
-const features = [
+interface Feature {
+    Icon: ComponentType<{ size?: number; class?: string }>;
+    title: string;
+    desc: string;
+}
+
+const features: Feature[] = [
     {
-        icon: "🌳",
+        Icon: GitBranch,
         title: "File-Based Routing",
         desc: "Define your entire app as a route tree in routes.tsx. Nested layouts, automatic path resolution, and middleware inheritance.",
     },
     {
-        icon: "⚡",
+        Icon: Zap,
         title: "SSR + Hydration",
         desc: "Server-side rendering with seamless client hydration. Loaders run in parallel on the server, data flows automatically.",
     },
     {
-        icon: "🔄",
+        Icon: Repeat,
         title: "RPC Actions",
         desc: "Write server functions, call them from the client. The Vite plugin transforms action bodies into fetch stubs via AST.",
     },
     {
-        icon: "📡",
+        Icon: Rss,
         title: "Reactive Signals",
         desc: "@preact/signals for fine-grained reactivity. No re-renders, no selectors — just signals that update the DOM directly.",
     },
     {
-        icon: "📦",
+        Icon: Box,
         title: "Zero Config",
         desc: "One plugin, one install. Hono, Preact, Vite, wouter — everything included and wired together out of the box.",
     },
     {
-        icon: "🔒",
+        Icon: Lock,
         title: "Type-Safe",
         desc: "Full TypeScript. Typed loaders, actions, route modules, and middleware. Autocomplete everywhere.",
     },
@@ -79,7 +87,7 @@ export const Component = () => {
                 <div class={css.featuresGrid}>
                     {features.map((f, i) => (
                         <div key={i} class={css.featureCard}>
-                            <span class={css.featureIcon}>{f.icon}</span>
+                            <f.Icon class={css.featureIcon} size={32} />
                             <h3 class={css.featureTitle}>{f.title}</h3>
                             <p class={css.featureDesc}>{f.desc}</p>
                         </div>
