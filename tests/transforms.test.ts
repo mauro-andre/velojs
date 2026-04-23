@@ -6,6 +6,7 @@ import {
     transformStreamsForClient,
     removeLoaders,
     removeMiddlewares,
+    removeEndpointRoutes,
 } from "../src/vite.js";
 
 // ============================================
@@ -286,5 +287,177 @@ export const action_save = async () => ({ ok: true });
         expect(output).toContain("Component");
         expect(output).toContain("action_save");
         expect(output).not.toContain("__isVeloEventStream");
+    });
+});
+
+// ============================================
+// removeEndpointRoutes
+// ============================================
+
+describe("removeEndpointRoutes", () => {
+    it("removes object with handler property (module-only handler)", () => {
+        const input = `import { githubWebhook } from "./webhooks/github.js";
+import * as Home from "./pages/Home.js";
+
+export default [
+    { path: "/", module: Home },
+    { path: "/api/github", method: "POST", handler: githubWebhook },
+];`;
+        const output = removeEndpointRoutes(input);
+        expect(output).not.toContain("githubWebhook");
+        expect(output).not.toContain("/api/github");
+        expect(output).not.toContain("handler");
+        expect(output).toContain("Home");
+    });
+
+    it("removes inline arrow-function handler", () => {
+        const input = `import * as Home from "./pages/Home.js";
+
+export default [
+    { path: "/", module: Home },
+    { path: "/health", method: "GET", handler: ({ c }) => c.text("ok") },
+];`;
+        const output = removeEndpointRoutes(input);
+        expect(output).toContain("Home");
+        expect(output).not.toContain("/health");
+        expect(output).not.toContain("handler");
+    });
+
+    it("cleans up import that was only used by the removed endpoint", () => {
+        const input = `import { pixWebhook } from "./webhooks/pix.js";
+import * as Home from "./pages/Home.js";
+
+export default [
+    { path: "/", module: Home },
+    { path: "/api/pix", method: "POST", handler: pixWebhook },
+];`;
+        const output = removeEndpointRoutes(input);
+        expect(output).not.toContain("pixWebhook");
+        expect(output).not.toContain(`"./webhooks/pix.js"`);
+        expect(output).toContain("Home");
+    });
+
+    it("keeps import that is still used by a page after endpoint removal", () => {
+        const input = `import { shared } from "./shared.js";
+import * as Home from "./pages/Home.js";
+
+const base = shared();
+
+export default [
+    { path: "/", module: Home },
+    { path: "/api/x", method: "POST", handler: shared },
+];`;
+        const output = removeEndpointRoutes(input);
+        expect(output).toContain("shared");
+        expect(output).toContain(`"./shared.js"`);
+    });
+
+    it("preserves grouping nodes (path + children only)", () => {
+        const input = `import { mw } from "./mw.js";
+import * as User from "./pages/User.js";
+
+export default [
+    { path: "/api", middlewares: [mw], children: [
+        { path: "/user", module: User },
+        { path: "/webhook", method: "POST", handler: () => new Response() },
+    ]},
+];`;
+        const output = removeEndpointRoutes(input);
+        expect(output).toContain("/api");
+        expect(output).toContain("/user");
+        expect(output).toContain("User");
+        expect(output).not.toContain("/webhook");
+        expect(output).not.toContain("handler");
+    });
+
+    it("removes endpoint nested inside children array", () => {
+        const input = `import { adminWebhook } from "./admin.js";
+import * as Admin from "./pages/Admin.js";
+
+export default [
+    { path: "/admin", children: [
+        { path: "/", module: Admin },
+        { path: "/webhook", method: "POST", handler: adminWebhook },
+    ]},
+];`;
+        const output = removeEndpointRoutes(input);
+        expect(output).not.toContain("adminWebhook");
+        expect(output).not.toContain(`"./admin.js"`);
+        expect(output).toContain("Admin");
+    });
+
+    it("is a no-op when routes have no endpoints", () => {
+        const input = `import * as Home from "./pages/Home.js";
+
+export default [
+    { path: "/", module: Home },
+];`;
+        const output = removeEndpointRoutes(input);
+        expect(output).toBe(input);
+    });
+
+    it("handles `satisfies AppRoutes` type annotation", () => {
+        const input = `import type { AppRoutes } from "@mauroandre/velojs";
+import { webhook } from "./webhook.js";
+import * as Home from "./pages/Home.js";
+
+export default [
+    { path: "/", module: Home },
+    { path: "/api", method: "POST", handler: webhook },
+] satisfies AppRoutes;`;
+        const output = removeEndpointRoutes(input);
+        expect(output).not.toContain("webhook");
+        expect(output).not.toContain(`"./webhook.js"`);
+        expect(output).toContain("Home");
+    });
+
+    it("handles `as AppRoutes` type cast", () => {
+        const input = `import type { AppRoutes } from "@mauroandre/velojs";
+import { webhook } from "./webhook.js";
+import * as Home from "./pages/Home.js";
+
+export default [
+    { path: "/", module: Home },
+    { path: "/api", method: "POST", handler: webhook },
+] as AppRoutes;`;
+        const output = removeEndpointRoutes(input);
+        expect(output).not.toContain("webhook");
+        expect(output).toContain("Home");
+    });
+
+    it("keeps non-endpoint imports from same source", () => {
+        const input = `import { webhook, helper } from "./utils.js";
+import * as Home from "./pages/Home.js";
+
+const compute = helper();
+
+export default [
+    { path: "/", module: Home },
+    { path: "/api", method: "POST", handler: webhook },
+];`;
+        const output = removeEndpointRoutes(input);
+        expect(output).not.toContain("webhook");
+        expect(output).toContain("helper");
+    });
+
+    it("removes multiple endpoints at different tree levels", () => {
+        const input = `import { a } from "./a.js";
+import { b } from "./b.js";
+import * as Home from "./pages/Home.js";
+
+export default [
+    { path: "/", module: Home },
+    { path: "/api/a", method: "POST", handler: a },
+    { path: "/sub", children: [
+        { path: "/b", method: "GET", handler: b },
+    ]},
+];`;
+        const output = removeEndpointRoutes(input);
+        expect(output).not.toContain(`"./a.js"`);
+        expect(output).not.toContain(`"./b.js"`);
+        expect(output).not.toContain("/api/a");
+        expect(output).not.toContain("/b");
+        expect(output).toContain("Home");
+        expect(output).toContain("/sub");
     });
 });

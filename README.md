@@ -534,6 +534,47 @@ The client-side transform rewrites the import to fetch `/_action/admin/Layout/lo
 
 ---
 
+## Endpoints
+
+Declarative HTTP endpoints for anything that isn't a page — webhooks, email-verification redirects, OAuth callbacks, health checks.
+
+Declare them directly in `routes.tsx`:
+
+```tsx
+import type { AppRoutes, EndpointHandler } from "@mauroandre/velojs";
+import * as Home from "./pages/Home.js";
+import { githubWebhook } from "./webhooks/github.handler.js";
+
+export default [
+    { path: "/", module: Home },
+    { path: "/api/github/webhook", method: "POST", handler: githubWebhook },
+] satisfies AppRoutes;
+```
+
+The handler gets `{ c, params, query }` and must return a `Response`:
+
+```ts
+import type { EndpointHandler } from "@mauroandre/velojs";
+
+export const githubWebhook: EndpointHandler = async ({ c }) => {
+    const body = await c.req.json();
+    // ...verify signature, process event...
+    return c.json({ ok: true });
+};
+```
+
+Endpoints inherit parent `middlewares` and can be nested inside grouping nodes. The Vite plugin strips endpoint objects (and their handler imports) from the client bundle, so server-only code never ships to the browser.
+
+Because endpoints live in `routes.tsx`, the testing toolkit sees them automatically:
+
+```ts
+const res = await app.post("/api/github/webhook", { body: {...}, headers: {...} });
+```
+
+Full documentation: [site/docs/17-endpoints.md](./site/docs/17-endpoints.md).
+
+---
+
 ## Event Streams
 
 Push real-time updates from server to client via Server-Sent Events (SSE). Live progress, notifications, metrics, log streaming, AI tokens — anything server → client.

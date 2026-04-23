@@ -29,9 +29,23 @@ export interface RouteModule {
     [key: `action_${string}`]: (args: ActionArgs<any>) => Promise<any>;
 }
 
+export type HTTPMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
+
+export interface EndpointHandlerArgs {
+    c: Context;
+    params: Record<string, string>;
+    query: Record<string, string>;
+}
+
+export type EndpointHandler = (
+    args: EndpointHandlerArgs
+) => Response | Promise<Response>;
+
 export interface RouteNode {
     path?: string;
-    module: RouteModule;
+    module?: RouteModule;
+    method?: HTTPMethod;
+    handler?: EndpointHandler;
     children?: RouteNode[];
     middlewares?: MiddlewareHandler[];
     isRoot?: boolean;

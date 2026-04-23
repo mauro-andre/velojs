@@ -50,6 +50,7 @@ function createTestApp(tgzPath: string) {
     }
     fs.mkdirSync(TEST_APP_DIR, { recursive: true });
     fs.mkdirSync(path.join(TEST_APP_DIR, "app/pages"), { recursive: true });
+    fs.mkdirSync(path.join(TEST_APP_DIR, "app/webhooks"), { recursive: true });
     fs.mkdirSync(path.join(TEST_APP_DIR, "public/logos"), { recursive: true });
 
     // package.json — references built VeloJS via tarball (same as npm install from registry)
@@ -114,6 +115,24 @@ export const Component = ({ children }: { children?: ComponentChildren }) => (
     // app/server.tsx
     fs.writeFileSync(path.join(TEST_APP_DIR, "app/server.tsx"), "");
 
+    // app/webhooks/github.handler.ts — server-only: imports node:crypto
+    fs.writeFileSync(
+        path.join(TEST_APP_DIR, "app/webhooks/github.handler.ts"),
+        `import type { EndpointHandler } from "@mauroandre/velojs";
+import { createHmac } from "node:crypto";
+
+const SECRET_SENTINEL_MARKER = "GITHUB_WEBHOOK_SECRET_XYZ_12345";
+
+export const githubWebhook: EndpointHandler = async ({ c }) => {
+    const raw = await c.req.text();
+    const sig = c.req.header("x-hub-signature-256") ?? "";
+    const expected = "sha256=" + createHmac("sha256", SECRET_SENTINEL_MARKER).update(raw).digest("hex");
+    if (sig !== expected) return c.json({ error: "bad sig" }, 401);
+    return c.json({ ok: true });
+};
+`
+    );
+
     // app/routes.tsx
     fs.writeFileSync(
         path.join(TEST_APP_DIR, "app/routes.tsx"),
@@ -122,6 +141,7 @@ import * as Root from "./client-root.js";
 import * as Home from "./pages/Home.js";
 import * as About from "./pages/About.js";
 import * as Deploy from "./pages/Deploy.js";
+import { githubWebhook } from "./webhooks/github.handler.js";
 
 export default [
     {
@@ -131,6 +151,7 @@ export default [
             { path: "/", module: Home },
             { path: "/about", module: About },
             { path: "/deploy/:id", module: Deploy },
+            { path: "/api/github/webhook", method: "POST", handler: githubWebhook },
         ],
     },
 ] satisfies AppRoutes;
@@ -404,6 +425,34 @@ describe("Build Integration", () => {
                 "utf-8"
             );
             expect(hooksJs).toContain("useEventStream");
+        });
+
+        it("endpoint handler is registered on the server bundle", () => {
+            const serverJs = fs.readFileSync(
+                path.join(TEST_APP_DIR, "dist/server.js"),
+                "utf-8"
+            );
+            // The webhook secret sentinel and path should both be in the server bundle
+            expect(serverJs).toContain("/api/github/webhook");
+            expect(serverJs).toContain("GITHUB_WEBHOOK_SECRET_XYZ_12345");
+        });
+
+        it("endpoint handler does NOT leak into the client bundle", () => {
+            const clientDir = path.join(TEST_APP_DIR, "dist/client");
+            const clientJsFile = fs
+                .readdirSync(clientDir)
+                .find((f) => f.startsWith("client.") && f.endsWith(".js"))!;
+            const clientJs = fs.readFileSync(
+                path.join(clientDir, clientJsFile),
+                "utf-8"
+            );
+
+            // The endpoint path must not appear in the client bundle
+            expect(clientJs).not.toContain("/api/github/webhook");
+            // The secret sentinel (inside the handler module) must not appear
+            expect(clientJs).not.toContain("GITHUB_WEBHOOK_SECRET_XYZ_12345");
+            // node:crypto usage from the handler must not leak
+            expect(clientJs).not.toContain("createHmac");
         });
     });
 

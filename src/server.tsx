@@ -4,7 +4,7 @@ import { trimTrailingSlash } from "hono/trailing-slash";
 import { render as preactRender } from "preact-render-to-string";
 import { Router } from "wouter-preact";
 import type { ComponentType, VNode } from "preact";
-import type { RouteNode, RouteModule, LoaderArgs, AppRoutes } from "./types.js";
+import type { RouteNode, RouteModule, LoaderArgs, AppRoutes, HTTPMethod } from "./types.js";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { getAppContext } from "./app-context.js";
 import { flushPendingStreamRoutes, registerStreamHandler } from "./events.js";
@@ -163,7 +163,22 @@ const registerRoutes = (
     parentMiddlewares: MiddlewareHandler[] = []
 ) => {
     for (const node of nodes) {
-        const currentModules = [...parentModules, node.module];
+        // Pure endpoint nodes (handler without module) are handled by registerEndpointRoutes
+        if (node.handler && !node.module) {
+            if (node.children) {
+                registerRoutes(
+                    app,
+                    node.children,
+                    parentModules,
+                    [...parentMiddlewares, ...(node.middlewares || [])]
+                );
+            }
+            continue;
+        }
+
+        const currentModules = node.module
+            ? [...parentModules, node.module]
+            : parentModules;
         // Acumula middlewares: pai → filho
         const currentMiddlewares = [
             ...parentMiddlewares,
@@ -178,6 +193,9 @@ const registerRoutes = (
                 currentModules,
                 currentMiddlewares
             );
+        } else if (!node.module) {
+            // Grouping leaf (no module, no children) — nothing to render. Ignore.
+            continue;
         } else {
             // Folha - registra rota usando metadata.fullPath
             const fullPath = node.module.metadata?.fullPath;
@@ -213,14 +231,14 @@ const registerActionRoutes = (
     parentMiddlewares: MiddlewareHandler[] = []
 ) => {
     for (const node of nodes) {
-        const moduleId = node.module.metadata?.moduleId;
+        const moduleId = node.module?.metadata?.moduleId;
         // Acumula middlewares: pai → filho
         const currentMiddlewares = [
             ...parentMiddlewares,
             ...(node.middlewares || []),
         ];
 
-        if (moduleId) {
+        if (node.module && moduleId) {
             // Encontra todas as actions do módulo
             const actionKeys = Object.keys(node.module).filter((k) =>
                 k.startsWith("action_")
@@ -294,13 +312,13 @@ const registerStreamRoutes = async (
 ) => {
     const visit = (subNodes: RouteNode[], inheritedMiddlewares: MiddlewareHandler[]) => {
         for (const node of subNodes) {
-            const moduleId = node.module.metadata?.moduleId;
+            const moduleId = node.module?.metadata?.moduleId;
             const currentMiddlewares = [
                 ...inheritedMiddlewares,
                 ...(node.middlewares || []),
             ];
 
-            if (moduleId) {
+            if (node.module && moduleId) {
                 // Encontra todas as exportações stream_* no módulo
                 const streamKeys = Object.keys(node.module).filter((k) =>
                     k.startsWith("stream_")
@@ -338,6 +356,109 @@ const registerStreamRoutes = async (
 };
 
 // ============================================
+// REGISTER ENDPOINT ROUTES - Declarative HTTP endpoints (EndpointRoute)
+// ============================================
+
+const joinPath = (parent: string, segment: string | undefined): string => {
+    if (!segment) return parent || "";
+    // Mirror collectFullPaths: paths concatenate with parent. Leading slash on
+    // segment means "nested under parent" (velojs convention), not absolute.
+    return segment.startsWith("/")
+        ? parent + segment
+        : parent
+            ? parent + "/" + segment
+            : "/" + segment;
+};
+
+const collectPageGetPaths = (nodes: RouteNode[]): Set<string> => {
+    const paths = new Set<string>();
+    const walk = (subNodes: RouteNode[]) => {
+        for (const node of subNodes) {
+            if (node.module && !node.children) {
+                const fullPath = node.module.metadata?.fullPath;
+                if (fullPath) paths.add(fullPath);
+            }
+            if (node.children) walk(node.children);
+        }
+    };
+    walk(nodes);
+    return paths;
+};
+
+const registerEndpointRoutes = (
+    app: Hono,
+    nodes: RouteNode[],
+    pageGetPaths: Set<string>,
+    parentPath: string = "",
+    parentMiddlewares: MiddlewareHandler[] = []
+) => {
+    for (const node of nodes) {
+        const fullPath = joinPath(parentPath, node.path);
+        const currentMiddlewares = [
+            ...parentMiddlewares,
+            ...(node.middlewares || []),
+        ];
+
+        // Validation — loud warns, no throws
+        const hasHandler = !!node.handler;
+        const hasMethod = !!node.method;
+
+        if (hasHandler && !hasMethod) {
+            console.warn(
+                `[velojs] invalid route at "${fullPath || "/"}" — "handler" set without "method"; endpoint skipped`
+            );
+        } else if (hasMethod && !hasHandler) {
+            console.warn(
+                `[velojs] invalid route at "${fullPath || "/"}" — "method" set without "handler"; endpoint skipped`
+            );
+        } else if (hasHandler && node.module) {
+            console.warn(
+                `[velojs] ambiguous route at "${fullPath || "/"}" — both "module" and "handler" set; endpoint ignored, page kept`
+            );
+        } else if (hasHandler && node.isRoot) {
+            console.warn(
+                `[velojs] "isRoot" has no effect on endpoint at "${fullPath || "/"}"; ignored`
+            );
+        }
+
+        const canRegister = hasHandler && hasMethod && !node.module;
+        if (canRegister) {
+            const method = node.method as HTTPMethod;
+            if (method === "GET" && pageGetPaths.has(fullPath)) {
+                console.warn(
+                    `[velojs] path "${fullPath}" has both a page GET and an endpoint GET; endpoint will win. Consider renaming one.`
+                );
+            }
+
+            const handlerFn = node.handler!;
+            const wrapped = async (c: Context) => {
+                return await handlerFn({
+                    c,
+                    params: c.req.param(),
+                    query: c.req.query(),
+                });
+            };
+
+            if (currentMiddlewares.length > 0) {
+                app.on([method], [fullPath], ...currentMiddlewares, wrapped);
+            } else {
+                app.on([method], [fullPath], wrapped);
+            }
+        }
+
+        if (node.children) {
+            registerEndpointRoutes(
+                app,
+                node.children,
+                pageGetPaths,
+                fullPath,
+                currentMiddlewares
+            );
+        }
+    }
+};
+
+// ============================================
 // CREATE APP - Cria app Hono com rotas
 // ============================================
 
@@ -365,6 +486,10 @@ export const createApp = async (routes: AppRoutes): Promise<Hono> => {
 
     // Stream routes (SSE) — convenção stream_* por módulo
     await registerStreamRoutes(app, routes);
+
+    // Endpoint routes (declarative HTTP endpoints mixed into the route tree)
+    const pageGetPaths = collectPageGetPaths(routes);
+    registerEndpointRoutes(app, routes, pageGetPaths);
 
     // Standalone streams registrados via createEventStream({ path: ... })
     flushPendingStreamRoutes(app);

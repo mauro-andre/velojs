@@ -19,11 +19,14 @@ async function collectStaticRoutes(
     const routes: StaticRoute[] = [];
 
     for (const node of nodes) {
-        const nodePath = node.module.metadata?.fullPath ?? "";
+        const nodePath = node.module?.metadata?.fullPath ?? "";
 
         if (node.children) {
             const childRoutes = await collectStaticRoutes(node.children, nodePath);
             routes.push(...childRoutes);
+        } else if (!node.module) {
+            // Endpoint-only or grouping leaf — not renderable as static page
+            continue;
         } else {
             // Leaf node — this is a page
             const fullPath = node.module.metadata?.fullPath;

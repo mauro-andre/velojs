@@ -30,10 +30,10 @@ export function buildConventionRegistry(routes: AppRoutes): ConventionRegistry {
 
     function visit(nodes: RouteNode[]): void {
         for (const node of nodes) {
-            const moduleId = node.module.metadata?.moduleId;
-            const fullPath = node.module.metadata?.fullPath;
+            const moduleId = node.module?.metadata?.moduleId;
+            const fullPath = node.module?.metadata?.fullPath;
 
-            if (moduleId) {
+            if (node.module && moduleId) {
                 // Discover actions
                 for (const key of Object.keys(node.module)) {
                     if (!key.startsWith("action_")) continue;

@@ -6,6 +6,9 @@ export type {
     LoaderArgs,
     ActionArgs,
     Metadata,
+    HTTPMethod,
+    EndpointHandler,
+    EndpointHandlerArgs,
 } from "./types.js";
 
 // Config

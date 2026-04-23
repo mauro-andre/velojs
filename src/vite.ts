@@ -537,6 +537,160 @@ export function removeMiddlewares(code: string): string {
 }
 
 // ============================================
+// TRANSFORMAÇÃO 5.5: Remover EndpointRoutes do routes.tsx (client only)
+// ============================================
+
+/**
+ * Collects all Identifier names referenced anywhere inside `node` (and its
+ * subtree). Skips the *keys* of non-computed ObjectProperty and the
+ * *property* side of non-computed MemberExpression, since those are symbolic
+ * and not references to a binding.
+ */
+function collectReferencedIdentifiers(node: unknown, into: Set<string>): void {
+    const walk = (n: any): void => {
+        if (!n || typeof n !== "object") return;
+        if (Array.isArray(n)) {
+            for (const item of n) walk(item);
+            return;
+        }
+        if (n.type === "Identifier") {
+            into.add(n.name);
+            return;
+        }
+        if (n.type === "MemberExpression") {
+            walk(n.object);
+            if (n.computed) walk(n.property);
+            return;
+        }
+        if ((n.type === "ObjectProperty" || n.type === "ObjectMethod") && !n.computed) {
+            // Skip the key (symbolic), walk value/body
+            if (n.type === "ObjectProperty") walk(n.value);
+            else walk(n.body);
+            return;
+        }
+        if (n.type === "ImportSpecifier" || n.type === "ImportDefaultSpecifier" || n.type === "ImportNamespaceSpecifier") {
+            // Imports are sources, not references — don't count
+            return;
+        }
+        for (const key of Object.keys(n)) {
+            if (key === "loc" || key === "start" || key === "end" ||
+                key === "leadingComments" || key === "trailingComments" ||
+                key === "innerComments") continue;
+            walk(n[key]);
+        }
+    };
+    walk(node);
+}
+
+/** Returns true if `obj` is an EndpointRoute ObjectExpression (has a `handler` property). */
+function isEndpointObjectExpression(obj: t.ObjectExpression): boolean {
+    for (const prop of obj.properties) {
+        if (t.isObjectProperty(prop) && t.isIdentifier(prop.key) && prop.key.name === "handler") {
+            return true;
+        }
+    }
+    return false;
+}
+
+/** Returns the inner `children` ArrayExpression if present on a PageRoute-like object. */
+function findChildrenArray(obj: t.ObjectExpression): t.ArrayExpression | null {
+    for (const prop of obj.properties) {
+        if (t.isObjectProperty(prop) &&
+            t.isIdentifier(prop.key) &&
+            prop.key.name === "children" &&
+            t.isArrayExpression(prop.value)) {
+            return prop.value;
+        }
+    }
+    return null;
+}
+
+/**
+ * On client builds, strip EndpointRoute objects from the default-export array
+ * of `routes.tsx` so server-only handler code (and its imports) don't ship to
+ * the browser. Mirrors the pattern used by `removeMiddlewares`.
+ *
+ * Detection: any ObjectExpression that has a `handler` property is treated as
+ * an endpoint and removed from its containing array. Imports referenced only
+ * by removed endpoints are dropped afterwards.
+ */
+export function removeEndpointRoutes(code: string): string {
+    const ast = parse(code, {
+        sourceType: "module",
+        plugins: ["typescript", "jsx"],
+    });
+
+    const removedEndpoints: t.ObjectExpression[] = [];
+
+    // Phase 1: walk the default-export routes array recursively, removing
+    // ObjectExpressions with a `handler` property.
+    const walkArray = (arr: t.ArrayExpression): void => {
+        for (let i = arr.elements.length - 1; i >= 0; i--) {
+            const el = arr.elements[i];
+            if (!t.isObjectExpression(el)) continue;
+            if (isEndpointObjectExpression(el)) {
+                removedEndpoints.push(el);
+                arr.elements.splice(i, 1);
+                continue;
+            }
+            const children = findChildrenArray(el);
+            if (children) walkArray(children);
+        }
+    };
+
+    traverse(ast, {
+        ExportDefaultDeclaration(nodePath) {
+            const decl = nodePath.node.declaration;
+            let arr: t.ArrayExpression | null = null;
+            if (t.isArrayExpression(decl)) {
+                arr = decl;
+            } else if (t.isTSSatisfiesExpression(decl) && t.isArrayExpression(decl.expression)) {
+                arr = decl.expression;
+            } else if (t.isTSAsExpression(decl) && t.isArrayExpression(decl.expression)) {
+                arr = decl.expression;
+            }
+            if (arr) walkArray(arr);
+        },
+    });
+
+    if (removedEndpoints.length === 0) return code;
+
+    // Phase 2: collect identifiers used *inside* removed endpoints.
+    const usedInRemoved = new Set<string>();
+    for (const ep of removedEndpoints) {
+        collectReferencedIdentifiers(ep, usedInRemoved);
+    }
+
+    // Phase 3: collect identifiers still referenced in the AST *after* removal
+    // (excluding ImportSpecifier locals, which are the binding sites).
+    const stillUsed = new Set<string>();
+    collectReferencedIdentifiers(ast.program, stillUsed);
+
+    // Phase 4: the identifiers safe to strip = used only by removed endpoints.
+    const toStrip = new Set<string>();
+    for (const name of usedInRemoved) {
+        if (!stillUsed.has(name)) toStrip.add(name);
+    }
+
+    if (toStrip.size > 0) {
+        traverse(ast, {
+            ImportDeclaration(nodePath) {
+                const specifiers = nodePath.node.specifiers;
+                const kept = specifiers.filter((spec) => !toStrip.has(spec.local.name));
+                if (kept.length === 0) {
+                    nodePath.remove();
+                } else if (kept.length !== specifiers.length) {
+                    nodePath.node.specifiers = kept;
+                }
+            },
+        });
+    }
+
+    const output = generate(ast, { retainLines: true });
+    return output.code;
+}
+
+// ============================================
 // TRANSFORMAÇÃO 6: Extrair e injetar fullPaths
 // ============================================
 
@@ -812,10 +966,22 @@ startClient({ routes });
             const hasStream = /export\s+const\s+stream_\w+/.test(code);
             const hasLoaderCall = /\bLoader\s*</.test(code) || /\bLoader\s*\(/.test(code);
             const hasUseLoaderCall = /\buseLoader\s*</.test(code) || /\buseLoader\s*\(/.test(code);
+            const hasEndpointHandler = /\bhandler\s*:/.test(code);
+
+            // Routes file path (used to scope the endpoint strip)
+            const routesFilePath = path.join(appDir, routesFile);
 
             // 5. Remover middlewares e imports (client only)
             if (!isSSR && hasMiddlewares) {
                 transformedCode = removeMiddlewares(transformedCode);
+                hasTransformations = true;
+            }
+
+            // 5.5. Remover EndpointRoutes do routes.tsx (client only)
+            // Scoped to routes.tsx because that's where endpoints are declared
+            // — stripping `handler:` anywhere else would be wrong.
+            if (!isSSR && hasEndpointHandler && id === routesFilePath) {
+                transformedCode = removeEndpointRoutes(transformedCode);
                 hasTransformations = true;
             }
 

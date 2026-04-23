@@ -122,6 +122,17 @@ await app.post("/api/upload", {
 
 Methods: `.get`, `.post`, `.put`, `.patch`, `.delete`.
 
+These methods hit everything registered under your `routes` — **pages, actions, streams, and endpoints**. A webhook declared as `{ path: "/api/github/webhook", method: "POST", handler: githubWebhook }` in `routes.tsx` is exercised exactly like any other POST route:
+
+```typescript
+const res = await app.post("/api/github/webhook", {
+    headers: { "x-hub-signature-256": sig },
+    body: { action: "push" },
+});
+```
+
+See [17-endpoints.md](./17-endpoints.md) for declaring endpoints.
+
 `TestResponse` mirrors the Fetch `Response`:
 
 | Field | Description |
