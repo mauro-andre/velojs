@@ -15,6 +15,9 @@ export const Component = ({ children }: RootProps) => {
                 <link rel="preconnect" href="https://fonts.googleapis.com" />
                 <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
                 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+                {/* Register @property --angle so conic-gradient animations can sweep
+                    the gradient origin without rotating the whole element. */}
+                <style dangerouslySetInnerHTML={{ __html: `@property --angle { syntax: "<angle>"; initial-value: 0deg; inherits: false; }` }} />
                 <Scripts />
             </head>
             <body>{children}</body>

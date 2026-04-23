@@ -1,4 +1,4 @@
-import { style, globalStyle } from "@vanilla-extract/css";
+import { style, keyframes, globalStyle } from "@vanilla-extract/css";
 import { vars } from "./styles/theme.css.js";
 
 // ── Nav ─────────────────────────────────────────────────────
@@ -65,72 +65,139 @@ export const navCta = style({
 
 // ── Hero ────────────────────────────────────────────────────
 
-export const hero = style({
-    maxWidth: "800px",
-    margin: "0 auto",
-    padding: "160px 24px 100px",
-    textAlign: "center",
+// Staggered fade-up for the hero elements.
+// Each step starts invisible + offset, then animates to its final position
+// with an increasing delay so the eye catches each layer sequentially.
+const fadeUp = keyframes({
+    "0%": {
+        opacity: 0,
+        transform: "translateY(0.75rem)",
+    },
+    "100%": {
+        opacity: 1,
+        transform: "translateY(0)",
+    },
 });
 
+// Sutil pulse no glow do CTA primário — nunca move o botão.
+// A escala fica em 1 (estática), só a intensidade do shadow varia.
+const ctaGlowPulse = keyframes({
+    "0%, 100%": {
+        boxShadow: `0 0 0 0 rgba(108, 140, 255, 0.45), 0 0.25rem 1rem rgba(108, 140, 255, 0.25)`,
+    },
+    "50%": {
+        boxShadow: `0 0 0 0.5rem rgba(108, 140, 255, 0), 0 0.25rem 1rem rgba(108, 140, 255, 0.3)`,
+    },
+});
+
+export const hero = style({
+    maxWidth: "50rem",
+    margin: "0 auto",
+    padding: "10rem 1.5rem 6rem",
+    textAlign: "center",
+    position: "relative",
+});
+
+// Base para os elementos do hero — começam invisíveis, esperam o delay do step.
+const heroAnimBase = {
+    opacity: 0,
+    animationName: fadeUp,
+    animationDuration: "0.7s",
+    animationFillMode: "forwards",
+    animationTimingFunction: "cubic-bezier(0.2, 0.8, 0.2, 1)",
+} as const;
+
+export const heroStep1 = style({ ...heroAnimBase, animationDelay: "0.05s" });
+export const heroStep2 = style({ ...heroAnimBase, animationDelay: "0.15s" });
+export const heroStep3 = style({ ...heroAnimBase, animationDelay: "0.3s" });
+export const heroStep4 = style({ ...heroAnimBase, animationDelay: "0.45s" });
+export const heroStep5 = style({ ...heroAnimBase, animationDelay: "0.6s" });
+
+// Eyebrow: VeloJS pequeno, em gradiente, mono — parece um label técnico.
+export const heroEyebrow = style({
+    display: "inline-block",
+    fontFamily: vars.font.mono,
+    fontSize: "0.85rem",
+    fontWeight: 600,
+    letterSpacing: "0.15em",
+    textTransform: "uppercase",
+    background: `linear-gradient(135deg, ${vars.color.primary}, ${vars.color.accent})`,
+    WebkitBackgroundClip: "text",
+    WebkitTextFillColor: "transparent",
+    marginBottom: "1.5rem",
+});
+
+// Headline: duas linhas, grande, gradient quente-frio do texto.
 export const heroTitle = style({
     fontSize: "4.5rem",
     fontWeight: 800,
-    lineHeight: 1.1,
-    marginBottom: "24px",
-    background: `linear-gradient(135deg, ${vars.color.text} 0%, ${vars.color.textMuted} 100%)`,
-    WebkitBackgroundClip: "text",
-    WebkitTextFillColor: "transparent",
+    lineHeight: 1.05,
+    letterSpacing: "-0.02em",
+    marginBottom: "1.5rem",
     "@media": {
-        "(max-width: 600px)": {
-            fontSize: "2.8rem",
+        "(max-width: 40rem)": {
+            fontSize: "2.75rem",
         },
     },
 });
 
-export const heroTagline = style({
-    fontSize: "1.4rem",
-    fontWeight: 600,
-    marginBottom: "20px",
+export const heroTitleLine = style({
+    display: "block",
+    background: `linear-gradient(135deg, ${vars.color.text} 0%, ${vars.color.textMuted} 100%)`,
+    WebkitBackgroundClip: "text",
+    WebkitTextFillColor: "transparent",
+});
+
+// Segunda linha ganha o gradiente do brand (primary → accent) pra dar contraste.
+globalStyle(`${heroTitleLine}:last-child`, {
     background: `linear-gradient(135deg, ${vars.color.primary}, ${vars.color.accent})`,
     WebkitBackgroundClip: "text",
     WebkitTextFillColor: "transparent",
 });
 
 export const heroSubtitle = style({
-    fontSize: "1.1rem",
+    fontSize: "1.15rem",
     color: vars.color.textMuted,
-    maxWidth: "600px",
-    margin: "0 auto 40px",
-    lineHeight: 1.7,
+    maxWidth: "38rem",
+    margin: "0 auto 2.5rem",
+    lineHeight: 1.65,
 });
 
 export const heroActions = style({
     display: "flex",
-    gap: "16px",
+    gap: "1rem",
     justifyContent: "center",
     flexWrap: "wrap",
+    marginBottom: "3rem",
 });
 
 export const btnPrimary = style({
     display: "inline-block",
-    padding: "14px 32px",
+    padding: "0.875rem 2rem",
     borderRadius: vars.radius.md,
     backgroundColor: vars.color.primary,
     color: "#fff",
     fontSize: "1rem",
     fontWeight: 600,
     transition: "background-color 0.15s, transform 0.15s",
+    animation: `${ctaGlowPulse} 3.2s ease-in-out infinite`,
     ":hover": {
         backgroundColor: vars.color.primaryHover,
-        transform: "translateY(-1px)",
+        transform: "translateY(-0.0625rem)",
+    },
+    "@media": {
+        "(prefers-reduced-motion: reduce)": {
+            animation: "none",
+            boxShadow: `0 0.25rem 1rem rgba(108, 140, 255, 0.3)`,
+        },
     },
 });
 
 export const btnSecondary = style({
     display: "inline-block",
-    padding: "14px 32px",
+    padding: "0.875rem 2rem",
     borderRadius: vars.radius.md,
-    border: `1px solid ${vars.color.border}`,
+    border: `0.0625rem solid ${vars.color.border}`,
     color: vars.color.textMuted,
     fontSize: "1rem",
     fontWeight: 500,
@@ -141,129 +208,33 @@ export const btnSecondary = style({
     },
 });
 
-// ── Sections ────────────────────────────────────────────────
-
-export const section = style({
-    maxWidth: "1100px",
-    margin: "0 auto",
-    padding: "80px 24px",
+// Pills: scope do velojs listado em chips discretos.
+// Font mono pra amarrar com o "eyebrow"; border + bg translúcido.
+export const heroPills = style({
+    display: "flex",
+    flexWrap: "wrap",
+    justifyContent: "center",
+    gap: "0.5rem",
+    listStyle: "none",
+    padding: 0,
+    margin: 0,
 });
 
-export const sectionTitle = style({
-    fontSize: "2.2rem",
-    fontWeight: 800,
-    textAlign: "center",
-    marginBottom: "12px",
-});
-
-export const sectionSubtitle = style({
-    fontSize: "1.05rem",
-    color: vars.color.textMuted,
-    textAlign: "center",
-    maxWidth: "550px",
-    margin: "0 auto 48px",
-});
-
-// ── Features ────────────────────────────────────────────────
-
-export const featuresGrid = style({
-    display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))",
-    gap: "20px",
-});
-
-export const featureCard = style({
-    padding: "28px",
-    borderRadius: vars.radius.lg,
-    backgroundColor: vars.color.bgCard,
-    border: `1px solid ${vars.color.border}`,
-    transition: "border-color 0.2s, transform 0.2s",
-    ":hover": {
-        borderColor: vars.color.primary,
-        transform: "translateY(-2px)",
-    },
-});
-
-export const featureIcon = style({
-    display: "block",
-    marginBottom: "16px",
-    color: vars.color.primary,
-});
-
-export const featureTitle = style({
-    fontSize: "1.1rem",
-    fontWeight: 700,
-    marginBottom: "8px",
-});
-
-export const featureDesc = style({
-    fontSize: "0.9rem",
-    color: vars.color.textMuted,
-    lineHeight: 1.6,
-});
-
-// ── Code Section ────────────────────────────────────────────
-
-export const codeGrid = style({
-    display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(400px, 1fr))",
-    gap: "20px",
-    "@media": {
-        "(max-width: 600px)": {
-            gridTemplateColumns: "1fr",
-        },
-    },
-});
-
-export const codeCard = style({
-    borderRadius: vars.radius.lg,
-    backgroundColor: vars.color.bgCard,
-    border: `1px solid ${vars.color.border}`,
-    overflow: "hidden",
-});
-
-export const codeCardHeader = style({
-    padding: "12px 20px",
+export const heroPill = style({
+    fontFamily: vars.font.mono,
     fontSize: "0.8rem",
-    fontWeight: 600,
+    fontWeight: 500,
     color: vars.color.textMuted,
-    borderBottom: `1px solid ${vars.color.border}`,
-});
-
-export const codeBlock = style({
-    padding: "20px",
-    fontSize: "0.85rem",
-    lineHeight: 1.7,
-    fontFamily: vars.font.mono,
-    color: vars.color.text,
-    overflowX: "auto",
-});
-
-globalStyle(`${codeBlock} .keyword`, { color: vars.color.accent });
-globalStyle(`${codeBlock} .string`, { color: "#51cf66" });
-globalStyle(`${codeBlock} .comment`, { color: vars.color.textMuted });
-globalStyle(`${codeBlock} .type`, { color: vars.color.primary });
-globalStyle(`${codeBlock} .function`, { color: "#ffd43b" });
-
-// ── Install ─────────────────────────────────────────────────
-
-export const installSection = style({
-    maxWidth: "600px",
-    margin: "0 auto",
-    padding: "60px 24px 80px",
-    textAlign: "center",
-});
-
-export const installCode = style({
-    display: "inline-block",
-    padding: "16px 32px",
-    borderRadius: vars.radius.md,
-    backgroundColor: vars.color.bgCard,
-    border: `1px solid ${vars.color.border}`,
-    fontFamily: vars.font.mono,
-    fontSize: "1rem",
-    color: vars.color.primary,
-    marginTop: "24px",
+    padding: "0.375rem 0.875rem",
+    borderRadius: "999px",
+    border: `0.0625rem solid ${vars.color.border}`,
+    background: "rgba(255, 255, 255, 0.02)",
+    transition: "color 0.2s, border-color 0.2s, background-color 0.2s",
+    ":hover": {
+        color: vars.color.text,
+        borderColor: vars.color.primary,
+        background: "rgba(108, 140, 255, 0.08)",
+    },
 });
 
 // ── Footer ──────────────────────────────────────────────────
