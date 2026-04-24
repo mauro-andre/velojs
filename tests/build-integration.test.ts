@@ -609,7 +609,7 @@ describe("Build Integration", () => {
             // JS must NOT have fixed name
             expect(html).not.toMatch(/["']\/client\/client\.js["']/);
             // JS must have hashed name
-            expect(html).toMatch(/client\.[a-zA-Z0-9_]+\.js/);
+            expect(html).toMatch(/client\.[a-zA-Z0-9_-]+\.js/);
         });
 
         it("client JS uses fetch with cache: no-cache", () => {
