@@ -59,7 +59,15 @@ export interface SocketHandlerArgs {
     query: Record<string, string>;
 }
 
-export type SocketHandler = (args: SocketHandlerArgs) => void | Promise<void>;
+export type SocketHandler = ((args: SocketHandlerArgs) => void | Promise<void>) & {
+    /**
+     * Populated at runtime by the socket registrar (and by the Vite plugin on the
+     * client bundle, where the function is replaced by a stub). Lets consumers
+     * pass the declared `socket_*` value straight into `useSocket(...)` without
+     * casting.
+     */
+    readonly __path?: string;
+};
 
 /** Client-side stub shape — what the Vite plugin replaces `socket_*` with on the client bundle. */
 export interface SocketStub {
@@ -362,12 +370,44 @@ export async function registerSocketRoutes(
  * returns (prod) or with Vite's dev http server (dev).
  *
  * No-op when no sockets are registered on `app`.
+ *
+ * The server is wrapped so that `upgrade` listeners registered by
+ * `@hono/node-ws` only fire for requests whose pathname matches a registered
+ * `socket_*` route. Without this, the adapter's listener treats every upgrade
+ * as a candidate and replies with an HTTP status, which corrupts the handshake
+ * for other listeners on the same server (notably Vite's HMR WebSocket in
+ * dev mode).
  */
 export async function injectWebSocketServer(app: Hono, server: any): Promise<void> {
     const adapter = adapters.get(app);
     if (!adapter) return;
+
+    const filteredServer = new Proxy(server, {
+        get(target, prop, receiver) {
+            if (prop === "on" || prop === "addListener") {
+                return (event: string, listener: (...args: any[]) => void) => {
+                    if (event !== "upgrade") {
+                        return target[prop](event, listener);
+                    }
+                    return target[prop]("upgrade", (req: any, socket: any, head: any) => {
+                        const host = req.headers?.host ?? "localhost";
+                        let pathname: string;
+                        try {
+                            pathname = new URL(req.url ?? "/", `http://${host}`).pathname;
+                        } catch {
+                            return;
+                        }
+                        if (!appSockets.get(app)?.has(pathname)) return;
+                        listener(req, socket, head);
+                    });
+                };
+            }
+            return Reflect.get(target, prop, receiver);
+        },
+    });
+
     try {
-        adapter.injectWebSocket(server);
+        adapter.injectWebSocket(filteredServer);
     } catch (err) {
         console.error("[velojs] injectWebSocket failed:", err);
     }

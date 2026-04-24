@@ -12,7 +12,7 @@ import {
     useLocation as wouterUseLocation,
 } from "wouter-preact";
 import type { EventStream } from "./events.js";
-import type { SocketStub } from "./sockets.js";
+import type { SocketHandler, SocketStub } from "./sockets.js";
 
 // Flag: true when a newer build has been deployed
 export const __veloUpdatePending = signal(false);
@@ -450,7 +450,7 @@ export interface UseSocketApi {
  * ```
  */
 export function useSocket(
-    stub: SocketStub | { __path: string },
+    stub: SocketHandler | SocketStub | { __path: string },
     options: UseSocketOptions = {}
 ): UseSocketApi {
     const status = useSignal<SocketStatus>("connecting");

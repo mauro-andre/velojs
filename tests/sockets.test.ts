@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { createTestApp } from "../src/testing/index.js";
 import type { SocketHandler } from "../src/sockets.js";
-import { parseJson } from "../src/sockets.js";
+import { parseJson, injectWebSocketServer } from "../src/sockets.js";
 import type { AppRoutes, RouteModule } from "../src/types.js";
 
 function makeModuleWithSocket(opts: {
@@ -274,6 +274,62 @@ describe("socket_* — registry + app.close", () => {
         await expect(
             app.socket("/_socket/nope/thing")
         ).rejects.toThrow(/no socket handler registered/);
+        await app.close();
+    });
+});
+
+// ============================================
+// socket_* — injectWebSocketServer path filter
+// ============================================
+
+describe("socket_* — injectWebSocketServer filters by registered path", () => {
+    // Regression: @hono/node-ws registers a single upgrade listener that reacts
+    // to every upgrade, including Vite HMR's ws://host/?token=xxx — replying
+    // with an HTTP status corrupts that handshake. We wrap the server so the
+    // adapter's listener only sees upgrades whose path matches a registered
+    // socket_* route.
+    it("HMR-style upgrades (path not registered) are not forwarded to @hono/node-ws", async () => {
+        const handler: SocketHandler = async ({ keepOpen }) => { keepOpen(); };
+        const module = makeModuleWithSocket({
+            moduleId: "test/Filter",
+            sockets: { chat: handler },
+        });
+        const app = await createTestApp({ routes: [{ module }] as AppRoutes });
+
+        let wrapper: ((req: any, socket: any, head: any) => void) | null = null;
+        const fakeServer = {
+            on(event: string, listener: (req: any, socket: any, head: any) => void) {
+                if (event === "upgrade") wrapper = listener;
+            },
+        };
+        await injectWebSocketServer(app.hono, fakeServer);
+        expect(wrapper).not.toBeNull();
+
+        const fakeSocket: any = { end: vi.fn(), destroy: vi.fn(), write: vi.fn() };
+
+        // Vite HMR-ish upgrade (path "/", token query) — wrapper short-circuits
+        wrapper!(
+            { url: "/?token=ABC", headers: { host: "localhost:5173" } },
+            fakeSocket,
+            Buffer.alloc(0),
+        );
+        expect(fakeSocket.end).not.toHaveBeenCalled();
+        expect(fakeSocket.destroy).not.toHaveBeenCalled();
+        expect(fakeSocket.write).not.toHaveBeenCalled();
+
+        // Registered socket path — wrapper forwards, adapter replies via socket.end
+        wrapper!(
+            { url: "/_socket/test/Filter/chat", headers: { host: "localhost:5173" } },
+            fakeSocket,
+            Buffer.alloc(0),
+        );
+        await new Promise((r) => setTimeout(r, 30));
+        const touched =
+            fakeSocket.end.mock.calls.length > 0 ||
+            fakeSocket.destroy.mock.calls.length > 0 ||
+            fakeSocket.write.mock.calls.length > 0;
+        expect(touched).toBe(true);
+
         await app.close();
     });
 });
