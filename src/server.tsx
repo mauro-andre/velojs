@@ -516,7 +516,9 @@ export const createApp = async (routes: AppRoutes): Promise<Hono> => {
 // ============================================
 
 export const startServer = async (options: StartServerOptions) => {
-    const { routes, port = Number(process.env.SERVER_PORT) || 3000 } = options;
+    const { routes } = options;
+    // Precedence: PORT env (injected by most hosts) > defineConfig port > 3000.
+    const port = Number(process.env.PORT) || options.port || 3000;
     const app = await createApp(routes);
 
     // Production: serve static files and start server

@@ -1247,7 +1247,7 @@ Callbacks queue until the server starts. If called after startup, executes immed
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `SERVER_PORT` | `3000` | Server port |
+| `PORT` | `3000` | Server port. Overrides the `port` set in `defineConfig` |
 | `NODE_ENV` | — | Set automatically by `velojs start`. Enables static file serving |
 | `STATIC_BASE_URL` | `""` | CDN/bucket prefix for static assets |
 
@@ -1528,7 +1528,7 @@ COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
 COPY --from=builder /app/dist ./dist
 
-ENV SERVER_PORT=3000
+ENV PORT=3000
 EXPOSE 3000
 CMD ["npx", "velojs", "start"]
 ```

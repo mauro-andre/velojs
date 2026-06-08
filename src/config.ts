@@ -22,6 +22,13 @@ export interface VeloConfig {
      * @default "client.tsx"
      */
     clientInit?: string;
+
+    /**
+     * Porta usada tanto pelo dev server quanto pelo servidor de produção.
+     * A env `PORT` (injetada pela maioria dos hosts) sempre tem precedência.
+     * @default 3000
+     */
+    port?: number;
 }
 
 export function defineConfig(config: VeloConfig): VeloConfig {

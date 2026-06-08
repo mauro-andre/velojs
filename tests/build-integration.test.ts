@@ -333,6 +333,18 @@ describe("Build Integration", () => {
             expect(match![1]!.length).toBeGreaterThan(0);
         });
 
+        it("server.js passes a resolved port to startServer (no leftover token)", () => {
+            const serverJs = fs.readFileSync(
+                path.join(TEST_APP_DIR, "dist/server.js"),
+                "utf-8"
+            );
+            // The __VELO_CONFIG_PORT__ define must be substituted, otherwise
+            // startServer({ port: __VELO_CONFIG_PORT__ }) throws at runtime.
+            expect(serverJs).not.toContain("__VELO_CONFIG_PORT__");
+            // Fixture sets no `port` in config → baked as null (PORT env / 3000 win).
+            expect(serverJs).toMatch(/startServer\(\s*\{[^}]*port\s*:\s*(null|\d+)/);
+        });
+
         it("server.js references hashed CSS and JS from manifest", () => {
             const serverJs = fs.readFileSync(
                 path.join(TEST_APP_DIR, "dist/server.js"),

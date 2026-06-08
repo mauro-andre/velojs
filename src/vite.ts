@@ -972,7 +972,7 @@ import routes from "${routesPath}";
 import { startServer } from "@mauroandre/velojs/server";
 
 export { routes };
-export default await startServer({ routes });
+export default await startServer({ routes, port: __VELO_CONFIG_PORT__ });
 `;
             }
 
@@ -1099,7 +1099,7 @@ startClient({ routes });
 // VITE PLUGIN - CONFIG (internal)
 // ============================================
 
-function veloConfigPlugin(): Plugin {
+function veloConfigPlugin(veloConfig: VeloConfig): Plugin {
     return {
         name: "velo:config",
 
@@ -1108,6 +1108,11 @@ function veloConfigPlugin(): Plugin {
             const isDev = mode === "development";
 
             const isStatic = !!process.env.VELO_STATIC;
+
+            // Unified port: PORT env (runtime, host-injected) > defineConfig port > 3000.
+            // Dev uses it via Vite's server.port; prod uses it inside startServer.
+            // The CLI flag `velojs dev --port` still overrides (Vite applies it last).
+            const port = Number(process.env.PORT) || veloConfig.port || 3000;
 
             // In server build, read the client manifest to get hashed asset filenames
             let clientJs = "client.js";
@@ -1132,12 +1137,18 @@ function veloConfigPlugin(): Plugin {
                     "__VELO_BUILD_HASH__": JSON.stringify(process.env.VELO_BUILD_HASH || Date.now().toString(36)),
                     "__VELO_CLIENT_JS__": JSON.stringify(clientJs),
                     "__VELO_CLIENT_CSS__": JSON.stringify(clientCss),
+                    // Baked into the server bundle as startServer's port fallback.
+                    // null when unset → startServer falls back to PORT env / 3000.
+                    "__VELO_CONFIG_PORT__": JSON.stringify(veloConfig.port ?? null),
                 },
                 resolve: {
                     alias: {
                         react: "preact/compat",
                         "react-dom": "preact/compat",
                     },
+                },
+                server: {
+                    port,
                 },
             };
 
@@ -1226,7 +1237,7 @@ export function veloPlugin(config?: VeloConfig): PluginOption[] {
     const appDirectory = veloConfig.appDirectory ?? "./app";
 
     return [
-        veloConfigPlugin(),
+        veloConfigPlugin(veloConfig),
         veloTransformPlugin(veloConfig, appDirectory),
         veloStaticUrlPlugin(),
         preact(),

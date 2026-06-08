@@ -145,6 +145,6 @@ Callbacks registered with `onServer` queue until the server starts. If called af
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `SERVER_PORT` | `3000` | The port the server listens on |
+| `PORT` | `3000` | The port the server listens on. Overrides `defineConfig`'s `port`. |
 | `NODE_ENV` | — | Set automatically by `velojs start` to `production` |
 | `STATIC_BASE_URL` | `""` | CDN/bucket prefix for static assets |

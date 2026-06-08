@@ -39,12 +39,32 @@ COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
 COPY --from=builder /app/dist ./dist
 
-ENV SERVER_PORT=3000
+ENV PORT=3000
 EXPOSE 3000
 CMD ["npx", "velojs", "start"]
 ```
 
 The multi-stage build keeps the final image small — it only includes production dependencies and the compiled output, not your source code or dev dependencies.
+
+## Setting the port
+
+The server reads the port from, in order of precedence:
+
+1. The `PORT` environment variable — the convention most hosts (Railway, Render, Fly, Heroku) inject automatically.
+2. The `port` field in `defineConfig` (`vite.config.ts`) — applies to both `velojs dev` and `velojs start`.
+3. The default, `3000`.
+
+```ts
+// vite.config.ts
+import { defineConfig } from "vite";
+import { veloPlugin } from "@mauroandre/velojs/vite";
+
+export default defineConfig({
+    plugins: [veloPlugin({ port: 4000 })],
+});
+```
+
+In dev, `velojs dev --port 5000` still overrides everything (it's passed straight to Vite).
 
 ## Static assets on CDN
 
