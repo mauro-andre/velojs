@@ -27,18 +27,29 @@ const runBuild = (isStatic: boolean) => {
     };
 
     console.log("Building client...");
-    spawnSync("npx", ["vite", "build"], {
+    const clientResult = spawnSync("npx", ["vite", "build"], {
         stdio: "inherit",
         cwd: process.cwd(),
         env,
     });
+    // Abort if the client build failed. Otherwise we'd proceed to build the
+    // server, print "Build complete!", and ship a dist/ with no dist/client/
+    // (static assets never served in prod) — a silent, false success.
+    if (clientResult.status !== 0) {
+        console.error("Client build failed. Aborting.");
+        process.exit(clientResult.status ?? 1);
+    }
 
     console.log("Building server...");
-    spawnSync("npx", ["vite", "build", "--mode", "server"], {
+    const serverResult = spawnSync("npx", ["vite", "build", "--mode", "server"], {
         stdio: "inherit",
         cwd: process.cwd(),
         env,
     });
+    if (serverResult.status !== 0) {
+        console.error("Server build failed. Aborting.");
+        process.exit(serverResult.status ?? 1);
+    }
 
     console.log("Build complete!");
 

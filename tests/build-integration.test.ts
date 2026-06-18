@@ -53,16 +53,24 @@ function createTestApp(tgzPath: string) {
     fs.mkdirSync(path.join(TEST_APP_DIR, "app/webhooks"), { recursive: true });
     fs.mkdirSync(path.join(TEST_APP_DIR, "public/logos"), { recursive: true });
 
-    // package.json — references built VeloJS via tarball (same as npm install from registry)
+    // package.json — references built VeloJS via tarball (same as npm install from registry).
+    // VELO_FIXTURE_VITE ("7" | "8") forces the vite major via npm overrides so the
+    // build can be exercised under both Rollup (vite 7) and Rolldown (vite 8). When
+    // unset, npm resolves velojs's declared range (highest match → vite 8).
+    const fixtureVite = process.env.VELO_FIXTURE_VITE;
+    const pkg: Record<string, unknown> = {
+        name: "test-app",
+        type: "module",
+        dependencies: {
+            "@mauroandre/velojs": `file:${tgzPath}`,
+        },
+    };
+    if (fixtureVite) {
+        pkg.overrides = { vite: `^${fixtureVite}.0.0` };
+    }
     fs.writeFileSync(
         path.join(TEST_APP_DIR, "package.json"),
-        JSON.stringify({
-            name: "test-app",
-            type: "module",
-            dependencies: {
-                "@mauroandre/velojs": `file:${tgzPath}`,
-            },
-        })
+        JSON.stringify(pkg)
     );
 
     // vite.config.ts
@@ -160,16 +168,35 @@ export default [
 `
     );
 
-    // app/pages/Deploy.tsx — page with stream_*
+    // app/channel.server.ts — server-only channel resolver, imported TOP-LEVEL by a
+    // page and used only inside createEventStream({ channel }). After the stream is
+    // stubbed on the client, this import is orphaned. Rollup tree-shook it for free;
+    // Rolldown (vite 8) keeps it, leaking the whole module into the browser bundle.
+    // The client transform's import-prune must drop it. (This is the podcubo bug.)
+    fs.writeFileSync(
+        path.join(TEST_APP_DIR, "app/channel.server.ts"),
+        `import { randomBytes } from "node:crypto";
+
+const CHANNEL_RESOLVER_SECRET = "STREAM_CHANNEL_RESOLVER_SECRET_QWE456";
+
+export const ownChannel = (c: any): string => {
+    randomBytes(1);
+    return c.req.query("channel") ?? CHANNEL_RESOLVER_SECRET;
+};
+`
+    );
+
+    // app/pages/Deploy.tsx — page with stream_* whose channel is an imported helper
     fs.writeFileSync(
         path.join(TEST_APP_DIR, "app/pages/Deploy.tsx"),
         `import { createEventStream } from "@mauroandre/velojs";
 import { useEventStream } from "@mauroandre/velojs/hooks";
+import { ownChannel } from "../channel.server.js";
 
 type DeployState = { step: string; status: "running" | "success" | "error" };
 
 export const stream_progress = createEventStream<DeployState>({
-    channel: (c) => c.req.query("channel") ?? "",
+    channel: ownChannel,
     closeOn: (s) => s.status === "success" || s.status === "error",
 });
 
@@ -528,6 +555,38 @@ describe("Build Integration", () => {
             expect(serverJs).toContain("SOCKET_TERMINAL_SECRET_ABC987");
             // randomBytes is the node:crypto import the handler uses
             expect(serverJs).toContain("randomBytes");
+        });
+
+        it("server-only stream channel resolver does NOT leak into the client (orphan import pruned)", () => {
+            // Scan EVERY js file under dist/client — a leaked module can land in a
+            // separate chunk, not just client.*.js (this is how it manifested in
+            // the wild: a `*.service-*.js` chunk dragged in under Rolldown).
+            const clientDir = path.join(TEST_APP_DIR, "dist/client");
+            const readAllJs = (dir: string): string => {
+                let out = "";
+                for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+                    const full = path.join(dir, entry.name);
+                    if (entry.isDirectory()) out += readAllJs(full);
+                    else if (entry.name.endsWith(".js")) out += fs.readFileSync(full, "utf-8");
+                }
+                return out;
+            };
+            const clientJs = readAllJs(clientDir);
+
+            // The resolver module (and its node:crypto dep) must be fully absent.
+            expect(clientJs).not.toContain("STREAM_CHANNEL_RESOLVER_SECRET_QWE456");
+            expect(clientJs).not.toContain("channel.server");
+            // The stream itself is still stubbed on the client.
+            expect(clientJs).toContain("/_event/pages/Deploy/progress");
+        });
+
+        it("server-only stream channel resolver IS present on the server bundle", () => {
+            const serverJs = fs.readFileSync(
+                path.join(TEST_APP_DIR, "dist/server.js"),
+                "utf-8"
+            );
+            // The resolver runs on the server — its body must survive there.
+            expect(serverJs).toContain("STREAM_CHANNEL_RESOLVER_SECRET_QWE456");
         });
     });
 

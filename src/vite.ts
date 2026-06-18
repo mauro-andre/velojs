@@ -521,6 +521,65 @@ export function removeLoaders(code: string): string {
 }
 
 // ============================================
+// TRANSFORMAÇÃO 4.5: Podar imports órfãos (client only)
+// ============================================
+
+/**
+ * Removes import specifiers whose local binding is no longer referenced
+ * anywhere in the module after the client-only strips above (actions →
+ * fetch stubs, streams/sockets → stubs, loaders removed). Runs LAST so it
+ * sees the fully transformed AST.
+ *
+ * Why this is needed: under Rollup (vite 7) these orphaned imports were
+ * tree-shaken for free, keeping server-only code out of the client graph.
+ * Under Rolldown (vite 8) they survive — so a server-only helper imported
+ * top-level (e.g. an SSE `channel` resolver referenced only inside a now-
+ * stubbed `createEventStream({...})`) drags its entire service, and native
+ * `.node` deps, into the browser bundle and breaks the build. We replicate
+ * the tree-shake deterministically, inside our control.
+ *
+ * Safety:
+ *  - Side-effect imports (`import "./x.css"`, no specifiers) are preserved.
+ *  - `collectReferencedIdentifiers` counts value, type, and JSX positions,
+ *    so a component used only in `<Foo />` is never dropped.
+ *  - Only specifiers with zero remaining references are removed.
+ */
+export function pruneClientOnlyImports(code: string): string {
+    const ast = parse(code, {
+        sourceType: "module",
+        plugins: ["typescript", "jsx"],
+    });
+
+    // Everything referenced outside of import binding sites.
+    const used = new Set<string>();
+    collectReferencedIdentifiers(ast.program, used);
+
+    let changed = false;
+    traverse(ast, {
+        ImportDeclaration(nodePath) {
+            const specifiers = nodePath.node.specifiers;
+            // Side-effect import — keep (CSS, polyfills, register-style imports).
+            if (specifiers.length === 0) return;
+
+            const kept = specifiers.filter((spec) => used.has(spec.local.name));
+            if (kept.length === specifiers.length) return;
+
+            changed = true;
+            if (kept.length === 0) {
+                nodePath.remove();
+            } else {
+                nodePath.node.specifiers = kept;
+            }
+        },
+    });
+
+    if (!changed) return code;
+
+    const output = generate(ast, { retainLines: true });
+    return output.code;
+}
+
+// ============================================
 // TRANSFORMAÇÃO 5: Remover middlewares e imports (client only)
 // ============================================
 
@@ -605,6 +664,18 @@ function collectReferencedIdentifiers(node: unknown, into: Set<string>): void {
             return;
         }
         if (n.type === "Identifier") {
+            into.add(n.name);
+            // A typed binding (`props: SomeType`) carries its type on the
+            // Identifier; descend so imported types used only in annotations
+            // are counted as referenced and not pruned.
+            if (n.typeAnnotation) walk(n.typeAnnotation);
+            return;
+        }
+        // A component/element used in JSX (`<Foo />`) is a JSXIdentifier, not an
+        // Identifier. Count it so import pruning never drops a still-rendered
+        // component. Lowercase tags (`<div>`) and attribute names land here too,
+        // but those never match an import binding, so adding them is harmless.
+        if (n.type === "JSXIdentifier") {
             into.add(n.name);
             return;
         }
@@ -1080,6 +1151,14 @@ startClient({ routes });
                 // 4. Remover loaders (client only)
                 if (!isSSR) {
                     transformedCode = removeLoaders(transformedCode);
+                }
+
+                // 4.5. Prune imports orphaned by the strips above. Rolldown
+                // (vite 8) no longer tree-shakes these, so a server-only helper
+                // imported top-level would leak its whole service (+ native
+                // .node deps) into the client bundle. See pruneClientOnlyImports.
+                if (!isSSR) {
+                    transformedCode = pruneClientOnlyImports(transformedCode);
                 }
 
                 hasTransformations = true;

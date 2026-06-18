@@ -8,6 +8,7 @@ import {
     removeLoaders,
     removeMiddlewares,
     removeEndpointRoutes,
+    pruneClientOnlyImports,
 } from "../src/vite.js";
 
 // ============================================
@@ -511,5 +512,87 @@ export const socket_typed: SocketHandler = async ({ send }) => {};
         const output = transformSocketsForClient(input, "pages/Typed");
         expect(output).toContain(`__path: "/_socket/pages/Typed/typed"`);
         expect(output).toContain("__isVeloSocket: true");
+    });
+});
+
+// ============================================
+// pruneClientOnlyImports
+// ============================================
+
+describe("pruneClientOnlyImports", () => {
+    it("drops an import orphaned by a stubbed stream channel resolver", () => {
+        // Mirrors the real vite-8 leak: a server-only `channel` resolver is
+        // imported top-level, then becomes orphan once the stream is stubbed.
+        const input = `
+import { ownAppChannel } from "../modules/app/app.stream.js";
+import { useState } from "preact/hooks";
+export const stream_backup = { __isVeloEventStream: true, __path: "/_event/x/backup" };
+export const Component = () => { const [n] = useState(0); return null; };
+`;
+        const output = pruneClientOnlyImports(input);
+        expect(output).not.toContain("app.stream");
+        expect(output).not.toContain("ownAppChannel");
+        // Still-used import survives.
+        expect(output).toContain("useState");
+    });
+
+    it("removes only the orphaned specifiers, keeping used ones from same import", () => {
+        const input = `
+import { gone, kept } from "./mixed.js";
+export const value = kept;
+`;
+        const output = pruneClientOnlyImports(input);
+        expect(output).toContain("kept");
+        expect(output).not.toMatch(/\bgone\b/);
+        // The import line itself stays (kept is still imported).
+        expect(output).toContain("./mixed.js");
+    });
+
+    it("keeps a component imported only via JSX", () => {
+        const input = `
+import { Card } from "./Card.js";
+export const Component = () => <Card />;
+`;
+        const output = pruneClientOnlyImports(input);
+        expect(output).toContain("Card");
+        expect(output).toContain("./Card.js");
+    });
+
+    it("keeps a type imported only in a type position", () => {
+        const input = `
+import type { User } from "./user.types.js";
+export const Component = (props: { user: User }) => null;
+`;
+        const output = pruneClientOnlyImports(input);
+        expect(output).toContain("User");
+        expect(output).toContain("./user.types.js");
+    });
+
+    it("preserves side-effect imports (no specifiers)", () => {
+        const input = `
+import "./styles.css";
+import { gone } from "./gone.js";
+export const Component = () => null;
+`;
+        const output = pruneClientOnlyImports(input);
+        expect(output).toContain("./styles.css");
+        expect(output).not.toContain("./gone.js");
+    });
+
+    it("returns code unchanged when nothing is orphaned", () => {
+        const input = `import { a } from "./a.js";\nexport const x = a;\n`;
+        const output = pruneClientOnlyImports(input);
+        expect(output).toContain("./a.js");
+        expect(output).toContain("a");
+    });
+
+    it("keeps a namespace import used via member access", () => {
+        const input = `
+import * as css from "./X.css.js";
+export const Component = () => css.root;
+`;
+        const output = pruneClientOnlyImports(input);
+        expect(output).toContain("./X.css.js");
+        expect(output).toContain("css");
     });
 });

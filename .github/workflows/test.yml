@@ -1,0 +1,33 @@
+name: Test
+
+on:
+  push:
+    branches: [dev, main]
+  pull_request:
+
+jobs:
+  test:
+    name: test (vite ${{ matrix.vite }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Build the integration fixture under both Rollup (vite 7) and
+        # Rolldown (vite 8). VELO_FIXTURE_VITE forces the fixture's vite major
+        # via npm overrides; the velojs test runner itself stays on its locked
+        # vite (see package-lock.json).
+        vite: [7, 8]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - run: npm ci
+
+      - run: npm run typecheck
+
+      - run: npm test
+        env:
+          VELO_FIXTURE_VITE: ${{ matrix.vite }}
