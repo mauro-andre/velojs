@@ -45,8 +45,15 @@ export function Scripts({ basePath, favicon = "/favicon.ico" }: ScriptsProps = {
     const isDev = process.env.NODE_ENV !== "production";
     basePath = basePath || process.env.STATIC_BASE_URL || (process.env.VELO_STATIC ? "/client" : "");
 
+    // Deriva o MIME type da extensão — um favicon SVG com type="image/x-icon"
+    // é recusado por alguns browsers (não renderiza). ico/png/svg cobrem os casos.
+    const faviconType = favicon === false
+        ? undefined
+        : favicon.endsWith(".svg") ? "image/svg+xml"
+        : favicon.endsWith(".png") ? "image/png"
+        : "image/x-icon";
     const faviconTag = favicon !== false && (
-        <link rel="icon" href={`${basePath}${favicon}`} type="image/x-icon" />
+        <link rel="icon" href={`${basePath}${favicon}`} type={faviconType} />
     );
 
     if (isDev) {
