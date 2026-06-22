@@ -76,7 +76,7 @@ export const Component = () => {
 
 Every layout and page can have its own `loader`. When a page is requested, **all loaders in the hierarchy run in parallel** — the Root loader, AdminLayout loader, and UserDetail loader all execute at the same time. This makes data loading fast.
 
-On the client, a layout with a `path` **stays mounted** while you navigate between its child routes — only the inner content swaps. Its state (and its loader) are preserved across sibling navigations, so a sidebar or nav bar doesn't flicker or re-fetch when you move between pages inside it.
+On the client, a layout **stays mounted** while you navigate between its child routes — only the inner content swaps. This follows the tree automatically: navigating between sibling routes never re-mounts anything above them, so a sidebar or nav bar (and its loader, scroll, and state) is preserved instead of flickering. It works the same whether the layout has a `path` (a section like `/admin`) or is a path-less wrapper (an app shell grouping several top-level routes) — no configuration needed.
 
 ## Route node properties
 

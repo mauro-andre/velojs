@@ -15,13 +15,6 @@ export interface StartClientOptions {
 // BUILD ROUTES - Gera rotas do wouter recursivamente
 // ============================================
 
-// Wrap a vnode in its ancestor layouts (outermost first), so a distributed
-// route still renders inside the layouts that grouped it.
-const applyWrappers = (
-    wrappers: ComponentType<any>[],
-    node: VNode
-): VNode => wrappers.reduceRight((acc, Wrapper) => <Wrapper>{acc}</Wrapper>, node);
-
 // Append a route segment to a parent path, mirroring the server's fullPath
 // rule (a leading "/" on a child concatenates onto the parent; an index "/"
 // inherits the parent path). Keeps the client's matching identical to SSR.
@@ -31,14 +24,58 @@ const joinPath = (parent: string, seg: string | undefined, isLeaf: boolean): str
     return seg.startsWith("/") ? parent + seg : parent + "/" + seg;
 };
 
-// Pattern that matches a path-ful layout's whole subtree WITHOUT creating a
-// wouter "nest" base (so links inside stay root-absolute, never doubled).
-// "/x/*?" matches both "/x" and "/x/...", but not a sibling like "/xy".
+// Splat pattern for a PATH-FUL layout: matches its prefix and everything under
+// it WITHOUT creating a wouter "nest" base (so links stay root-absolute) while
+// preserving named params for the layout. "/x/*?" matches "/x" and "/x/...".
 const subtreePattern = (prefix: string): string =>
     prefix === "" ? "*" : `${prefix}/*?`;
 
-// The catch-all component (path: "*"), rendered as each Switch's fallback so an
-// unmatched location shows the 404 in the nearest shell (and standalone at root).
+const escapeRe = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+// Convert one generated wouter path pattern into a RegExp source (a leading
+// `:param` becomes a single-segment match; a trailing "/*?" becomes "and
+// anything under it").
+const patternSource = (pattern: string): string => {
+    let subtree = false;
+    if (pattern.endsWith("/*?")) {
+        pattern = pattern.slice(0, -3);
+        subtree = true;
+    }
+    const body = pattern
+        .split("/")
+        .map((seg) => (seg.startsWith(":") ? "[^/]+" : escapeRe(seg)))
+        .join("/");
+    return subtree ? `${body}(?:/.*)?` : body;
+};
+
+// The wouter path patterns covering a node's whole subtree.
+const coverage = (node: RouteNode, basePath: string): string[] => {
+    if (node.path === "*") return []; // catch-all is a Switch default, not coverage
+    if (!node.module) {
+        const base = joinPath(basePath, node.path, false);
+        return (node.children ?? []).flatMap((c) => coverage(c, base));
+    }
+    if (!node.children) {
+        return [joinPath(basePath, node.path, true) || "/"];
+    }
+    if (node.path) {
+        // path-ful layout — its splat covers the whole subtree
+        return [`${joinPath(basePath, node.path, false)}/*?`];
+    }
+    // path-less layout — union of its children
+    const base = joinPath(basePath, node.path, false);
+    return (node.children ?? []).flatMap((c) => coverage(c, base));
+};
+
+// Matches a PATH-LESS layout against exactly its descendant routes, so it
+// persists across them but never shadows a sibling nor swallows an unrelated
+// URL (which falls through to the standalone catch-all).
+const subtreeRegex = (node: RouteNode, basePath: string): RegExp => {
+    const sources = coverage(node, basePath);
+    return new RegExp(`^(?:${sources.map(patternSource).join("|")})$`);
+};
+
+// The catch-all component (path: "*"), rendered as each Switch's fallback.
 const findCatchAll = (nodes: RouteNode[]): ComponentType<any> | null => {
     for (const node of nodes) {
         if (node.path === "*" && node.module) return node.module.Component;
@@ -59,14 +96,10 @@ const withDefault = (
 
 const buildRoutes = (
     nodes: RouteNode[],
-    // Ancestor path-less layout components to wrap around each route below.
-    wrappers: ComponentType<any>[],
     // Absolute path accumulated from ancestor segments.
     basePath: string,
     // Catch-all component injected as each Switch's fallback (or null).
     NotFound: ComponentType<any> | null,
-    // Unique key prefix — distributed children are flattened into the parent
-    // array, so plain indices would collide.
     keyPrefix: string
 ): VNode[] => {
     const vnodes: VNode[] = [];
@@ -74,8 +107,7 @@ const buildRoutes = (
         const node = nodes[i]!;
         const key = `${keyPrefix}${i}`;
 
-        // The catch-all is represented by each Switch's injected default route
-        // (see withDefault), not as a normal entry.
+        // The catch-all is represented by each Switch's injected default route.
         if (node.path === "*") continue;
 
         // Skip endpoint-only nodes — they belong to the server, never to wouter.
@@ -84,24 +116,20 @@ const buildRoutes = (
         // routes arrays that bypass the plugin, e.g. tests.)
         if (!node.module) {
             if (node.children) {
-                // Grouping node — inline its children, accumulating its segment.
                 const childBase = joinPath(basePath, node.path, false);
-                vnodes.push(
-                    ...buildRoutes(node.children, wrappers, childBase, NotFound, `${key}-`)
-                );
+                vnodes.push(...buildRoutes(node.children, childBase, NotFound, `${key}-`));
             }
             continue;
         }
 
         const Component = node.module.Component;
 
-        // Leaf node — a concrete route at its absolute full path, wrapped in all
-        // accumulated path-less ancestor layouts.
+        // Leaf — a concrete route at its absolute full path.
         if (!node.children) {
             const full = joinPath(basePath, node.path, true) || "/";
             vnodes.push(
                 <Route key={key} path={full}>
-                    {applyWrappers(wrappers, <Component />)}
+                    <Component />
                 </Route>
             );
             continue;
@@ -113,7 +141,7 @@ const buildRoutes = (
             vnodes.push(
                 <Switch key={key}>
                     {withDefault(
-                        buildRoutes(node.children, [], "", NotFound, `${key}-`),
+                        buildRoutes(node.children, "", NotFound, `${key}-`),
                         NotFound
                     )}
                 </Switch>
@@ -121,38 +149,28 @@ const buildRoutes = (
             continue;
         }
 
+        // Any layout (path-ful OR path-less) — rendered ONCE, wrapping an inner
+        // <Switch> of its children. It stays mounted while navigating between
+        // those children (only the inner switch swaps), so a sibling navigation
+        // never re-mounts anything above it. Matching follows the declared tree:
+        //   - path-ful → a non-nest splat (keeps named params, no nested base);
+        //   - path-less → a RegExp matching exactly its descendants, so it
+        //     persists across them without shadowing a sibling or swallowing an
+        //     unrelated URL (that falls through to the standalone catch-all).
         const prefix = joinPath(basePath, node.path, false);
-
-        // Path-less group layout — distribute it over each descendant's own
-        // <Route> (push onto the wrapper stack). A path-less element can't be a
-        // <Switch> entry (wouter treats a missing `path` as "*", shadowing the
-        // catch-all), and distributing lets an unmatched URL fall through to the
-        // root catch-all (standalone) instead of this layout's shell.
-        if (!node.path) {
-            vnodes.push(
-                ...buildRoutes(node.children, [...wrappers, Component], prefix, NotFound, `${key}-`)
-            );
-            continue;
-        }
-
-        // Path-ful layout — render ONCE, wrapping an inner <Switch> of its
-        // children, matched by a non-nest splat. The layout persists across
-        // sibling navigations (same <Route> stays mounted, only the inner switch
-        // swaps) and inner links stay root-absolute (no nested base). An
-        // unmatched sub-route falls to the in-shell 404.
+        const layoutPath: string | RegExp = node.path
+            ? subtreePattern(prefix)
+            : subtreeRegex(node, basePath);
         vnodes.push(
-            <Route key={key} path={subtreePattern(prefix)}>
-                {applyWrappers(
-                    wrappers,
-                    <Component>
-                        <Switch>
-                            {withDefault(
-                                buildRoutes(node.children, [], prefix, NotFound, `${key}-`),
-                                NotFound
-                            )}
-                        </Switch>
-                    </Component>
-                )}
+            <Route key={key} path={layoutPath as any}>
+                <Component>
+                    <Switch>
+                        {withDefault(
+                            buildRoutes(node.children, prefix, NotFound, `${key}-`),
+                            NotFound
+                        )}
+                    </Switch>
+                </Component>
             </Route>
         );
     }
@@ -165,7 +183,7 @@ const buildRoutes = (
 
 export const ClientRoutes = ({ routes }: { routes: AppRoutes }) => {
     const NotFound = findCatchAll(routes);
-    const routeTree = buildRoutes(routes, [], "", NotFound, "");
+    const routeTree = buildRoutes(routes, "", NotFound, "");
     return <Router>{routeTree}</Router>;
 };
 

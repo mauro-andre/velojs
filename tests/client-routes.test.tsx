@@ -218,3 +218,61 @@ describe("client router — path-less parent layout wrapping a path-ful nested a
         expect(link.getAttribute("href")).toBe("/master/workers");
     });
 });
+
+describe("client router — two path-less sibling layouts don't shadow each other", () => {
+    function routes(): AppRoutes {
+        return [
+            {
+                module: layout("root-layout"),
+                isRoot: true,
+                children: [
+                    {
+                        module: layout("auth-layout"),
+                        children: [
+                            { path: "/login", module: page("login-page") },
+                            { path: "/register", module: page("register-page") },
+                        ],
+                    },
+                    {
+                        module: layout("app-layout"),
+                        children: [
+                            { path: "/stacks", module: page("stacks-page") },
+                            { path: "/billing", module: page("billing-page") },
+                        ],
+                    },
+                    { path: "*", module: page("not-found") },
+                ],
+            },
+        ];
+    }
+
+    beforeEach(() => navigate("/"));
+    afterEach(() => {
+        cleanup();
+        navigate("/");
+    });
+
+    it("renders the first sibling's route in its own layout", () => {
+        navigate("/login");
+        const { container } = render(<ClientRoutes routes={routes()} />);
+        expect(container.textContent).toContain("auth-layout");
+        expect(container.textContent).toContain("login-page");
+        expect(container.textContent).not.toContain("app-layout");
+    });
+
+    it("renders the second sibling's route (not shadowed by the first)", () => {
+        navigate("/stacks");
+        const { container } = render(<ClientRoutes routes={routes()} />);
+        expect(container.textContent).toContain("app-layout");
+        expect(container.textContent).toContain("stacks-page");
+        expect(container.textContent).not.toContain("auth-layout");
+    });
+
+    it("falls through both siblings to the standalone catch-all", () => {
+        navigate("/nope");
+        const { container } = render(<ClientRoutes routes={routes()} />);
+        expect(container.textContent).toContain("not-found");
+        expect(container.textContent).not.toContain("auth-layout");
+        expect(container.textContent).not.toContain("app-layout");
+    });
+});
