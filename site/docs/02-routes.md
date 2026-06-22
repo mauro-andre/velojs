@@ -76,6 +76,8 @@ export const Component = () => {
 
 Every layout and page can have its own `loader`. When a page is requested, **all loaders in the hierarchy run in parallel** — the Root loader, AdminLayout loader, and UserDetail loader all execute at the same time. This makes data loading fast.
 
+On the client, a layout with a `path` **stays mounted** while you navigate between its child routes — only the inner content swaps. Its state (and its loader) are preserved across sibling navigations, so a sidebar or nav bar doesn't flicker or re-fetch when you move between pages inside it.
+
 ## Route node properties
 
 | Property | Type | Description |
@@ -143,12 +145,12 @@ export const Component = () => (
 VeloJS handles the catch-all specially across all modes:
 
 - **SSR** — it's wired to Hono's `notFound` hook, so it runs only after no route matched and no static asset was found. It never shadows your assets, actions, streams, or sockets. The response carries the `statusCode` (default `404`).
-- **SPA navigation** — the client router renders it when no route matches, with no round-trip.
+- **SPA navigation** — the client router renders it when no route matches, with no round-trip. A top-level unknown URL renders standalone; an unknown sub-route of a section that has a layout (e.g. `/admin/nope`) renders the 404 **inside that section's layout**, so the layout stays mounted (no flicker).
 - **Static generation** (`velojs build --static`) — it's emitted as `dist/404.html` at the output root, following the universal `/404.html` convention that static hosts (nginx, GitHub Pages, Netlify, S3/CloudFront…) serve automatically.
 
 The catch-all is **optional**. Without it, an unmatched path still responds `404`, just with a plain-text body instead of your styled page.
 
-> The 404 renders inside the **root** layout, not section layouts, and its route middlewares don't run (there was no route to match). It's a public, top-level not-found page.
+> On the server the 404 always renders standalone (inside the root shell only) and its route middlewares don't run — there was no route to match. On the client, a section layout stays mounted when you navigate to a bad sub-route of that section.
 
 ## Path resolution
 

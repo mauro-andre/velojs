@@ -187,15 +187,23 @@ describe("client router — path-less parent layout wrapping a path-ful nested a
         expect(container.textContent).toContain("servers-page");
     });
 
-    // Bug 1: an unmatched sub-route of the nested area must bubble up to the
-    // root catch-all and render standalone (matching SSR) — not the empty
-    // nested layout.
-    it("bubbles an unmatched nested sub-route to the root catch-all (standalone)", () => {
+    // An unmatched sub-route of a persistent path-ful area renders the 404
+    // inside that area's shell (so the layout persists). A truly top-level
+    // unmatched URL renders the 404 standalone.
+    it("renders the 404 in-shell for an unmatched nested sub-route", () => {
         navigate("/master/does-not-exist");
         const { container } = render(<ClientRoutes routes={routes()} />);
 
         expect(container.textContent).toContain("not-found");
-        // Should NOT render the nested area chrome at all.
+        // The persistent area's shell stays mounted (no flicker on bad sub-URL).
+        expect(container.textContent).toContain("master-layout");
+    });
+
+    it("renders the 404 standalone for a top-level unmatched URL", () => {
+        navigate("/totally-unknown");
+        const { container } = render(<ClientRoutes routes={routes()} />);
+
+        expect(container.textContent).toContain("not-found");
         expect(container.textContent).not.toContain("master-layout");
         expect(container.textContent).not.toContain("admin-layout");
     });
