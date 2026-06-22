@@ -2,6 +2,8 @@
 
 The `Link` component handles navigation in VeloJS. It supports both simple string paths and type-safe module references.
 
+All link paths are **root-absolute** — they resolve from the root of your app, exactly as the server does. There is no per-layout relative context to keep track of.
+
 ## Basic usage
 
 ```typescript
@@ -16,18 +18,14 @@ import { Link } from "@mauroandre/velojs";
 
 ## Module references
 
-Instead of hardcoding paths, you can pass a route module directly. This way, if the path changes in `routes.tsx`, your links update automatically:
+Instead of hardcoding paths, you can pass a route module directly. The link uses the module's `fullPath`, so if the path changes in `routes.tsx`, your links update automatically:
 
 ```typescript
 import { Link } from "@mauroandre/velojs";
 import * as UserPage from "./users/UserDetail.js";
-import * as LoginPage from "./auth/Login.js";
 
-// Relative path (uses metadata.path — works within the current layout)
+// Navigates to the module's full path (e.g. /users/:id)
 <Link to={UserPage} params={{ id: "123" }}>View</Link>
-
-// Absolute path (uses metadata.fullPath — navigates from the root)
-<Link to={LoginPage} absolute>Login</Link>
 ```
 
 ## Parameters and query strings
@@ -43,30 +41,22 @@ Use `params` to substitute `:param` placeholders in the path, and `search` to ad
 
 ## The `~/` prefix
 
-VeloJS uses wouter-preact for client-side routing. When routes are nested (layouts wrapping children), wouter creates a **nest context** — relative paths resolve within the current layout's scope.
-
-This is usually what you want. But sometimes you need to navigate to a completely different section of your app. That's where `~/` comes in:
+String paths may start with `~/`. This is wouter-preact's root-absolute prefix: the `~` is stripped and the path resolves from the root. Since VeloJS links are already root-absolute, `~/x` and `/x` resolve to the same place:
 
 ```typescript
-// Inside a layout at /admin/users, these behave differently:
-
-<Link to="/details">     // → /admin/users/details (relative to current layout)
-<Link to="~/settings">   // → /settings (absolute, from the root)
+<Link to="~/stacks">Stacks</Link>   // → /stacks
+<Link to="/stacks">Stacks</Link>    // → /stacks  (identical)
 ```
 
-**When to use `~/`**: anytime you navigate to a route outside the current layout. In practice, most cross-section links (e.g., from admin to settings, from dashboard to billing) use `~/`.
+The prefix is supported for backward compatibility — you can keep existing `~/` links as-is, or drop the `~` in new code.
 
-```typescript
-// Common pattern: cross-section navigation
-<Link to="~/stacks">Stacks</Link>
-<Link to={`~/stacks/apps/${appId}/edit`}>Edit App</Link>
-```
+> **Migrating from older versions:** earlier releases resolved string and module links relative to the current layout's nest context, and `~/` escaped to the root. Layout nesting on the client now mirrors the server (full-path matching, no nested base), so every link is root-absolute. In practice: keep using absolute paths (`/stacks`) or module references; existing `~/` links keep working.
 
 ## Props reference
 
 | Prop | Type | Description |
 |------|------|-------------|
-| `to` | `string \| RouteModule` | Destination path or module. Strings support `~/` prefix. |
+| `to` | `string \| RouteModule` | Destination path or module. A string may start with `~/` (root-absolute); a module resolves to its `fullPath`. |
 | `params` | `Record<string, string>` | Substitutes `:param` placeholders in the path. |
 | `search` | `Record<string, string>` | Appends query string parameters to the URL. |
-| `absolute` | `boolean` | When using a module reference: use `fullPath` instead of `path`. Default: `false`. |
+| `absolute` | `boolean` | Deprecated, no-op. Module references always use `fullPath`. Kept for backward compatibility. |

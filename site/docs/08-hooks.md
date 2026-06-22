@@ -51,15 +51,14 @@ const handleLogin = async () => {
 
 ## usePathname
 
-Returns the **absolute** pathname of the current URL. This is different from wouter's `useLocation`, which returns a path relative to the current layout context.
+Returns the **absolute** pathname of the current URL, and works identically on the server (SSR) and the client. It reads the real URL rather than any router state, so you always get the full path.
 
 ```typescript
 const pathname = usePathname();
 // Always returns the full path, e.g., "/admin/users/123"
-// Even when inside a nested layout like /admin
 ```
 
-This is useful when you need to know the exact URL, regardless of layout nesting.
+This is useful when you need the exact current URL — for active-link styling, breadcrumbs, analytics, and the like.
 
 ## useEventStream
 

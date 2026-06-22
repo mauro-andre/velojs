@@ -106,9 +106,8 @@ type LinkProps = Omit<WouterLinkProps, "to" | "href"> & {
     search?: Record<string, string> | undefined;
 
     /**
-     * When true, ignores current URL params and uses fullPath as-is
-     * By default, params are extracted from current URL and substituted
-     * @default false
+     * @deprecated No-op. Module refs always resolve to their fullPath now.
+     * Kept for backward compatibility.
      */
     absolute?: boolean;
 };
@@ -133,14 +132,11 @@ export function substituteParams(
  *
  * @example
  * ```tsx
- * // With string path
+ * // With string path (root-absolute; a leading "~/" is also accepted)
  * <Link to="/login">Login</Link>
  *
- * // With route module (relative - uses path, works with nest)
+ * // With route module (navigates to its fullPath)
  * <Link to={McpPage}>MCP</Link>
- *
- * // With route module (absolute - uses fullPath)
- * <Link to={LoginPage} absolute>Login</Link>
  *
  * // With explicit params
  * <Link to={UserPage} params={{ id: "123" }}>View User</Link>
@@ -150,23 +146,24 @@ export function Link({ to, params, search, absolute, ...rest }: LinkProps) {
     const isModule = typeof to !== "string";
     const router = useRouter();
 
-    // Default: path (relative), absolute: fullPath
-    const basePath = isModule
-        ? (absolute ? to.metadata?.fullPath : to.metadata?.path) ?? "/"
-        : to;
+    // Module refs always resolve to their absolute `fullPath`. The client router
+    // no longer uses wouter's nested base — it matches by full path, mirroring
+    // SSR — so there is no relative-to-layout context to resolve against. The
+    // `absolute` prop is kept for backward compatibility but is now a no-op
+    // (module links already resolved to fullPath on SSR/first paint).
+    void absolute;
+    const basePath = isModule ? (to.metadata?.fullPath ?? "/") : to;
 
-    // Substitute params if provided
+    // Substitute params if provided. A leading "~/" on a string `to` is still
+    // honored by wouter (it strips the "~"), resolving to a root-absolute path.
     const finalPath = params ? substituteParams(basePath, params) : basePath;
-
-    // Absolute module paths: prefix with ~ for wouter absolute navigation
-    const routePath = isModule && absolute ? `~${finalPath}` : finalPath;
 
     // Append query string if search params provided
     const queryString = search
         ? `?${new URLSearchParams(search).toString()}`
         : "";
 
-    const href = `${routePath}${queryString}`;
+    const href = `${finalPath}${queryString}`;
 
     // If a newer build was deployed, do a full page navigation instead of SPA
     if (typeof window !== "undefined" && __veloUpdatePending.value) {
