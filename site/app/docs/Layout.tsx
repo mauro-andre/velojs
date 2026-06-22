@@ -43,7 +43,7 @@ export const Component = ({ children }: { children: any }) => {
                     {entries.map((entry) => (
                         <Link
                             key={entry.slug}
-                            to={`/${entry.slug}`}
+                            to={`/docs/${entry.slug}`}
                             class={`${css.sidebarLink} ${pathname === `/docs/${entry.slug}` ? css.sidebarLinkActive : ""}`}
                         >
                             {entry.title}

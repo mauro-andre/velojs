@@ -73,7 +73,7 @@ export const Component = () => {
             <div class={css.prevNext}>
                 <div>
                     {prevSlug && (
-                        <Link to={`/${prevSlug}`} class={css.prevNextLink}>
+                        <Link to={`/docs/${prevSlug}`} class={css.prevNextLink}>
                             <span class={css.prevNextLabel}>← Previous</span>
                             <span class={css.prevNextTitle}>{prevTitle}</span>
                         </Link>
@@ -81,7 +81,7 @@ export const Component = () => {
                 </div>
                 <div>
                     {nextSlug && (
-                        <Link to={`/${nextSlug}`} class={css.prevNextLink} style={{ textAlign: "right" }}>
+                        <Link to={`/docs/${nextSlug}`} class={css.prevNextLink} style={{ textAlign: "right" }}>
                             <span class={css.prevNextLabel}>Next →</span>
                             <span class={css.prevNextTitle}>{nextTitle}</span>
                         </Link>
