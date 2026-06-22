@@ -85,6 +85,70 @@ Every layout and page can have its own `loader`. When a page is requested, **all
 | `children` | `RouteNode[]` | Nested routes. When present, the module acts as a layout. |
 | `middlewares` | `MiddlewareHandler[]` | Server-side middlewares. Inherited by all children. |
 | `isRoot` | `boolean` | Marks the root node (the HTML shell). |
+| `statusCode` | `number` | HTTP status code for the rendered page. Defaults to `200`. See [Status codes](#status-codes) and [The 404 page](#the-404-page). |
+
+## Status codes
+
+By default every page responds with HTTP `200`. Set `statusCode` on a route to override it — useful for pages like _gone_ (`410`) or _service unavailable_ (`503`):
+
+```typescript
+{ path: "/old-page", module: Gone, statusCode: 410 }
+```
+
+The status is applied to both the SSR HTML response and the JSON returned for SPA navigation, so it stays consistent however the page is reached.
+
+For a **conditional** status — a route that exists but whose resource may be missing (e.g. `/users/:id` for an unknown id) — don't use a static `statusCode`. Set it from the loader instead, via the Hono context:
+
+```typescript
+export const loader = async ({ params, c }: LoaderArgs) => {
+    const user = await getUser(params.id);
+    if (!user) c.status(404);
+    return { user };
+};
+```
+
+## The 404 page
+
+To render your own _not found_ page, add a **catch-all** route with `path: "*"` as the **last child of the root**:
+
+```typescript
+import * as NotFound from "./pages/NotFound.js";
+
+export default [
+    {
+        module: Root,
+        isRoot: true,
+        children: [
+            { path: "/", module: Home },
+            // Keep the catch-all last — it matches only when nothing else does.
+            { path: "*", module: NotFound, statusCode: 404 },
+        ],
+    },
+] satisfies AppRoutes;
+```
+
+The `NotFound` page is a normal page component, rendered inside the root layout like any other route:
+
+```typescript
+// app/pages/NotFound.tsx
+export const Component = () => (
+    <main>
+        <h1>404</h1>
+        <p>Page not found.</p>
+        <a href="/">Go home</a>
+    </main>
+);
+```
+
+VeloJS handles the catch-all specially across all modes:
+
+- **SSR** — it's wired to Hono's `notFound` hook, so it runs only after no route matched and no static asset was found. It never shadows your assets, actions, streams, or sockets. The response carries the `statusCode` (default `404`).
+- **SPA navigation** — the client router renders it when no route matches, with no round-trip.
+- **Static generation** (`velojs build --static`) — it's emitted as `dist/404.html` at the output root, following the universal `/404.html` convention that static hosts (nginx, GitHub Pages, Netlify, S3/CloudFront…) serve automatically.
+
+The catch-all is **optional**. Without it, an unmatched path still responds `404`, just with a plain-text body instead of your styled page.
+
+> The 404 renders inside the **root** layout, not section layouts, and its route middlewares don't run (there was no route to match). It's a public, top-level not-found page.
 
 ## Path resolution
 

@@ -78,6 +78,7 @@ interface RouteNode {
     children?: RouteNode[];
     middlewares?: MiddlewareHandler[];
     isRoot?: boolean;
+    statusCode?: number; // HTTP status for the page (default 200)
 }
 ```
 

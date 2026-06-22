@@ -49,6 +49,13 @@ export interface RouteNode {
     children?: RouteNode[];
     middlewares?: MiddlewareHandler[];
     isRoot?: boolean;
+    /**
+     * HTTP status code for the rendered page (default 200). Lets a route
+     * respond with e.g. 404/410/503. The bare catch-all (`path: "*"`) defaults
+     * to 404 and is served via Hono's notFound hook. For conditional status
+     * (resource missing inside a valid route), call `c.status()` in the loader.
+     */
+    statusCode?: number;
 }
 
 export type AppRoutes = RouteNode[];

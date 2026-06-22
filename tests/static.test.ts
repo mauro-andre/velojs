@@ -246,6 +246,90 @@ describe("generateStatic", () => {
         expect(fs.existsSync(path.join(TEST_DIR, "dist/favicon.ico"))).toBe(true);
     });
 
+    it("emits dist/404.html for a catch-all route (and does not generate it as a normal page)", async () => {
+        const app = createMockApp({
+            "/": {
+                html: "<html><body>Home</body></html>",
+                data: { "pages/Home": { title: "Home" } },
+            },
+        });
+        // The catch-all is served via Hono's notFound hook — generateStatic
+        // fetches an unknown path to capture it.
+        app.notFound((c) => c.html("<html><body>Not Found</body></html>", 404));
+
+        const routes: AppRoutes = [
+            {
+                module: {
+                    Component: () => null,
+                    metadata: { moduleId: "Root" },
+                },
+                isRoot: true,
+                children: [
+                    {
+                        path: "/",
+                        module: {
+                            Component: () => null,
+                            metadata: { moduleId: "pages/Home", fullPath: "/" },
+                        },
+                    },
+                    {
+                        path: "*",
+                        statusCode: 404,
+                        module: {
+                            Component: () => null,
+                            metadata: { moduleId: "pages/NotFound", fullPath: "/*" },
+                        },
+                    },
+                ],
+            },
+        ];
+
+        const originalCwd = process.cwd;
+        process.cwd = () => TEST_DIR;
+        try {
+            await generateStatic(app, routes);
+        } finally {
+            process.cwd = originalCwd;
+        }
+
+        // 404.html lives at the outDir root (convention /404.html), next to index.html.
+        const notFoundPath = path.join(TEST_DIR, "dist/404.html");
+        expect(fs.existsSync(notFoundPath)).toBe(true);
+        expect(fs.readFileSync(notFoundPath, "utf-8")).toContain("Not Found");
+
+        // The catch-all must NOT be generated as a normal page (no "*" dir).
+        expect(fs.existsSync(path.join(TEST_DIR, "dist/*"))).toBe(false);
+        expect(fs.existsSync(path.join(TEST_DIR, "dist/index.html"))).toBe(true);
+    });
+
+    it("does not emit 404.html when there is no catch-all", async () => {
+        const app = createMockApp({
+            "/": {
+                html: "<html><body>Home</body></html>",
+                data: { "pages/Home": { title: "Home" } },
+            },
+        });
+
+        const routes: AppRoutes = [
+            {
+                module: {
+                    Component: () => null,
+                    metadata: { moduleId: "pages/Home", fullPath: "/" },
+                },
+            },
+        ];
+
+        const originalCwd = process.cwd;
+        process.cwd = () => TEST_DIR;
+        try {
+            await generateStatic(app, routes);
+        } finally {
+            process.cwd = originalCwd;
+        }
+
+        expect(fs.existsSync(path.join(TEST_DIR, "dist/404.html"))).toBe(false);
+    });
+
     it("works without a public/ folder", async () => {
         const app = createMockApp({
             "/": {

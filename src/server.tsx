@@ -61,7 +61,19 @@ export function addRoutes(fn: (app: Hono) => void | Promise<void>): void {
 // RENDER PAGE - SSR ou JSON para navegação SPA
 // ============================================
 
-const renderPage = (c: Context, Component: VNode, data?: unknown) => {
+const renderPage = (
+    c: Context,
+    Component: VNode,
+    data?: unknown,
+    statusCode?: number
+) => {
+    // Status explícito da rota (default 200). Setado via preset do Hono para
+    // valer tanto no HTML SSR quanto no JSON do _data=1 abaixo. Um status
+    // setado por um loader (c.status) é preservado quando statusCode é undefined.
+    if (statusCode && statusCode !== 200) {
+        c.status(statusCode as Parameters<typeof c.status>[0]);
+    }
+
     // Navegação SPA - retorna apenas JSON
     if (c.req.query("_data") === "1") {
         const buildHash = (globalThis as any).__veloBuildHash || undefined;
@@ -198,9 +210,15 @@ const registerRoutes = (
             // Grouping leaf (no module, no children) — nothing to render. Ignore.
             continue;
         } else {
-            // Folha - registra rota usando metadata.fullPath
+            // Folha. Bare catch-all → página 404 (default 404); demais rotas
+            // usam o status declarado (ou 200 implícito) e registram por fullPath.
+            const isCatchAll = node.path === "*";
+            const statusCode = node.statusCode ?? (isCatchAll ? 404 : undefined);
+
             const fullPath = node.module.metadata?.fullPath;
-            if (!fullPath) {
+            // O catch-all não usa fullPath (vai via notFound), então só exigimos
+            // fullPath para rotas normais.
+            if (!fullPath && !isCatchAll) {
                 console.warn(
                     `Module ${node.module.metadata?.moduleId} has no fullPath`
                 );
@@ -210,13 +228,19 @@ const registerRoutes = (
             const handler = async (c: Context) => {
                 const { components, data } = await loadPage(currentModules, c);
                 const nested = nestComponents(components);
-                return renderPage(c, nested, data);
+                return renderPage(c, nested, data, statusCode);
             };
 
-            if (currentMiddlewares.length > 0) {
-                app.on(["GET"], [fullPath], ...currentMiddlewares, handler);
+            if (isCatchAll) {
+                // Não registra como GET normal: um "*" registrado antes do
+                // serveStatic engoliria os assets em produção. O notFound do
+                // Hono só dispara quando nada casou E o serveStatic não achou
+                // arquivo — o último recurso correto para a página 404.
+                app.notFound(handler);
+            } else if (currentMiddlewares.length > 0) {
+                app.on(["GET"], [fullPath!], ...currentMiddlewares, handler);
             } else {
-                app.on(["GET"], [fullPath], handler);
+                app.on(["GET"], [fullPath!], handler);
             }
         }
     }

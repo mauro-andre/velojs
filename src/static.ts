@@ -19,6 +19,10 @@ async function collectStaticRoutes(
     const routes: StaticRoute[] = [];
 
     for (const node of nodes) {
+        // Catch-all (página 404) é tratado à parte: vira dist/404.html, não
+        // uma rota normal (o "*" quebraria o fetch e geraria uma pasta "*").
+        if (node.path === "*") continue;
+
         const nodePath = node.module?.metadata?.fullPath ?? "";
 
         if (node.children) {
@@ -64,6 +68,17 @@ async function collectStaticRoutes(
     }
 
     return routes;
+}
+
+/**
+ * Whether the route tree declares a bare catch-all (the 404 page).
+ */
+function hasCatchAll(nodes: RouteNode[]): boolean {
+    for (const node of nodes) {
+        if (node.path === "*" && node.module) return true;
+        if (node.children && hasCatchAll(node.children)) return true;
+    }
+    return false;
 }
 
 /**
@@ -146,6 +161,20 @@ export async function generateStatic(
     for (const route of staticRoutes) {
         await generateRoute(app, route.fullPath, outDir);
         console.log(`  ✓ ${route.fullPath}`);
+    }
+
+    // Catch-all → dist/404.html (raiz do outDir, convenção universal /404.html
+    // que os hosts estáticos servem por default). Buscamos via um path
+    // inexistente, que dispara o app.notFound() e renderiza a página 404 dentro
+    // do layout root. Não passa pelo generateRoute porque o status é 404 (e o
+    // generateRoute pula tudo que não for 200).
+    if (hasCatchAll(routes)) {
+        const res = await app.fetch(
+            new Request("http://localhost/__velojs_not_found__")
+        );
+        const html = await res.text();
+        fs.writeFileSync(path.join(outDir, "404.html"), html);
+        console.log("  ✓ /404.html");
     }
 
     // Copy public/ assets to dist/ root so HTML references like /logos/file.svg work

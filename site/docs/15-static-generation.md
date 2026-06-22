@@ -29,6 +29,7 @@ The output:
 dist/
 ├── index.html              # Home page
 ├── index.json              # Home page data
+├── 404.html                # Catch-all page (if defined) — see Custom 404 page
 ├── about/
 │   ├── index.html          # About page
 │   └── index.json          # About page data
@@ -102,6 +103,12 @@ export const Component = () => {
 ```
 
 Routes with `:params` that don't export `staticPaths` are skipped during the static build (with a warning).
+
+## Custom 404 page
+
+If your app defines a catch-all route (`{ path: "*", module: NotFound }` — see [Routes](/docs/routes#the-404-page)), the static build emits it as **`dist/404.html`** at the output root, following the universal `/404.html` convention.
+
+Most static hosts serve `404.html` automatically for unmatched paths (GitHub Pages, Netlify, Cloudflare Pages, S3/CloudFront). On a bare nginx you point `error_page 404 /404.html;` at it. The HTTP status on a direct hit is then up to the host — in static mode VeloJS only produces the page content, not the response status.
 
 ## What doesn't work in static mode
 

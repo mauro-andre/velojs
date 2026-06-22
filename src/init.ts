@@ -62,6 +62,7 @@ export default { plugins: [veloPlugin()] };
 
 import * as Root from "./client-root.js";
 import * as Home from "./pages/Home.js";
+import * as NotFound from "./pages/NotFound.js";
 
 export default [
     {
@@ -69,6 +70,8 @@ export default [
         isRoot: true,
         children: [
             { path: "/", module: Home },
+            // Catch-all 404 — keep last. Served via notFound (SSR) / 404.html (SSG).
+            { path: "*", module: NotFound, statusCode: 404 },
         ],
     },
 ] satisfies AppRoutes;
@@ -133,6 +136,17 @@ a:hover {
         <main style={{ maxWidth: 640, margin: "80px auto", padding: "0 20px" }}>
             <h1>Welcome to VeloJS</h1>
             <p>Edit <code>app/pages/Home.tsx</code> to get started.</p>
+        </main>
+    );
+};
+`,
+
+    "app/pages/NotFound.tsx": `export const Component = () => {
+    return (
+        <main style={{ maxWidth: 640, margin: "80px auto", padding: "0 20px" }}>
+            <h1>404</h1>
+            <p>Page not found.</p>
+            <a href="/">Go home</a>
         </main>
     );
 };
