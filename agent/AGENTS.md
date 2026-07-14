@@ -35,9 +35,33 @@ hard constraints, not style.
 | `c.req.param(...)` or `params.x` inside `action_*`, `stream_*`, `socket_*` | actions: read it from `body`. streams/sockets: send `?channel=` from the client and read `query.channel` | these register at **static** paths (`/_action/{moduleId}/{name}`, `/_event/…`, `/_socket/…`) — the page's `:params` are not in scope → always `{}` / `undefined` |
 | a page in `.jsx` / `.js`, or any page outside `appDirectory` | `.tsx` inside `app/` | **zero transforms**: no metadata, no stubs, loader ships to the client |
 | a root layout that doesn't render a literal `<head>` | `isRoot` component renders `<html><head>…</head><body>{children}</body></html>` | `__PAGE_DATA__` is injected by replacing `</head>` → **every loader hydrates `null`** and refetches |
-| two components calling `useLoader()` for the **same** module | call it once and pass the data down | hydration is consume-once → **the second gets `null`** and refetches |
 
 Never pass a module id to `useLoader()` / `Loader()` yourself — the plugin injects it.
+
+## Sharing a layout's data with its children
+
+`Loader()` is the importable handle for a module's loader data; `useLoader()` is the
+component-local form. Both read the same entry, so a child can read — and optimistically
+mutate — its layout's data:
+
+```ts
+// app/admin/CompaniesLayout.tsx
+export const { data: companiesData, refetch } = Loader<LoaderData>();
+
+// app/admin/companies/CompanyInfo.tsx — rendered inside it
+import { companiesData } from "../CompaniesLayout.js";
+companiesData.value!.companies[i] = saved;
+touch(companiesData);        // you already know the result — no round-trip
+refetch();                   // or make the server recompute
+```
+
+Never mirror loader data into a module-level `export let`: on the server a module binding
+is per-process, so a value stored there belongs to whichever request wrote it last.
+`Loader()`'s server value is an AsyncLocalStorage getter — per-request by construction.
+
+An entry refreshes on navigation when the params **its own route declares** change
+(`/x/:id`). A query string is not declared in `routes.tsx`, so nothing infers it — use
+`useLoader([query.tab])` when data depends on one.
 
 ## A stream/socket `channel` is untrusted client input
 

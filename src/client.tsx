@@ -1,7 +1,9 @@
 import { hydrate } from "preact";
-import { Router, Route, Switch } from "wouter-preact";
+import { Router, Route, Switch, useLocation } from "wouter-preact";
+import { useEffect } from "preact/hooks";
 import type { VNode, ComponentType } from "preact";
 import type { RouteNode, AppRoutes } from "./types.js";
+import { registerRoutePatterns, syncLocation } from "./loader-store.js";
 
 // ============================================
 // CLIENT OPTIONS
@@ -181,10 +183,29 @@ const buildRoutes = (
 // CLIENT ROUTES - Componente de rotas
 // ============================================
 
+// Tells the loader store when the URL changed, so it can refresh exactly the
+// entries whose declared path params moved. Renders nothing; it exists to turn
+// wouter's location into a plain call, since the store is not a component.
+const LoaderSync = () => {
+    const [location] = useLocation();
+    useEffect(() => {
+        syncLocation(window.location.pathname);
+    }, [location]);
+    return null;
+};
+
 export const ClientRoutes = ({ routes }: { routes: AppRoutes }) => {
+    // Idempotent: records each module's route pattern, which is what the store
+    // reads to decide whose data a navigation invalidates.
+    registerRoutePatterns(routes);
     const NotFound = findCatchAll(routes);
     const routeTree = buildRoutes(routes, "", NotFound, "");
-    return <Router>{routeTree}</Router>;
+    return (
+        <Router>
+            <LoaderSync />
+            {routeTree}
+        </Router>
+    );
 };
 
 // ============================================

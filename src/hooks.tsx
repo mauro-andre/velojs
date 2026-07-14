@@ -13,9 +13,16 @@ import {
 } from "wouter-preact";
 import type { EventStream } from "./events.js";
 import type { SocketHandler, SocketStub } from "./sockets.js";
+import {
+    loaderEntry,
+    loaderLoading,
+    refetchModule,
+    __veloUpdatePending,
+} from "./loader-store.js";
 
-// Flag: true when a newer build has been deployed
-export const __veloUpdatePending = signal(false);
+// Flag: true when a newer build has been deployed. Owned by the loader store,
+// which is what talks to the server and sees the build hash.
+export { __veloUpdatePending };
 
 /**
  * Força o signal a notificar mudanças após mutação de propriedades aninhadas
@@ -59,10 +66,12 @@ export function touch<T>(sig: Signal<T | null>): void {
 export function Loader<T>(moduleId?: string): {
     data: Signal<T | null>;
     loading: Signal<boolean>;
+    refetch: () => void;
 } {
-    const loading = signal(false);
-
-    // Servidor: getter que sempre lê do AsyncLocalStorage (sem cache)
+    // Servidor: getter que sempre lê do AsyncLocalStorage (sem cache).
+    // O binding é module-scope, mas o VALOR é por-request — é isso que torna o
+    // handle seguro de exportar, ao contrário de guardar o signal de um request
+    // numa variável de módulo.
     if (typeof window === "undefined") {
         const data = {
             get value(): T | null {
@@ -72,16 +81,25 @@ export function Loader<T>(moduleId?: string): {
                 return (serverData?.[moduleId] as T) ?? null;
             },
         };
-        return { data: data as Signal<T | null>, loading };
+        return {
+            data: data as Signal<T | null>,
+            loading: signal(false),
+            refetch: () => {},
+        };
     }
 
-    // Cliente: apenas hidrata do __PAGE_DATA__, nunca faz fetch
-    // (Loader roda uma única vez no import do módulo, não é responsável por SPA)
-    const pageData = (window as any).__PAGE_DATA__;
-    const initialData =
-        moduleId && pageData?.[moduleId] ? (pageData[moduleId] as T) : null;
+    if (!moduleId) {
+        return { data: signal<T | null>(null), loading: signal(false), refetch: () => {} };
+    }
 
-    return { data: signal<T | null>(initialData), loading };
+    // Cliente: a entrada compartilhada do store. Hidrata do __PAGE_DATA__ sem
+    // consumir, e é reidratada na navegação quando os params que a rota deste
+    // módulo declara mudam — sem deps, sem driver.
+    return {
+        data: loaderEntry<T>(moduleId),
+        loading: loaderLoading(moduleId),
+        refetch: () => refetchModule(moduleId),
+    };
 }
 
 /**
@@ -124,77 +142,46 @@ export function useLoader<T>(
         resolvedDeps = deps;
     }
 
-    // Servidor: pega dados do AsyncLocalStorage (isolado por request)
-    let initialData: T | null = null;
-
-    if (typeof window === "undefined" && moduleId) {
-        const storage = (globalThis as any).__veloServerData;
-        const serverData = storage?.getStore?.();
-        if (serverData?.[moduleId]) {
-            initialData = serverData[moduleId] as T;
+    // Servidor: lê o AsyncLocalStorage (isolado por request). O store é client-only.
+    if (typeof window === "undefined") {
+        let initialData: T | null = null;
+        if (moduleId) {
+            const storage = (globalThis as any).__veloServerData;
+            const serverData = storage?.getStore?.();
+            if (serverData?.[moduleId]) initialData = serverData[moduleId] as T;
         }
+        return {
+            data: useSignal<T | null>(initialData),
+            loading: useSignal(false),
+            refetch: () => {},
+        };
     }
 
-    // Cliente: tenta hidratar do __PAGE_DATA__
-    if (typeof window !== "undefined" && moduleId) {
-        const pageData = (window as any).__PAGE_DATA__;
-        if (pageData?.[moduleId]) {
-            initialData = pageData[moduleId] as T;
-            delete pageData[moduleId];
-        }
+    if (!moduleId) {
+        return { data: useSignal<T | null>(null), loading: useSignal(false), refetch: () => {} };
     }
 
-    const data = useSignal<T | null>(initialData);
-    const loading = useSignal(false);
+    // Cliente: a MESMA entrada que o Loader deste módulo devolve, para que um
+    // layout e seus filhos leiam um dado só. A hidratação já aconteceu no store,
+    // sem consumir — dois componentes podem ler o mesmo módulo.
+    const data = loaderEntry<T>(moduleId);
+    const loading = loaderLoading(moduleId);
+    const refetch = () => refetchModule(moduleId);
 
-    const fetchData = () => {
-        if (typeof window === "undefined" || !moduleId) return;
-        const currentPath = window.location.pathname;
-        loading.value = true;
-
-        // Static mode: fetch pre-generated JSON file
-        // Dynamic mode: fetch from server with _data query param
-        const isStatic = typeof __VELO_STATIC__ !== "undefined" && __VELO_STATIC__;
-        const dataUrl = isStatic
-            ? `${currentPath === "/" ? "" : currentPath}/index.json`
-            : (() => {
-                const searchParams = new URLSearchParams(window.location.search);
-                searchParams.set("_data", "1");
-                return `${currentPath}?${searchParams.toString()}`;
-            })();
-
-        fetch(dataUrl, { cache: "no-cache" })
-            .then((res) => res.json())
-            .then((json: Record<string, unknown>) => {
-                // Detect newer deploy by comparing build hashes
-                if (
-                    typeof __VELO_BUILD_HASH__ !== "undefined" &&
-                    json.__buildHash &&
-                    json.__buildHash !== __VELO_BUILD_HASH__
-                ) {
-                    __veloUpdatePending.value = true;
-                }
-
-                data.value = json[moduleId] as T;
-                loading.value = false;
-            })
-            .catch(() => {
-                loading.value = false;
-            });
-    };
-
-    // Skip fetch on first render if hydrated from __PAGE_DATA__
-    // On subsequent dep changes (SPA navigation), always fetch
-    const isHydrated = useRef(initialData !== null);
+    // Deps continuam existindo para reatividade que a rota NÃO declara (uma
+    // query string, um signal de client). Mudança de path param já é tratada
+    // pelo store na navegação; um dep que apenas repete um param coalesce no
+    // mesmo fetch em vez de duplicá-lo.
+    const isFirstRun = useRef(true);
     useEffect(() => {
-        if (isHydrated.current) {
-            isHydrated.current = false;
-            return;
+        if (isFirstRun.current) {
+            isFirstRun.current = false;
+            if (data.value !== null) return; // já hidratado
         }
-        fetchData();
+        refetch();
     }, resolvedDeps ?? []);
 
-    return { data, loading, refetch: fetchData };
+    return { data, loading, refetch };
 }
 
 /**
