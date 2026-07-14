@@ -282,11 +282,14 @@ describe("EndpointRoute — validation warns", () => {
     });
 
     it("warns and skips when handler has no method", async () => {
+        // `method` and `handler` are both optional on RouteNode — declaring one
+        // without the other is exactly the mistake under test, so it needs no
+        // cast to express.
         const routes: AppRoutes = [
             {
                 path: "/bad",
-                handler: ({ c }) => c.text("never") as any,
-            } as any,
+                handler: ({ c }) => c.text("never"),
+            },
         ];
         const app = await createTestApp({ routes });
         const res = await app.get("/bad");
@@ -299,7 +302,7 @@ describe("EndpointRoute — validation warns", () => {
 
     it("warns and skips when method has no handler", async () => {
         const routes: AppRoutes = [
-            { path: "/bad", method: "GET" } as any,
+            { path: "/bad", method: "GET" },
         ];
         const app = await createTestApp({ routes });
         const res = await app.get("/bad");
@@ -330,19 +333,38 @@ describe("EndpointRoute — validation warns", () => {
         await app.close();
     });
 
-    it("warns when endpoint GET conflicts with a page GET on the same path", async () => {
+    it("warns when endpoint GET conflicts with a page GET, and the PAGE wins", async () => {
+        // Pages register before endpoints (createApp), and the page handler
+        // returns a Response without calling next(), so Hono stops there. The
+        // page has to win: it also serves `?_data=1`, the JSON every SPA
+        // navigation fetches. An endpoint taking the path over would silently
+        // make the page unnavigable client-side.
         const page = makeModule({ moduleId: "pages/Dup", fullPath: "/dup" });
+        (page as any).Component = () => "PAGE-HTML";
         const routes: AppRoutes = [
             { path: "/dup", module: page },
             {
                 path: "/dup",
                 method: "GET",
-                handler: ({ c }) => c.text("endpoint"),
+                handler: ({ c }) => c.text("ENDPOINT"),
             },
         ];
-        await createTestApp({ routes });
+        const app = await createTestApp({ routes });
+
         expect(warnSpy).toHaveBeenCalledWith(
             expect.stringContaining(`has both a page GET and an endpoint GET`)
         );
+        // The warning must name the actual winner, not the opposite.
+        expect(warnSpy).toHaveBeenCalledWith(
+            expect.stringContaining(`the page wins`)
+        );
+
+        const res = await app.get("/dup");
+        expect(res.status).toBe(200);
+        const body = await res.text();
+        expect(body).toContain("PAGE-HTML");
+        expect(body).not.toContain("ENDPOINT");
+
+        await app.close();
     });
 });

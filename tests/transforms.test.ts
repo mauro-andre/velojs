@@ -221,6 +221,81 @@ const routes = {
         expect(output).not.toContain("logMw");
         expect(output).not.toContain("middlewares");
     });
+
+    // The `middlewares` property is server-only config: it must never reach the
+    // client bundle, whatever shape its value has. Each case below used to leak
+    // because the identifier scan drove the whole transform.
+
+    it("removes the property when the array only spreads", () => {
+        const input = `import { common } from "./common.js";
+
+const routes = {
+    middlewares: [...common],
+};`;
+        const output = removeMiddlewares(input);
+        expect(output).not.toContain("middlewares");
+        expect(output).not.toContain("common");
+    });
+
+    it("removes the property when the value is a call expression", () => {
+        const input = `import { getMws } from "./common.js";
+
+const routes = {
+    middlewares: getMws(),
+};`;
+        const output = removeMiddlewares(input);
+        expect(output).not.toContain("middlewares");
+        expect(output).not.toContain("getMws");
+    });
+
+    it("removes namespace-imported middlewares", () => {
+        const input = `import * as mw from "./middleware.js";
+
+const routes = {
+    middlewares: [mw.auth],
+};`;
+        const output = removeMiddlewares(input);
+        expect(output).not.toContain("middlewares");
+        expect(output).not.toContain("mw");
+    });
+
+    it("removes default-imported middlewares", () => {
+        const input = `import auth from "./auth.middleware.js";
+
+const routes = {
+    middlewares: [auth],
+};`;
+        const output = removeMiddlewares(input);
+        expect(output).not.toContain("middlewares");
+        expect(output).not.toContain("auth.middleware.js");
+    });
+
+    it("removes mixed identifier + spread, dropping both imports", () => {
+        const input = `import { auth, common } from "./mw.js";
+
+const routes = {
+    middlewares: [auth, ...common],
+};`;
+        const output = removeMiddlewares(input);
+        expect(output).not.toContain("middlewares");
+        expect(output).not.toContain("auth");
+        expect(output).not.toContain("common");
+    });
+
+    it("keeps a middleware import that is still referenced elsewhere", () => {
+        // Stripping unconditionally would leave `auth` referenced but unbound.
+        const input = `import { auth } from "./auth.js";
+
+const routes = {
+    middlewares: [auth],
+};
+
+export const stillUsed = auth;`;
+        const output = removeMiddlewares(input);
+        expect(output).not.toContain("middlewares");
+        expect(output).toContain(`import { auth } from "./auth.js"`);
+        expect(output).toContain("export const stillUsed = auth");
+    });
 });
 
 // ============================================

@@ -27,9 +27,12 @@ export const __veloUpdatePending = signal(false);
  * ```
  */
 export function touch<T>(sig: Signal<T | null>): void {
-    if (sig.value !== null && typeof sig.value === "object") {
-        sig.value = { ...sig.value } as T;
-    }
+    const current = sig.value;
+    if (current === null || typeof current !== "object") return;
+    // Arrays must stay arrays: `typeof [] === "object"`, so spreading into an
+    // object literal would turn [a, b] into {0: a, 1: b} and silently break
+    // every later .map/.filter on the signal.
+    sig.value = (Array.isArray(current) ? [...current] : { ...current }) as T;
 }
 
 /**

@@ -312,6 +312,54 @@ describe("Conventions — .action and .loader", () => {
         expect(data).toEqual({ greeting: "hi" });
         await app.close();
     });
+
+    it(".loader returns a TestResponse when the loader throws — it does not re-throw", async () => {
+        // The loader runs inside a Hono handler, and Hono catches to produce a
+        // 500 response. `hono.fetch` therefore resolves and `.loader` returns
+        // the TestResponse for inspection. A test written as
+        // `await expect(app.loader(fn)).rejects.toThrow()` could never pass.
+        const loaderFn = async () => {
+            throw new Error("boom");
+        };
+        const home = makeModule({ moduleId: "Home", fullPath: "/", loader: loaderFn });
+        const app = await createTestApp({
+            routes: [
+                {
+                    module: makeModule({ moduleId: "Root" }),
+                    isRoot: true,
+                    children: [{ path: "/", module: home }],
+                },
+            ],
+        });
+
+        const res: any = await app.loader(loaderFn);
+        expect(res.status).toBe(500);
+        expect(typeof res.text).toBe("function");
+        await app.close();
+    });
+
+    it(".loader returns a TestResponse when the loader sets a non-2xx status", async () => {
+        // A loader's return value is data, not a Response — the way to signal a
+        // conditional status is c.status(), which renderPage preserves.
+        const loaderFn = async ({ c }: any) => {
+            c.status(403);
+            return { error: "forbidden" };
+        };
+        const home = makeModule({ moduleId: "Home", fullPath: "/", loader: loaderFn });
+        const app = await createTestApp({
+            routes: [
+                {
+                    module: makeModule({ moduleId: "Root" }),
+                    isRoot: true,
+                    children: [{ path: "/", module: home }],
+                },
+            ],
+        });
+
+        const res: any = await app.loader(loaderFn);
+        expect(res.status).toBe(403);
+        await app.close();
+    });
 });
 
 // ============================================

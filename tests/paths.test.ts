@@ -121,6 +121,21 @@ export default [
         expect(result.get("pages/Home")).toEqual({ fullPath: "/", path: "/" });
     });
 
+    it("handles as AppRoutes syntax", () => {
+        // `as` must behave exactly like `satisfies`. Without a TSAsExpression
+        // branch the map comes back empty, no module gets a fullPath, and every
+        // route 404s at boot with only a console.warn — a silent failure.
+        const code = `
+import type { AppRoutes } from "velojs";
+import * as Home from "./pages/Home.js";
+
+export default [
+    { path: "/", module: Home },
+] as AppRoutes;`;
+        const result = buildFullPathMap(code);
+        expect(result.get("pages/Home")).toEqual({ fullPath: "/", path: "/" });
+    });
+
     it("returns empty map for routes without namespace imports", () => {
         const code = `
 import Home from "./pages/Home.js";

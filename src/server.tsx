@@ -450,8 +450,12 @@ const registerEndpointRoutes = (
         if (canRegister) {
             const method = node.method as HTTPMethod;
             if (method === "GET" && pageGetPaths.has(fullPath)) {
+                // Pages are registered before endpoints and their handler never
+                // calls next(), so the page answers and this endpoint is dead.
+                // That order is deliberate: the page GET also serves `?_data=1`,
+                // the JSON every SPA navigation fetches.
                 console.warn(
-                    `[velojs] path "${fullPath}" has both a page GET and an endpoint GET; endpoint will win. Consider renaming one.`
+                    `[velojs] path "${fullPath}" has both a page GET and an endpoint GET; the page wins and the endpoint is unreachable. Consider renaming one.`
                 );
             }
 

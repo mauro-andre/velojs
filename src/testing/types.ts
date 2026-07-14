@@ -147,8 +147,12 @@ export interface TestApp {
     /**
      * Invoke a `loader` server function. By default unwraps the response data:
      * - Resolved normally → returns the loader's return value
-     * - Threw → re-throws
-     * - Redirected → returns a `TestResponse` for status inspection
+     * - Redirected (3xx) → returns a `TestResponse` for status inspection
+     * - Non-2xx (a `c.status()` set by the loader, or a 500 from a thrown
+     *   error) → returns a `TestResponse`. Nothing is re-thrown: the loader
+     *   runs inside a Hono handler, which catches and turns the throw into a
+     *   500 response, so `hono.fetch` resolves. Assert on `res.status`, not
+     *   with `rejects.toThrow()`.
      */
     loader<T = any>(fn: Function | string, opts?: LoaderRequestOptions): Promise<T | TestResponse>;
 

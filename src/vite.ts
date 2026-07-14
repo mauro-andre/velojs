@@ -589,58 +589,54 @@ export function removeMiddlewares(code: string): string {
         plugins: ["typescript", "jsx"],
     });
 
-    // Fase 1: Coleta identificadores usados em middlewares: [...]
-    const middlewareIdentifiers = new Set<string>();
+    // Fase 1: remove TODA propriedade `middlewares`, guardando o valor removido.
+    // A forma do valor é irrelevante — array literal, spread, chamada de função:
+    // tudo é config server-only e nada pode chegar ao client. (Deixar a remoção
+    // depender de encontrar identificadores fazia `[...common]` e `getMws()`
+    // vazarem inteiros, propriedade e import.)
+    const removedValues: t.Node[] = [];
 
     traverse(ast, {
         ObjectProperty(nodePath) {
-            // Procura: middlewares: [...]
-            if (
-                t.isIdentifier(nodePath.node.key, { name: "middlewares" }) &&
-                t.isArrayExpression(nodePath.node.value)
-            ) {
-                // Coleta todos os identificadores no array
-                for (const element of nodePath.node.value.elements) {
-                    if (t.isIdentifier(element)) {
-                        middlewareIdentifiers.add(element.name);
-                    }
-                }
-
-                // Remove a propriedade middlewares
-                nodePath.remove();
-            }
+            if (!t.isIdentifier(nodePath.node.key, { name: "middlewares" })) return;
+            removedValues.push(nodePath.node.value);
+            nodePath.remove();
         },
     });
 
-    // Se não encontrou middlewares, retorna código original
-    if (middlewareIdentifiers.size === 0) {
-        return code;
+    if (removedValues.length === 0) return code;
+
+    // Fase 2: derruba os imports que SÓ os middlewares removidos referenciavam.
+    // Default e namespace imports entram: um middleware trazido por
+    // `import auth from` ou `import * as mw from` é tão server-only quanto um
+    // nomeado. O que segue referenciado em outro lugar fica — removê-lo deixaria
+    // um identificador solto e quebraria o bundle.
+    const usedInRemoved = new Set<string>();
+    for (const value of removedValues) {
+        collectReferencedIdentifiers(value, usedInRemoved);
     }
 
-    // Fase 2: Remove imports dos identificadores de middleware
-    traverse(ast, {
-        ImportDeclaration(nodePath) {
-            const specifiers = nodePath.node.specifiers;
+    const stillUsed = new Set<string>();
+    collectReferencedIdentifiers(ast.program, stillUsed);
 
-            // Filtra os specifiers, removendo os que são middlewares
-            const remainingSpecifiers = specifiers.filter((specifier) => {
-                if (t.isImportSpecifier(specifier)) {
-                    const localName = specifier.local.name;
-                    return !middlewareIdentifiers.has(localName);
+    const toStrip = new Set<string>();
+    for (const name of usedInRemoved) {
+        if (!stillUsed.has(name)) toStrip.add(name);
+    }
+
+    if (toStrip.size > 0) {
+        traverse(ast, {
+            ImportDeclaration(nodePath) {
+                const specifiers = nodePath.node.specifiers;
+                const kept = specifiers.filter((spec) => !toStrip.has(spec.local.name));
+                if (kept.length === 0) {
+                    nodePath.remove();
+                } else if (kept.length !== specifiers.length) {
+                    nodePath.node.specifiers = kept;
                 }
-                // Mantém default imports e namespace imports
-                return true;
-            });
-
-            if (remainingSpecifiers.length === 0) {
-                // Remove o import inteiro se não sobrou nenhum specifier
-                nodePath.remove();
-            } else if (remainingSpecifiers.length !== specifiers.length) {
-                // Atualiza os specifiers se alguns foram removidos
-                nodePath.node.specifiers = remainingSpecifiers;
-            }
-        },
-    });
+            },
+        });
+    }
 
     const output = generate(ast, { retainLines: true });
     return output.code;
@@ -859,7 +855,8 @@ export function buildFullPathMap(code: string): Map<string, PathInfo> {
             if (t.isArrayExpression(declaration)) {
                 arrayNode = declaration;
             } else if (
-                t.isTSSatisfiesExpression(declaration) &&
+                (t.isTSSatisfiesExpression(declaration) ||
+                    t.isTSAsExpression(declaration)) &&
                 t.isArrayExpression(declaration.expression)
             ) {
                 arrayNode = declaration.expression;
@@ -1188,10 +1185,15 @@ function veloConfigPlugin(veloConfig: VeloConfig): Plugin {
 
             const isStatic = !!process.env.VELO_STATIC;
 
-            // Unified port: PORT env (runtime, host-injected) > defineConfig port > 3000.
-            // Dev uses it via Vite's server.port; prod uses it inside startServer.
-            // The CLI flag `velojs dev --port` still overrides (Vite applies it last).
-            const port = Number(process.env.PORT) || veloConfig.port || 3000;
+            // Unified port: an explicit server.port (`velojs dev --port`, or the
+            // user's own vite config) > PORT env (runtime, host-injected) >
+            // veloPlugin({ port }) > 3000. Dev uses it via Vite's server.port;
+            // prod uses it inside startServer.
+            // A plugin's config() return is merged LAST and wins, so we must
+            // defer to a port the user set explicitly instead of overwriting it.
+            const port =
+                userConfig.server?.port ??
+                (Number(process.env.PORT) || veloConfig.port || 3000);
 
             // In server build, read the client manifest to get hashed asset filenames
             let clientJs = "client.js";
