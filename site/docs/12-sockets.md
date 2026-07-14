@@ -2,7 +2,7 @@
 
 Sockets are **declarative WebSocket handlers** co-located with the page that uses them. Export `socket_<name>` from a page or layout module and VeloJS registers a WebSocket route at `/_socket/{moduleId}/{name}`, with the same middleware inheritance as pages, actions, and streams.
 
-Use sockets when you need **bidirectional** server ↔ client communication: interactive terminals, collaborative editing, live cursors, anything where the client needs to send messages too. For one-way push (server → client), use [Event Streams](./11-event-streams.md).
+Use sockets when you need **bidirectional** server ↔ client communication: interactive terminals, collaborative editing, live cursors, anything where the client needs to send messages too. For one-way push (server → client), use [Event Streams](/docs/event-streams).
 
 ## The shortest example
 
@@ -10,16 +10,20 @@ Use sockets when you need **bidirectional** server ↔ client communication: int
 // app/workers/WorkerTerminal.tsx
 import type { SocketHandler } from "@mauroandre/velojs";
 import { parseJson } from "@mauroandre/velojs/sockets";
-import { useSocket } from "@mauroandre/velojs/hooks";
+import { useSocket, useParams } from "@mauroandre/velojs/hooks";
 
 type Incoming = { type: "data"; data: string } | { type: "resize"; cols: number; rows: number };
 type Outgoing = { type: "data"; data: string } | { type: "exit"; code: number };
 
 export const socket_terminal: SocketHandler = async ({
-    incoming, send, keepOpen, abortSignal, c, params,
+    incoming, send, close, keepOpen, abortSignal, c, query,
 }) => {
     const user = c.get("user");
-    const session = await createTerminal({ user, workerId: params.workerId });
+    // The client sends the id as `?channel=` — see the note below on `params`.
+    const workerId = query.channel;
+    if (!workerId) { close(1008, "missing channel"); return; }
+
+    const session = await createTerminal({ user, workerId });
 
     session.on("data", (chunk) => send({ type: "data", data: chunk.toString() }));
     session.on("exit", (code) => send({ type: "exit", code }));
@@ -63,11 +67,27 @@ export type SocketHandler = (args: {
     close: (code?: number, reason?: string) => void;
     keepOpen: () => void;
     abortSignal: AbortSignal;
-    c: Context;
+    /** Always empty for `socket_*` — see below. */
     params: Record<string, string>;
     query: Record<string, string>;
 }) => void | Promise<void>;
 ```
+
+### `params` is always empty — read the id from `query.channel`
+
+A `socket_*` handler is mounted at its own static path — `/_socket/{moduleId}/{name}` — not at the URL of the page it lives on. That path has no `:segments`, so `params` is always `{}`, even when the page route is `/workers/:workerId` and even when a middleware on that route reads the param fine.
+
+The client sends the value as `?channel=`, so it arrives in **`query.channel`**:
+
+```ts
+// ❌ undefined in production
+const workerId = params.workerId;
+
+// ✅
+const workerId = query.channel;
+```
+
+> This one is easy to miss because **`app.socket()` lets you inject `params` directly**, so a test written against the wrong version passes while production breaks. Pass `channel` in tests instead, matching what `useSocket({ channel })` really transmits.
 
 ### `incoming` — `AsyncIterable<string | Uint8Array>`
 
@@ -114,7 +134,7 @@ A `for await (const msg of incoming)` loop keeps the handler alive naturally whi
 Close the socket imperatively. Useful for protocol-level end-of-session:
 
 ```ts
-if (!authorize(user, params.workerId)) {
+if (!authorize(user, query.channel)) {
     close(1008, "policy violation");
     return;
 }
@@ -194,7 +214,7 @@ const app = await createTestApp({ routes });
 
 const ws = await app.socket(socket_terminal, {
     user: { id: "alice" },
-    params: { workerId: "w42" },
+    channel: "w42",
 });
 
 ws.send({ type: "data", data: "ls\n" });
@@ -220,15 +240,15 @@ await ws.close();
   Test middleware behavior separately through a regular endpoint or page that uses the same middleware.
 - **No real HTTP upgrade.** Binary frames pass through `Uint8Array`, but there's no true TCP socket.
 
-See [17-testing.md](./17-testing.md) for the full toolkit.
+See [17-testing.md](/docs/testing) for the full toolkit.
 
 ## Common patterns
 
 ### Terminal / interactive shell
 
 ```ts
-export const socket_terminal: SocketHandler = async ({ incoming, send, keepOpen, abortSignal, params }) => {
-    const pty = await spawnPty(params.workerId);
+export const socket_terminal: SocketHandler = async ({ incoming, send, keepOpen, abortSignal, query }) => {
+    const pty = await spawnPty(query.channel);
     pty.onData((chunk) => send({ type: "data", data: chunk }));
     pty.onExit((code) => send({ type: "exit", code }));
     abortSignal.addEventListener("abort", () => pty.kill());
@@ -272,7 +292,7 @@ export const socket_foo: SocketHandler = async ({ c, close }) => {
 
 ## Related
 
-- [Event Streams](./11-event-streams.md) — one-way server → client push (SSE). Use when you don't need client → server.
-- [`pipe` in streams](./11-event-streams.md#pipe-unified-vocabulary) — share vocabulary (`send / keepOpen / abortSignal`) with `socket_*`.
-- [Middlewares](./07-middlewares.md)
-- [Testing](./17-testing.md)
+- [Event Streams](/docs/event-streams) — one-way server → client push (SSE). Use when you don't need client → server.
+- [`pipe` in streams](/docs/event-streams#pipe-unified-vocabulary) — share vocabulary (`send / keepOpen / abortSignal`) with `socket_*`.
+- [Middlewares](/docs/middlewares)
+- [Testing](/docs/testing)

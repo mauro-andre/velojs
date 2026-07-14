@@ -12,13 +12,58 @@ In a typical web app, the client asks the server for data. But sometimes you nee
 - **WebSocket** — bidirectional, complex setup, proxy issues
 - **Server-Sent Events (SSE)** — one-way over plain HTTP, auto-reconnect built-in, works through any proxy
 
-VeloJS picks SSE because it covers ~90% of real-time use cases with minimal complexity. For bidirectional needs (rare — interactive terminals, live cursors), drop down to a raw WebSocket via `onServer`.
+VeloJS picks SSE because it covers ~90% of real-time use cases with minimal complexity. For bidirectional needs (rare — interactive terminals, live cursors), use the [`socket_*` convention](/docs/sockets).
 
 ## Channels by default
 
 Streams are **channel-aware by default**. You don't need to configure anything — `useEventStream(stream, { channel })` on the client and `stream.emit(channel, value)` on the server just work together. The framework reads `?channel=...` from the URL automatically.
 
 For streams that should send the same event to everyone (broadcast), opt in with `{ broadcast: true }`.
+
+## A channel is untrusted input
+
+`useEventStream(stream, { channel })` puts the channel on the query string, so **anyone can send any value**. A resolver that echoes it back subscribes the caller to whatever they ask for — including another customer's data:
+
+```typescript
+// ⚠️ only safe when the route's middleware already restricts every subscriber
+//    (e.g. an admin-only page). Otherwise this is an IDOR.
+channel: (c) => c.req.query("channel") ?? "",
+```
+
+Resolve it through an ownership check instead. Returning `null` denies the connection with a 403:
+
+```typescript
+// app/modules/app/app.stream.ts
+export const ownAppChannel = async (c: Context): Promise<string | null> => {
+    const appId = c.req.query("channel");
+    if (!appId) return null;
+
+    const user = c.get("user");                 // set by the route's middleware
+    if (!user?.id) return null;
+
+    // Dynamic import keeps the service out of the client bundle.
+    const { getApp } = await import("./app.service.js");
+    const app = await getApp({ id: appId });
+    if (!app) return null;
+
+    if (user.role !== "master" && app.ownerId !== user.id) return null;
+    return appId;
+};
+```
+
+```typescript
+export const stream_deploy = createEventStream<DeployEvent>({
+    channel: ownAppChannel,
+});
+```
+
+A channel derived from the session needs no check, since the client cannot influence it:
+
+```typescript
+channel: (c) => c.get("user").id,
+```
+
+> `c.req.param()` does **not** work in a `stream_*` resolver. Convention streams are mounted at a static path — `/_event/{moduleId}/{name}` — so the page's `:params` are not in scope and `c.req.param()` is always empty. Send the value as `?channel=` and read it with `c.req.query("channel")`. (Params do work in a [standalone stream](#2-standalone-cross-cutting-streams) given an explicit `path` containing `:segments`.)
 
 ## The shortest example
 
@@ -357,7 +402,7 @@ Sometimes each channel needs its **own** producer — like an SSH connection per
 
 ```typescript
 export const stream_logs = createEventStream<string>({
-    channel: (c) => `${c.req.param("worker")}:${c.req.param("container")}`,
+    channel: (c) => c.req.query("channel") ?? "",
     perChannelSource: async (channelKey, emit, { abortSignal }) => {
         const [worker, container] = channelKey.split(":");
         const conn = await ssh.connect(worker);
@@ -385,11 +430,11 @@ This means resources scale with **active channels**, not total channels. When no
 
 ## `pipe` — unified vocabulary {#pipe-unified-vocabulary}
 
-`pipe` is a **newer per-channel producer** that shares the same vocabulary (`send / keepOpen / abortSignal / close`) used by [`socket_*` handlers](./12-sockets.md). Prefer `pipe` for new code — it's a cleaner API and transfers directly to sockets when the same team later needs bidirectional flow.
+`pipe` is a **newer per-channel producer** that shares the same vocabulary (`send / keepOpen / abortSignal / close`) used by [`socket_*` handlers](/docs/sockets). Prefer `pipe` for new code — it's a cleaner API and transfers directly to sockets when the same team later needs bidirectional flow.
 
 ```typescript
 export const stream_logs = createEventStream<string>({
-    channel: (c) => c.req.param("appId"),
+    channel: ownAppChannel,
     pipe: async ({ send, keepOpen, abortSignal, c, params, channel }) => {
         const user = c.get("user");
         const conn = await ssh.connect(channel);
@@ -581,7 +626,7 @@ Each channel owns an expensive resource. Open on first subscriber, close on last
 
 ```typescript
 export const stream_containerLogs = createEventStream<string>({
-    channel: (c) => `${c.req.param("worker")}:${c.req.param("container")}`,
+    channel: (c) => c.req.query("channel") ?? "",
     bufferSize: 500,
     perChannelSource: async (key, emit, { abortSignal }) => {
         const [worker, container] = key.split(":");
@@ -644,7 +689,7 @@ Yes. The hook is just a convenience. You can construct the URL (`stream.__path` 
 
 ### What about WebSocket?
 
-VeloJS doesn't include WebSocket helpers because most real-time use cases (~90%) are server-to-client only, where SSE is simpler. For bidirectional needs (interactive terminals, live cursors), use `onServer` to attach a WebSocket library directly.
+Use [Sockets](/docs/sockets). VeloJS ships a first-class `socket_*` convention with the same middleware inheritance and testing story as streams. Reach for it when the client must **send** as well as receive — interactive terminals, collaborative editing. For server-to-client push (the ~90% case) SSE stays simpler, so prefer a stream. `onServer` remains available if you need to attach a WebSocket library yourself, but it's no longer the recommended path.
 
 ### How many concurrent subscribers can the server handle?
 

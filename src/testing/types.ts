@@ -13,7 +13,7 @@ export type Query = Record<string, string | string[]>;
 export type Params = Record<string, string>;
 
 export interface CreateTestAppOptions {
-    /** App routes — typically `import { routes } from "./app/routes.js"`. */
+    /** App routes — typically `import routes from "./app/routes.js"` (the default export of `routes.tsx`). */
     routes: AppRoutes;
     /**
      * Optional setup that runs once before the app is created.

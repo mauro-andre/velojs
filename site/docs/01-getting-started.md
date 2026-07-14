@@ -13,7 +13,7 @@ npm install
 npx velojs dev
 ```
 
-This creates a ready-to-run project. Open `http://localhost:5173` and you should see your app.
+This creates a ready-to-run project. Open `http://localhost:3000` and you should see your app.
 
 ## Project structure
 
@@ -132,7 +132,7 @@ export default [
 ] satisfies AppRoutes;
 ```
 
-Notice the `import *` syntax — this imports the entire module (Component, loader, actions, metadata) as a single object.
+Page and layout modules **must** be imported with `import * as Name from "./x.js"`. This isn't style: when the plugin resolves each module's URL it only reads namespace imports, so a default or named import silently drops the route — the server logs `Module … has no fullPath` at startup and the page 404s. Use `./`-relative paths inside `appDirectory` too; a `../` path or a tsconfig alias produces a key the plugin can't match, with the same result.
 
 ## Your first page
 
@@ -168,7 +168,7 @@ The loader runs on the server, and the data is automatically available in the co
 npm run dev
 ```
 
-Open `http://localhost:5173` in your browser. Changes to your code will hot-reload instantly.
+Open `http://localhost:3000` in your browser. Changes to your code will hot-reload instantly.
 
 ## Configuration
 

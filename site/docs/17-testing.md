@@ -36,7 +36,7 @@ If you have a `vite.config.ts` with the plugin already, you can extend it with `
 
 ```typescript
 import { createTestApp } from "@mauroandre/velojs/testing";
-import { routes } from "../app/routes.js";
+import routes from "../app/routes.js";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 
 describe("API", () => {
@@ -77,7 +77,7 @@ const app = await createTestApp({
 
 | Option | Purpose |
 |--------|---------|
-| `routes` | Required. Your app's `routes` array — typically `import { routes } from "./app/routes.js"` |
+| `routes` | Required. Your app's `routes` array — typically `import routes from "./app/routes.js"` (it is the **default** export of `routes.tsx`) |
 | `bootstrap` | Runs once before the app is created. Use for DB connections, index creation, anything `app/server.tsx` does at startup. `addRoutes()` and `onServer()` calls here are **scoped to this app only** |
 | `getSessionCookie` | Maps a user object to cookies the test client will attach. Required for `app.as(user)` and `app.sessionCookies(user)` |
 
@@ -131,14 +131,14 @@ const res = await app.post("/api/github/webhook", {
 });
 ```
 
-See [06-endpoints.md](./06-endpoints.md) for declaring endpoints.
+See [06-endpoints.md](/docs/endpoints) for declaring endpoints.
 
 `TestResponse` mirrors the Fetch `Response`:
 
 | Field | Description |
 |-------|-------------|
 | `status` | HTTP status |
-| `headers` | Plain object (case-preserved) |
+| `headers` | Plain object. **Keys are lowercased** (Fetch `Headers` normalization) — use `res.headers["x-trace"]`, not `res.headers["X-Trace"]` |
 | `cookies` | Set-Cookie headers parsed into a record |
 | `json<T>()` | Parse body as JSON |
 | `text()` | Body as text |
@@ -206,8 +206,11 @@ expect(data.user.name).toBe("Alice");
 | Loader behavior | Returned by `.loader()` |
 |-----------------|------------------------|
 | Returned a value | The value directly (unwrapped) |
-| Threw an exception | Re-thrown |
 | Redirected (`c.redirect(...)`) | `TestResponse` for status inspection |
+| Set a non-2xx status (`c.status(403)`) | `TestResponse` for status inspection |
+| Threw an exception | `TestResponse` with status 500 — **not** re-thrown |
+
+A loader runs inside a Hono handler, and Hono catches a throw and turns it into a 500 response — so `.loader()` resolves either way. Assert on `res.status`; `await expect(app.loader(fn)).rejects.toThrow()` can never pass.
 
 If the function isn't found in the route tree, `.action`/`.loader` throws a clear error pointing at the most likely cause (Vitest config missing the VeloJS plugin).
 
@@ -361,7 +364,7 @@ Middlewares **don't run** with `mockContext`. That's the trade-off — direct in
 
 ```typescript
 import { createTestApp } from "@mauroandre/velojs/testing";
-import { routes } from "../app/routes.js";
+import routes from "../app/routes.js";
 import { stream_backup } from "../app/layouts/AdminLayout.js";
 import { action_setBackup, action_backupNow } from "../app/stacks/apps/AppEdit.js";
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";

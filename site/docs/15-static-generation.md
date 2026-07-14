@@ -41,8 +41,8 @@ dist/
 │       ├── index.html
 │       └── index.json
 └── client/
-    ├── client.js           # Client bundle
-    └── client.css           # Styles
+    ├── client.C3f9Ax_1.js   # Client bundle (content-hashed)
+    └── client.C3f9Ax_1.css  # Styles (content-hashed)
 ```
 
 ## SPA-like navigation

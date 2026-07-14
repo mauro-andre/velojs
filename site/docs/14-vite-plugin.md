@@ -15,15 +15,19 @@ The `veloPlugin()` is the core of VeloJS. It's a single function that returns 6 
 
 ## AST Transformations
 
-The `velo:transform` plugin uses Babel to modify your code at build time. It applies 5 transformations to files inside your `appDirectory`:
+The `velo:transform` plugin uses Babel to modify your code at build time. It applies 9 transformations to `.ts`/`.tsx` files inside your `appDirectory` (a file elsewhere, or a `.js`/`.jsx` one, is not transformed at all):
 
 | # | Transform | When | What it does |
 |---|-----------|------|-------------|
-| 1 | Inject metadata | Server + Client | Adds `export const metadata = { moduleId, fullPath, path }` to each module |
-| 2 | Transform loader functions | Server + Client | Injects moduleId into `useLoader()` and `Loader()` calls so they know which data to read |
-| 3 | Transform actions for client | Client only | Replaces action function bodies with `fetch()` stubs (the RPC mechanism) |
-| 4 | Remove loaders | Client only | Strips `export const loader` entirely from the client bundle |
-| 5 | Remove middlewares | Client only | Strips `middlewares: [...]` and their imports from the client bundle |
+| 1 | Remove middlewares | Client only | Strips the `middlewares` property and any import only it referenced |
+| 2 | Remove endpoint routes | Client only | Strips `{ method, handler }` nodes from `routes.tsx`, and their imports |
+| 3 | Inject metadata | Server + Client | Adds `export const metadata = { moduleId, fullPath, path }` to each module |
+| 4 | Transform loader functions | Server + Client | Injects moduleId into `useLoader()` and `Loader()` calls so they know which data to read |
+| 5 | Transform actions for client | Client only | Replaces `action_*` bodies with `fetch()` stubs (the RPC mechanism) |
+| 6 | Transform streams for client | Client only | Replaces `stream_*` with a `{ __path }` stub |
+| 7 | Transform sockets for client | Client only | Replaces `socket_*` with a `{ __path }` stub |
+| 8 | Remove loaders | Client only | Strips `export const loader` entirely from the client bundle |
+| 9 | Prune orphaned imports | Client only | Removes imports left unreferenced by 1–8, so server-only code doesn't reach the browser |
 
 These transforms are why VeloJS can provide such a seamless developer experience — you write one file, and the framework generates the right code for server and client automatically.
 
@@ -33,7 +37,7 @@ When you run `velojs build`, two Vite builds happen in sequence:
 
 ```bash
 velojs build
-# 1. vite build              → dist/client/ (client.js, client.css)
+# 1. vite build              → dist/client/ (client.[hash].js, client.[hash].css + .vite/manifest.json)
 # 2. vite build --mode server → dist/server.js
 ```
 

@@ -8,7 +8,7 @@
  * @example
  * ```typescript
  * import { createTestApp } from "@mauroandre/velojs/testing";
- * import { routes } from "../app/routes.js";
+ * import routes from "../app/routes.js";
  *
  * const app = await createTestApp({ routes });
  * const res = await app.get("/api/health");

@@ -1314,7 +1314,7 @@ VeloJS ships a backend testing toolkit at `@mauroandre/velojs/testing`. Spin up 
 
 ```typescript
 import { createTestApp } from "@mauroandre/velojs/testing";
-import { routes } from "../app/routes.js";
+import routes from "../app/routes.js";
 import { stream_progress } from "../app/Deploy.js";
 import { action_startDeploy } from "../app/Deploy.js";
 

@@ -4,7 +4,7 @@ Actions are server-side functions that you can call from the client as if they w
 
 ## How actions work
 
-Any exported function starting with `action_` is treated as a server action:
+An exported **`const` holding an `async` arrow function** whose name starts with `action_` is treated as a server action:
 
 ```typescript
 export const action_login = async ({
@@ -38,6 +38,30 @@ export const action_login = async ({ body }: { body: { email: string; password: 
 
 You don't write this — the Vite plugin generates it at build time by analyzing the AST of your code.
 
+## The shape is load-bearing
+
+The plugin recognizes actions by their exact shape. Write one differently and it is silently **not** transformed: the server still registers it, so it looks like it works — but the real body and its server-only imports ship to the browser and run there.
+
+```typescript
+// ✅ the only recognized form
+export const action_save = async ({ body }: ActionArgs<Body>) => { ... };
+
+// ❌ a function declaration — no stub is generated; your DB code goes to the browser
+export async function action_save({ body }: ActionArgs<Body>) { ... }
+
+// ❌ not async — same
+export const action_save = ({ body }: ActionArgs<Body>) => { ... };
+
+// ❌ the param must be destructured — the generated stub sends `body`, so a
+//    non-destructured param leaves it undeclared → ReferenceError when called
+export const action_save = async (args: ActionArgs<Body>) => { ... };
+
+// ❌ one action per `export const` — only the first declarator is read,
+//    so `action_b` is silently ignored
+export const action_a = async ({ body }) => { ... },
+             action_b = async ({ body }) => { ... };
+```
+
 ## The ActionArgs type
 
 Every action receives an object with these properties:
@@ -46,10 +70,29 @@ Every action receives an object with these properties:
 |----------|------|-------------|-------------|
 | `body` | `TBody` | Server + Client | The data sent from the client |
 | `c` | `Context` | Server only | Hono request context (cookies, headers, etc) |
-| `params` | `Record<string, string>` | Server only | URL parameters |
-| `query` | `Record<string, string>` | Server only | Query string parameters |
+| `params` | `Record<string, string>` | Server only | **Always empty.** See below |
+| `query` | `Record<string, string>` | Server only | Empty unless you hand-craft the request (e.g. `app.action(fn, { query })` in a test) |
 
 On the client, only `body` is available (the rest are stripped by the Vite plugin).
+
+### `params` is always empty in an action
+
+An action is mounted at its own static path — `/_action/{moduleId}/{name}` — not at the URL of the page it lives on. That path has no `:segments`, so `params` never has anything in it, even when the page is at `/users/:id`.
+
+Put the id in the body:
+
+```typescript
+// ❌ params.id is undefined — the action isn't mounted on /users/:id
+export const action_remove = async ({ params }: ActionArgs) => remove(params.id);
+
+// ✅
+export const action_remove = async ({ body }: ActionArgs<{ id: string }>) => remove(body.id);
+```
+
+```tsx
+const params = useParams<{ id: string }>();
+await action_remove({ body: { id: params.id } });
+```
 
 ## Error handling
 

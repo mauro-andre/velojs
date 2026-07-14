@@ -31,8 +31,8 @@ export const Component = ({ children }) => (
 **In production:**
 ```html
 <link rel="icon" href="/favicon.ico" type="image/x-icon" />
-<link rel="stylesheet" href="/client.css" />
-<script type="module" src="/client.js"></script>
+<link rel="stylesheet" href="/client.C3f9Ax_1.css" />
+<script type="module" src="/client.C3f9Ax_1.js"></script>
 ```
 
 ## Props
@@ -52,6 +52,6 @@ STATIC_BASE_URL=https://cdn.example.com/assets velojs start
 
 This makes the output become:
 ```html
-<link rel="stylesheet" href="https://cdn.example.com/assets/client.css" />
-<script type="module" src="https://cdn.example.com/assets/client.js"></script>
+<link rel="stylesheet" href="https://cdn.example.com/assets/client.C3f9Ax_1.css" />
+<script type="module" src="https://cdn.example.com/assets/client.C3f9Ax_1.js"></script>
 ```

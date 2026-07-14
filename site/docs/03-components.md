@@ -63,20 +63,20 @@ export const Component = () => {
 
 This is the **most important convention** in VeloJS. Read this carefully.
 
-Your page file is bundled for **both** server and client. The Vite plugin strips the loader body and transforms actions into fetch stubs for the client — but **top-level imports are kept in the client bundle**.
+Your page file is bundled for **both** server and client. For the client, the Vite plugin removes the `loader` export, stubs `action_*` into `fetch()` calls, and then prunes any top-level import left **unreferenced** by that strip.
 
-This means if you import a server-only module (database driver, file system, secrets) at the top of the file, it will leak into the client bundle and likely break the build.
+So an import used only inside a loader is dropped for you. What survives the strip keeps its imports — and that's where server code leaks:
 
-**The rule**: always use `await import()` inside loaders and actions for server-only code.
+**The rule**: always use `await import()` inside loaders and actions for server-only code. Never reference it from anything that survives into the client bundle.
 
 ```typescript
-// BAD — this import goes into the client bundle
-import { getUsers } from "./user.service.js";
+// BAD — `conn` is module-scope, so it survives the strip, so the import survives
+// with it, and the database driver lands in the browser.
 import { db } from "../db/engine.js";
 
-export const loader = async () => {
-    return db.collection("users").find().toArray();
-};
+const conn = db.connect();
+
+export const loader = async () => conn.query("select * from users");
 ```
 
 ```typescript
@@ -88,5 +88,7 @@ export const loader = async () => {
 ```
 
 Why does this matter? Because `user.service.js` might import a database driver, which imports Node.js native modules like `fs` or `crypto`. If that code ends up in the client bundle, Vite will throw errors or include unnecessary code.
+
+The same applies anywhere the strip leaves a reference behind — a value used in the `Component`, a helper called at module scope, or a type kept in an action's signature. When in doubt, move the import inside the function that needs it.
 
 **Think of it this way**: any `import` at the top of the file is shared between server and client. Any `await import()` inside a function is server-only (because loaders and actions only run on the server).

@@ -131,7 +131,9 @@ Because the endpoint lives in `routes.tsx`, it's also visible to the testing too
 
 ## Path conflicts with pages
 
-An endpoint and a page on the same path with the **same method** (both `GET`) conflict. VeloJS registers pages first, endpoints second, so the endpoint wins — but you'll see a loud warning at startup telling you to rename one.
+An endpoint and a page on the same path with the **same method** (both `GET`) conflict. VeloJS registers pages first, endpoints second, and a page handler answers without deferring — so the **page wins and the endpoint is unreachable**. You'll see a loud warning at startup telling you to rename one.
+
+The page has to win: a page `GET` also serves `?_data=1`, the JSON every client-side navigation fetches. An endpoint taking the path over would silently break that page's navigation.
 
 Different methods on the same path (page `GET` + endpoint `POST`) don't conflict. They're both registered and each is routed according to the request method.
 
@@ -154,7 +156,7 @@ Because endpoints live in `routes.tsx`, `createTestApp` picks them up automatica
 
 ```ts
 import { createTestApp } from "@mauroandre/velojs/testing";
-import { routes } from "../app/routes.js";
+import routes from "../app/routes.js";
 
 const app = await createTestApp({ routes });
 
@@ -169,12 +171,12 @@ expect(verify.status).toBe(302);
 expect(verify.headers.location).toBe("/stacks?verified=1");
 ```
 
-See [17-testing.md](./17-testing.md) for the full testing API.
+See [17-testing.md](/docs/testing) for the full testing API.
 
 ## Related
 
-- [Routes](./02-routes.md) — page routing and layouts
-- [Loaders](./04-loaders.md) — page data fetching
-- [Actions](./05-actions.md) — mutations from pages
-- [Middlewares](./07-middlewares.md) — authentication, logging, rate limiting
-- [Testing](./17-testing.md) — the backend testing toolkit
+- [Routes](/docs/routes) — page routing and layouts
+- [Loaders](/docs/loaders) — page data fetching
+- [Actions](/docs/actions) — mutations from pages
+- [Middlewares](/docs/middlewares) — authentication, logging, rate limiting
+- [Testing](/docs/testing) — the backend testing toolkit
