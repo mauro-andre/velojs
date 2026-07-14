@@ -110,6 +110,49 @@ describe("useLoader", () => {
         expect(result.data.value).toEqual({ name: "Bob" });
     });
 
+    // Pins the agent/AGENTS.md row: "two components calling useLoader() for the
+    // same module". Hydration is consume-once, so the second caller starts at
+    // null and goes to the network. If this ever stops being true, delete that
+    // row from AGENTS.md.
+    it("hydration is consume-once: a second useLoader for the same module gets null", async () => {
+        (window as any).__PAGE_DATA__ = {
+            "pages/Home": { message: "Hello" },
+        };
+        mockFetch.mockResolvedValue({
+            ok: true,
+            json: async () => ({ "pages/Home": { message: "Refetched" } }),
+        });
+
+        let first: any;
+        let second: any;
+        function First() {
+            first = useLoader<{ message: string }>("pages/Home");
+            return <div>{first.data.value?.message}</div>;
+        }
+        function Second() {
+            second = useLoader<{ message: string }>("pages/Home");
+            return <div>{second.data.value?.message}</div>;
+        }
+
+        render(
+            <div>
+                <First />
+                <Second />
+            </div>,
+        );
+
+        // The first consumer takes the payload and deletes it...
+        expect(first.data.value).toEqual({ message: "Hello" });
+        // ...leaving the second with nothing to hydrate from.
+        expect(second.data.value).toBeNull();
+
+        // And it silently goes to the network to recover.
+        await act(async () => {
+            await new Promise((r) => setTimeout(r, 10));
+        });
+        expect(mockFetch).toHaveBeenCalled();
+    });
+
     it("sets __veloUpdatePending when server returns a different __buildHash", async () => {
         mockFetch.mockResolvedValueOnce({
             ok: true,

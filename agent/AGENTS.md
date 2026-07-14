@@ -23,8 +23,7 @@ hard constraints, not style.
 
 | Never write | Always write | What silently happens |
 |---|---|---|
-| `export default [...] as AppRoutes` | `export default [...] satisfies AppRoutes` | `as` yields an **empty path map** → no module gets `fullPath` → **every route 404s** |
-| `export default routes` (a variable) | the array literal inline in the `export default` | empty path map → **every route 404s** |
+| `export default routes` (a variable) | the array literal inline in the `export default` — `satisfies AppRoutes` or `as AppRoutes` both work | the path map is built by reading the array **literal**; an identifier yields an empty map → no module gets `fullPath` → **every route 404s** |
 | `import Home from "./pages/Home.js"`<br>`import { Component } from "./pages/Home.js"` | `import * as Home from "./pages/Home.js"` | only `import * as` is registered → **that route silently disappears** |
 | `import * as Home from "../shared/Home.js"`<br>or a tsconfig alias, in `routes.tsx` | `./`-relative paths inside `appDirectory` | the map key won't match the module id → **route dropped** |
 | `export async function action_x(...)` | `export const action_x = async ({ body }) => {}` | no client stub is generated → **the action body and its server imports ship to the browser and execute there** |
@@ -32,7 +31,6 @@ hard constraints, not style.
 | `export const action_x = ({ body }) => {}` (not `async`) | `async ({ body }) => {}` | not recognized → no stub → **server code runs in the browser** |
 | `export async function loader(...)` | `export const loader = async ({ params }) => {}` | only `const` loaders are stripped → **the whole loader ships to the client bundle** |
 | `export const action_a = ..., action_b = ...` | one `export const` per declaration | only the **first** declarator is read → **the second is silently ignored** (same for `loader`, `stream_*`, `socket_*`, `metadata`) |
-| middleware via default or namespace import;<br>`middlewares: getMws()`; `middlewares: [...common]` | named import + a literal array of plain identifiers: `middlewares: [auth]` | the strip is skipped entirely → **the property and the server-only middleware import both leak into the client bundle** |
 | `useParams()` / `useQuery()` / `usePathname()` inside a `loader` | the loader's own args: `async ({ params, query, c }) => {}` | the async context wraps only rendering; loaders run **before** it → returns `{}` / `"/"` |
 | `c.req.param(...)` or `params.x` inside `action_*`, `stream_*`, `socket_*` | actions: read it from `body`. streams/sockets: send `?channel=` from the client and read `query.channel` | these register at **static** paths (`/_action/{moduleId}/{name}`, `/_event/…`, `/_socket/…`) — the page's `:params` are not in scope → always `{}` / `undefined` |
 | a page in `.jsx` / `.js`, or any page outside `appDirectory` | `.tsx` inside `app/` | **zero transforms**: no metadata, no stubs, loader ships to the client |
