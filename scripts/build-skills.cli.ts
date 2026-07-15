@@ -9,4 +9,8 @@
 import { writeSkills, DOCS_DIR, SKILLS_DIR } from "./build-skills.js";
 
 const skills = writeSkills(DOCS_DIR, SKILLS_DIR);
-console.log(`agent/skills: wrote ${skills.length} skills from site/docs`);
+
+// stderr, never stdout: this runs from `prepack`, and `npm pack`'s stdout is a
+// data channel — it prints the tarball filename, which callers parse. Anything
+// this script logs there corrupts that value.
+console.error(`agent/skills: wrote ${skills.length} skills from site/docs`);

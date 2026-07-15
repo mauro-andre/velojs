@@ -24,8 +24,10 @@ function buildAndPackVeloJS(): string {
         );
     }
 
-    // Pack into .tgz (exactly what npm publish would upload)
-    const pack = spawnSync("npm", ["pack", "--pack-destination", "/tmp"], {
+    // Pack into .tgz (exactly what npm publish would upload).
+    // --silent is load-bearing: we parse stdout for the filename, and without it
+    // npm prints the `prepack` lifecycle banners there too, poisoning the path.
+    const pack = spawnSync("npm", ["pack", "--silent", "--pack-destination", "/tmp"], {
         cwd: VELOJS_ROOT,
         stdio: "pipe",
         timeout: 30000,

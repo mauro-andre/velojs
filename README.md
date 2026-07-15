@@ -746,17 +746,21 @@ poll({ intervalMs: 3000, tick: async (emit) => emit(await collect()) })
 Use `perChannelSource` for resources that scale per channel (SSH connections, DB cursors, pub/sub topics). Invoked once per channel on first subscriber, aborted when the last subscriber of that channel leaves.
 
 ```typescript
+// The client sends the composite key: useEventStream(stream_logs, { channel: `${worker}:${container}` })
 export const stream_logs = createEventStream<string>({
-    channel: (c) => `${c.req.param("worker")}:${c.req.param("container")}`,
+    channel: (c) => c.req.query("channel") ?? "",
     bufferSize: 500,
     perChannelSource: async (key, emit, { abortSignal }) => {
-        const conn = await ssh.connect(...);
-        const stream = conn.exec(`podman logs -f ${key.split(":")[1]}`);
+        const [worker, container] = key.split(":");
+        const conn = await ssh.connect(worker);
+        const stream = conn.exec(`podman logs -f ${container}`);
         stream.on("data", (d) => emit(d.toString(), { snapshot: true }));
         abortSignal.addEventListener("abort", () => { stream.close(); conn.end(); });
     },
 });
 ```
+
+> `c.req.param()` does **not** work in a `stream_*` resolver — convention streams mount at a static path (`/_event/{moduleId}/{name}`), so the page's `:params` are not in scope and it always returns empty. The channel travels as `?channel=`. (Params do work in a standalone stream given an explicit `path` containing `:segments`.)
 
 Mutually exclusive with `source`.
 
@@ -1272,17 +1276,23 @@ Applied during Vite's `transform` hook to files in `appDirectory`:
 
 | # | Transform | When | What it does |
 |---|-----------|------|-------------|
-| 1 | `injectMetadata` | Server + Client | Adds `export const metadata = { moduleId, fullPath, path }` |
-| 2 | `transformLoaderFunctions` | Server + Client | Injects moduleId: `useLoader()` → `useLoader("moduleId")` |
-| 3 | `transformActionsForClient` | Client only | Replaces action body with `fetch()` stub |
-| 4 | `removeLoaders` | Client only | Removes `export const loader` entirely |
-| 5 | `removeMiddlewares` | Client only | Removes `middlewares: [...]` and related imports |
+| 1 | `removeMiddlewares` | Client only | Removes every `middlewares` property and the imports only it referenced |
+| 2 | `removeEndpointRoutes` | Client only | Strips `handler:` endpoint nodes from `routes.tsx` |
+| 3 | `injectMetadata` | Server + Client | Adds `export const metadata = { moduleId, fullPath, path }` |
+| 4 | `transformLoaderFunctions` | Server + Client | Injects moduleId: `useLoader()` → `useLoader("moduleId")` |
+| 5 | `transformActionsForClient` | Client only | Replaces action body with `fetch()` stub |
+| 6 | `transformStreamsForClient` | Client only | `stream_*` → `{ __isVeloEventStream, __path }` stub |
+| 7 | `transformSocketsForClient` | Client only | `socket_*` → `{ __isVeloSocket, __path }` stub |
+| 8 | `removeLoaders` | Client only | Removes `export const loader` entirely |
+| 9 | `pruneClientOnlyImports` | Client only | Drops imports left unreferenced by the strips above |
+
+Only `.ts`/`.tsx` files inside `appDirectory` are transformed — a `.jsx`/`.js` page, or one outside it, is not touched at all.
 
 ### Build Process
 
 ```bash
 velojs build
-# 1. vite build              → dist/client/ (client.js, client.css, manifest.json)
+# 1. vite build              → dist/client/ (client.[hash].js, client.[hash].css, .vite/manifest.json)
 # 2. vite build --mode server → dist/server.js (SSR entry)
 ```
 
