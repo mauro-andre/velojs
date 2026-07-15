@@ -1,3 +1,7 @@
+---
+description: "Deploying to production: `velojs build`/`start`, Docker, env vars (`PORT`, `NODE_ENV`, `STATIC_BASE_URL`), serving assets from a CDN. Use when writing a Dockerfile, configuring a host, or shipping to production."
+---
+
 # Production Deploy
 
 VeloJS apps compile to a simple structure: a `dist/` folder with a server entry and static assets. This makes deployment straightforward on any Node.js hosting.

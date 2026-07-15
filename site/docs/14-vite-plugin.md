@@ -1,3 +1,7 @@
+---
+description: "The `veloPlugin` build pipeline: the 9 AST transforms that inject metadata, stub actions, strip loaders/middlewares and prune imports; plugin options and virtual entries. Use when configuring `vite.config.ts` or debugging why transformed code behaves unexpectedly."
+---
+
 # Vite Plugin
 
 The `veloPlugin()` is the core of VeloJS. It's a single function that returns 6 Vite plugins working together to handle routing, SSR, code transforms, and more.

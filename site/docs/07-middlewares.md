@@ -1,3 +1,7 @@
+---
+description: "Route middleware: auth guards, redirects, per-route server logic, passing values via `c.set`/`c.get`. Use when protecting a route, requiring login, checking permissions, or running server logic before a page or action."
+---
+
 # Middlewares
 
 Middlewares are server-side functions that run before your loaders and actions. They're perfect for authentication, authorization, logging, and other cross-cutting concerns. The Vite plugin automatically removes them from the client bundle.

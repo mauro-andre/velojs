@@ -1,3 +1,7 @@
+---
+description: "Client/SSR hooks: `useLoader`, `useParams`, `useQuery`, `usePathname`, `useNavigate`, `touch`, `useEventStream`, `useSocket`. Use when reading URL params or query string, navigating programmatically, or updating signal state."
+---
+
 # Hooks
 
 VeloJS provides a set of hooks that work identically on both server (SSR) and client. On the server, they read from `AsyncLocalStorage` (isolated per request). On the client, they use the DOM and wouter-preact.

@@ -1,3 +1,7 @@
+---
+description: "The `<Scripts />` component in the root HTML shell: injecting the client bundle and CSS, favicon, CDN/static asset base paths. Use when setting up the root layout, changing the favicon, or serving assets from a CDN."
+---
+
 # Scripts Component
 
 The `Scripts` component injects the CSS and JavaScript files that your app needs. It must be placed inside `<head>` in your `client-root.tsx`.

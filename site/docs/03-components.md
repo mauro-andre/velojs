@@ -1,3 +1,7 @@
+---
+description: "Page and layout modules: the `Component` export, `metadata`/title, `children`, and keeping server-only code out of the client bundle. Use when creating a page or layout, setting a page title, or asked why a server import leaked to the browser."
+---
+
 # Components
 
 Every page and layout in VeloJS is a module that can export up to three things. Understanding these conventions is key to building with VeloJS.

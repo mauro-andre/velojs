@@ -1,3 +1,7 @@
+---
+description: "Server lifecycle and escape hatches: `addRoutes` for custom Hono routes, `onServer` for the raw HTTP server, port config, env vars. Use when mounting a custom Hono route, attaching a library to the HTTP server, or configuring the port."
+---
+
 # Server API
 
 VeloJS gives you direct access to the underlying Hono server. This lets you add custom API endpoints, SSE streams, WebSocket handlers, and anything else that goes beyond page routes.

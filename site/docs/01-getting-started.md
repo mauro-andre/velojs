@@ -1,3 +1,7 @@
+---
+description: "Scaffold a new VeloJS project and its file layout: `velojs init`, `vite.config.ts`, `app/routes.tsx`, the root HTML shell, dev server. Use when starting a project from scratch or wiring up the toolchain."
+---
+
 # Getting Started
 
 VeloJS is a fullstack web framework that combines Hono (server), Preact (UI), and Vite (build) into a single, cohesive experience. You write your pages, loaders, and server actions in one place — VeloJS handles the rest.

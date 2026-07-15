@@ -1,3 +1,7 @@
+---
+description: "Server actions: call server code from the client as a normal async function. Use when building login, form submit, a mutation, save/delete buttons, or any server-side operation triggered by user interaction."
+---
+
 # Actions
 
 Actions are server-side functions that you can call from the client as if they were regular functions. VeloJS transforms them into HTTP calls automatically — you write server code, the framework handles the rest.

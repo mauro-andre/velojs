@@ -1,3 +1,7 @@
+---
+description: "Static site generation with `velojs build --static`: prerendered HTML + `index.json`, `staticPaths` for dynamic routes, and what does not work in static mode. Use when deploying to a CDN/bucket or building a fully static site."
+---
+
 # Static Site Generation (SSG)
 
 VeloJS can generate fully static HTML sites — perfect for landing pages, documentation, blogs, and any content that doesn't change per request. Static sites are fast, cheap to host, and excellent for SEO since search engines see the complete HTML.

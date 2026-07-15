@@ -1,3 +1,7 @@
+---
+description: "Writing tests with `createTestApp` from `@mauroandre/velojs/testing`: HTTP requests, actions, loaders, auth, SSE subscriptions, sockets. Use when writing or fixing a test for a VeloJS app."
+---
+
 # Testing
 
 VeloJS ships a backend testing toolkit at `@mauroandre/velojs/testing`. It spins up your app in memory, fires HTTP requests against the registered handlers, subscribes to event streams, and asserts on the result. No socket. No browser. No fragile mocks of the framework internals.

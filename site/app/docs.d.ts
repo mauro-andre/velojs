@@ -4,6 +4,8 @@ declare module "virtual:docs-manifest" {
         title: string;
         order: number;
         filename: string;
+        /** From the doc's frontmatter. See site/plugins/vite-docs.ts. */
+        description?: string;
     }
     const manifest: DocEntry[];
     export default manifest;

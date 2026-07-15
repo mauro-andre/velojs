@@ -3,12 +3,18 @@ import fs from "node:fs";
 import path from "node:path";
 import { Marked } from "marked";
 import { createHighlighter, type Highlighter } from "shiki";
+import { readDocs } from "../../scripts/docs-frontmatter.js";
 
 export interface DocEntry {
     slug: string;
     title: string;
     order: number;
     filename: string;
+    /**
+     * From the doc's frontmatter. Exposed on the manifest for page metadata —
+     * it must never reach the rendered content, the emitted .md, or the zip.
+     */
+    description?: string;
 }
 
 interface DocData extends DocEntry {
@@ -60,30 +66,32 @@ export function docsPlugin(): Plugin {
         });
 
         docsDir = path.resolve(process.cwd(), "docs");
-        const files = fs.readdirSync(docsDir)
-            .filter((f) => f.endsWith(".md"))
-            .sort();
 
         docs = [];
 
-        for (const file of files) {
-            const rawMd = fs.readFileSync(path.join(docsDir, file), "utf-8");
+        // The frontmatter is split off here, once. Everything downstream — the
+        // rendered HTML, the virtual content module, the emitted .md, the zip —
+        // sees only `body`, so the YAML exists nowhere but the source file and
+        // the generated SKILL.md. Only the manifest carries `description`.
+        for (const doc of readDocs(docsDir)) {
+            // Title from the first # heading, of the body — reading it off the
+            // raw file would let a `#` inside the frontmatter win.
+            const titleMatch = doc.body.match(/^#\s+(.+)$/m);
+            const title = titleMatch ? titleMatch[1]! : doc.slug;
 
-            // Extract order from filename: "01-getting-started.md" → 1
-            const orderMatch = file.match(/^(\d+)-/);
-            const order = orderMatch ? parseInt(orderMatch[1], 10) : 99;
+            const html = await marked.parse(doc.body);
 
-            // Extract slug: "01-getting-started.md" → "getting-started"
-            const slug = file.replace(/^\d+-/, "").replace(/\.md$/, "");
-
-            // Extract title from first # heading
-            const titleMatch = rawMd.match(/^#\s+(.+)$/m);
-            const title = titleMatch ? titleMatch[1] : slug;
-
-            // Convert MD → HTML
-            const html = await marked.parse(rawMd);
-
-            docs.push({ slug, title, order, filename: file, html, rawMd });
+            docs.push({
+                slug: doc.slug,
+                title,
+                order: doc.order,
+                filename: doc.filename,
+                html,
+                rawMd: doc.body,
+                ...(doc.frontmatter.description !== undefined && {
+                    description: doc.frontmatter.description,
+                }),
+            });
         }
     }
 
@@ -119,12 +127,15 @@ export function docsPlugin(): Plugin {
             if (docs.length === 0) await loadDocs();
 
             if (id === RESOLVED_MANIFEST) {
-                const manifest: DocEntry[] = docs.map(({ slug, title, order, filename }) => ({
-                    slug,
-                    title,
-                    order,
-                    filename,
-                }));
+                const manifest: DocEntry[] = docs.map(
+                    ({ slug, title, order, filename, description }) => ({
+                        slug,
+                        title,
+                        order,
+                        filename,
+                        ...(description !== undefined && { description }),
+                    }),
+                );
                 return `export default ${JSON.stringify(manifest)};`;
             }
 

@@ -1,3 +1,7 @@
+---
+description: "Declarative HTTP endpoints in the route tree (`{ method, handler }`) for REST/JSON APIs, webhooks, downloads, health checks — anything returning a `Response` instead of a page. Use when building an API route or receiving a webhook."
+---
+
 # Endpoints
 
 Endpoints are **declarative HTTP routes** you add to `routes.tsx` alongside your pages. Use them for things a page wouldn't make sense for: webhooks, verification links clicked from email, redirects, health checks, OAuth callbacks.

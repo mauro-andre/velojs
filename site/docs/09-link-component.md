@@ -1,3 +1,7 @@
+---
+description: "The `<Link>` component for SPA navigation, linking by route module, and substituting `:params`. Use when adding navigation, a menu, or any internal link."
+---
+
 # Link Component
 
 The `Link` component handles navigation in VeloJS. It supports both simple string paths and type-safe module references.

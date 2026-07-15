@@ -1,3 +1,7 @@
+---
+description: "The route tree in `app/routes.tsx`: nesting, layouts, path-less wrappers, URL params, index routes, the catch-all 404, per-route status codes. Use when adding/moving/removing a page or URL, building a layout, or asked why a route 404s."
+---
+
 # Routes
 
 In VeloJS, all routes are defined in a single file: `app/routes.tsx`. Instead of filesystem-based routing, you define your routes as a **tree structure**. This gives you full control over layouts, nesting, and middleware inheritance.

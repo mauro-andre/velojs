@@ -1,3 +1,7 @@
+---
+description: "Exact TypeScript signatures for route and config types: `AppRoutes`, `RouteNode`, `RouteModule`, `LoaderArgs`, `ActionArgs`, `Metadata`, `EndpointHandler`, `VeloConfig`, plus the package subpath exports. Use when you need a precise type or aren't sure which subpath exports a symbol."
+---
+
 # Type Reference
 
 This page lists all the TypeScript types and interfaces exported by VeloJS, organized by import path.

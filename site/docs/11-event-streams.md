@@ -1,3 +1,7 @@
+---
+description: "Server-Sent Events via `createEventStream`/`stream_*` and `useEventStream`: live progress, logs, notifications, dashboards — one-way server-to-client realtime. Use when the server must push updates to the browser."
+---
+
 # Event Streams
 
 Event Streams are how you push data from the server to the client in real time using **Server-Sent Events (SSE)**. They cover live progress updates, notifications, metrics, log streaming, AI token generation, and any scenario where the server needs to notify clients of something happening.

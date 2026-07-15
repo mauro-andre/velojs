@@ -1,3 +1,7 @@
+---
+description: "Loading server data for a page: the `loader` export, `useLoader`, the `Loader` handle for sharing a layout's data with its children, hydration and SPA refetch. Use when a page needs data from a database or API before it renders."
+---
+
 # Loaders
 
 Loaders are how you fetch data on the server and make it available to your components. VeloJS provides two patterns, each designed for a different use case.

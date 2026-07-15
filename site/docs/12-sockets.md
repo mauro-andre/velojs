@@ -1,3 +1,7 @@
+---
+description: "WebSockets via `socket_*` and `useSocket`: bidirectional realtime like terminals, chat, collaborative editing. Use when the client must both send and receive continuously; for server-to-client only, prefer event-streams."
+---
+
 # Sockets
 
 Sockets are **declarative WebSocket handlers** co-located with the page that uses them. Export `socket_<name>` from a page or layout module and VeloJS registers a WebSocket route at `/_socket/{moduleId}/{name}`, with the same middleware inheritance as pages, actions, and streams.
