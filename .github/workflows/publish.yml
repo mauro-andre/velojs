@@ -17,6 +17,11 @@ jobs:
 
       - run: npm install
 
+      # Same gates as test.yml, in the same order. Without this a release can
+      # publish from a red `dev`: the branch gate runs on push/PR, but the
+      # release path did not, so a typecheck failure shipped to npm.
+      - run: npm run typecheck
+
       - run: npm test
 
       - run: npm run build
