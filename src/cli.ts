@@ -1,5 +1,6 @@
 import { spawnSync } from "node:child_process";
-import { resolve } from "node:path";
+import { resolve, join } from "node:path";
+import fs from "node:fs";
 
 const args = process.argv.slice(2);
 const command = args[0];
@@ -96,6 +97,7 @@ Commands:
   build            Build for production (client + server)
   build --static   Build as static site (HTML + JSON)
   start            Start production server
+  graph [app-dir]   Generate .velojs/graph.json (route tree + dependency graph)
 
 Examples:
   velojs init my-app
@@ -103,6 +105,8 @@ Examples:
   velojs build
   velojs build --static
   velojs start
+  velojs graph
+  velojs graph src/app
 `);
 };
 
@@ -123,6 +127,19 @@ switch (command) {
     case "start":
         runStart();
         break;
+    case "graph": {
+        const { buildGraph } = await import("./graph.js");
+        const rootDir = process.cwd();
+        const appDirFlag = args[1] && !args[1].startsWith("-") ? args[1] : null;
+        const appDir = join(rootDir, appDirFlag ?? "app");
+        const graph = buildGraph(appDir);
+        const outDir = join(rootDir, ".velojs");
+        fs.mkdirSync(outDir, { recursive: true });
+        const outFile = join(outDir, "graph.json");
+        fs.writeFileSync(outFile, JSON.stringify(graph, null, 2));
+        console.log(`Graph written to .velojs/graph.json`);
+        break;
+    }
     case "help":
     case "--help":
     case "-h":

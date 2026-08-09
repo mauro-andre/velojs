@@ -12,6 +12,15 @@ function getPackageVersion(): string {
 }
 
 const templates: Record<string, string> = {
+    ".gitignore": `# Dependencies
+node_modules/
+
+# Build output
+dist/
+
+# Project graph
+.velojs/
+`,
     "package.json": `{
     "name": "my-velojs-app",
     "version": "0.1.0",
