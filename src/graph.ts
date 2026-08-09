@@ -153,25 +153,6 @@ function parseRouteSource(code: string): {
     return { imports, arrayNode };
 }
 
-function extractMiddlewares(properties: t.ObjectProperty[]): string[] {
-    const middlewares: string[] = [];
-    for (const prop of properties) {
-        if (!t.isObjectProperty(prop)) continue;
-        const key = prop.key;
-        const keyName = t.isIdentifier(key) ? key.name : null;
-        if (keyName !== "middlewares") continue;
-        if (!t.isArrayExpression(prop.value)) continue;
-
-        for (const el of prop.value.elements) {
-            if (!el) continue;
-            if (t.isIdentifier(el)) {
-                middlewares.push(el.name);
-            }
-        }
-    }
-    return middlewares;
-}
-
 function nodeToModuleId(
     moduleName: string | null,
     imports: Map<string, string>

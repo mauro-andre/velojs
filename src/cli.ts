@@ -97,7 +97,7 @@ Commands:
   build            Build for production (client + server)
   build --static   Build as static site (HTML + JSON)
   start            Start production server
-  graph            Generate .velojs/graph.json (route tree + dependency graph)
+  graph [app-dir]   Generate .velojs/graph.json (route tree + dependency graph)
 
 Examples:
   velojs init my-app
@@ -106,6 +106,7 @@ Examples:
   velojs build --static
   velojs start
   velojs graph
+  velojs graph src/app
 `);
 };
 
@@ -129,7 +130,8 @@ switch (command) {
     case "graph": {
         const { buildGraph } = await import("./graph.js");
         const rootDir = process.cwd();
-        const appDir = join(rootDir, "app");
+        const appDirFlag = args[1] && !args[1].startsWith("-") ? args[1] : null;
+        const appDir = join(rootDir, appDirFlag ?? "app");
         const graph = buildGraph(appDir);
         const outDir = join(rootDir, ".velojs");
         fs.mkdirSync(outDir, { recursive: true });
