@@ -70,7 +70,8 @@ var ctx = canvas.getContext("2d");
 var W = 0, H = 0;
 
 function resize() {
-  W = window.innerWidth; H = window.innerHeight;
+  var tb = document.getElementById("topbar");
+  W = window.innerWidth; H = window.innerHeight - tb.offsetHeight;
   canvas.width = W * devicePixelRatio; canvas.height = H * devicePixelRatio;
   canvas.style.width = W + "px"; canvas.style.height = H + "px";
   ctx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
@@ -250,26 +251,26 @@ function nodeAt(sx, sy) {
   return null;
 }
 canvas.addEventListener("mousedown", function (e) {
-  var n = nodeAt(e.clientX, e.clientY);
+  var n = nodeAt(e.offsetX, e.offsetY);
   if (n && view === "modules") { dragNode = n; alpha = Math.max(alpha, 0.3); }
   else panning = true;
-  lastX = e.clientX; lastY = e.clientY; moved = false;
+  lastX = e.offsetX; lastY = e.offsetY; moved = false;
 });
 canvas.addEventListener("mousemove", function (e) {
-  var dx = e.clientX - lastX, dy = e.clientY - lastY;
+  var dx = e.offsetX - lastX, dy = e.offsetY - lastY;
   if (Math.abs(dx) + Math.abs(dy) > 3) moved = true;
-  if (dragNode) { var w = toWorld(e.clientX, e.clientY); dragNode.x = w[0]; dragNode.y = w[1]; dragNode.vx = dragNode.vy = 0; }
+  if (dragNode) { var w = toWorld(e.offsetX, e.offsetY); dragNode.x = w[0]; dragNode.y = w[1]; dragNode.vx = dragNode.vy = 0; }
   else if (panning) { cam.x += dx; cam.y += dy; }
   else {
-    var n = nodeAt(e.clientX, e.clientY);
+    var n = nodeAt(e.offsetX, e.offsetY);
     hoverHL = n ? { list: relatedNodes(n), origin: n } : null;
     canvas.style.cursor = n ? "pointer" : "grab";
   }
-  lastX = e.clientX; lastY = e.clientY;
+  lastX = e.offsetX; lastY = e.offsetY;
 });
 canvas.addEventListener("mouseup", function (e) {
   if (!moved) {
-    var n = nodeAt(e.clientX, e.clientY);
+    var n = nodeAt(e.offsetX, e.offsetY);
     if (n) {
       pinnedHL = { list: relatedNodes(n), origin: n };
       var id = view === "modules" ? n.id : n.data.moduleId;
@@ -284,9 +285,9 @@ canvas.addEventListener("mouseup", function (e) {
 canvas.addEventListener("wheel", function (e) {
   e.preventDefault();
   var k = Math.exp(-e.deltaY * 0.0012);
-  var w = toWorld(e.clientX, e.clientY);
+  var w = toWorld(e.offsetX, e.offsetY);
   cam.k *= k;
-  cam.x = e.clientX - w[0] * cam.k; cam.y = e.clientY - w[1] * cam.k;
+  cam.x = e.offsetX - w[0] * cam.k; cam.y = e.offsetY - w[1] * cam.k;
 }, { passive: false });
 
 // ---------- rendering ----------
