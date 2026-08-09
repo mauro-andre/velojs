@@ -98,6 +98,7 @@ Commands:
   build --static   Build as static site (HTML + JSON)
   start            Start production server
   graph [app-dir]   Generate .velojs/graph.json (route tree + dependency graph)
+  graph --view      Generate the graph and open an interactive viewer
 
 Examples:
   velojs init my-app
@@ -107,6 +108,7 @@ Examples:
   velojs start
   velojs graph
   velojs graph src/app
+  velojs graph --view
 `);
 };
 
@@ -138,6 +140,12 @@ switch (command) {
         const outFile = join(outDir, "graph.json");
         fs.writeFileSync(outFile, JSON.stringify(graph));
         console.log(`Graph written to .velojs/graph.json`);
+
+        if (args.includes("--view")) {
+            const { serveGraphViewer } = await import("./graph-viewer.js");
+            const url = await serveGraphViewer(rootDir);
+            console.log(`Graph viewer running at ${url} (Ctrl+C to stop)`);
+        }
         break;
     }
     case "help":
