@@ -58,7 +58,7 @@ const VIEWER_HTML = `<!DOCTYPE html>
   <div><i style="background:#5b8def"></i>page</div>
   <div><i style="background:#4b5565"></i>module</div>
 </div>
-<div id="hint">drag to pan · scroll to zoom · drag nodes · hover = impact · click = focus neighborhood · / = search · esc = reset</div>
+<div id="hint">drag to pan · scroll to zoom · drag nodes · hover = highlight · click = pin highlight + details · / = search · esc = reset</div>
 <script>
 var KIND_COLORS = { root: "#f59e0b", layout: "#a78bfa", page: "#5b8def", unknown: "#4b5565" };
 
@@ -162,47 +162,34 @@ function tick() {
   });
 }
 
-// ---------- focus mode ----------
-// Click isolates a node's neighborhood: transitive imports + importedBy
-// (modules), or ancestors + subtree (routes). Click empty / ESC exits.
-var focusModSet = null, focusRouteSet = null;
-function computeFocusModules(id) {
-  var set = {}, q = [id];
-  set[id] = true;
-  while (q.length) {
-    var m = graph.modules[q.shift()];
-    if (!m) continue;
-    m.imports.forEach(function (i) { if (modById[i] && !set[i]) { set[i] = true; q.push(i); } });
-    m.importedBy.forEach(function (i) { if (modById[i] && !set[i]) { set[i] = true; q.push(i); } });
+// ---------- highlight — hover = transient, click = pinned ----------
+// Same pattern in both views. Related set: modules → transitive
+// importedBy (impact); routes → ancestors + subtree (context).
+var hoverHL = null, pinnedHL = null;
+function activeHL() { return pinnedHL || hoverHL; }
+function relatedNodes(node) {
+  var list = [];
+  if (view === "modules") {
+    var seen = {}, q = [node];
+    seen[node.id] = true;
+    while (q.length) {
+      var cur = q.shift();
+      list.push(cur);
+      var m = graph.modules[cur.id];
+      if (!m) continue;
+      m.importedBy.forEach(function (i) {
+        if (modById[i] && !seen[i]) { seen[i] = true; q.push(modById[i]); }
+      });
+    }
+  } else {
+    var p = node.parent;
+    while (p) { list.push(p); p = p.parent; }
+    (function down(n) { list.push(n); n.kids.forEach(down); })(node);
   }
-  return set;
+  return list;
 }
-function computeFocusRoutes(rn) {
-  var set = [];
-  var p = rn.parent;
-  while (p) { set.push(p); p = p.parent; }
-  (function down(n) { set.push(n); n.kids.forEach(down); })(rn);
-  return set;
-}
-function modVisible(n) { return matches(n.id) && (!focusModSet || focusModSet[n.id]); }
-function routeVisible(n) { return matches(n.data.moduleId || "(wrapper)") && (!focusRouteSet || focusRouteSet.indexOf(n) >= 0); }
-
-// ---------- impact highlight ----------
-var hoverNode = null;
-var impactSet = null;
-function computeImpact(n) {
-  var set = {}, queue = [n.id];
-  set[n.id] = 2;
-  while (queue.length) {
-    var id = queue.shift();
-    var mod = graph.modules[id];
-    if (!mod) continue;
-    mod.importedBy.forEach(function (up) {
-      if (!(up in set)) { set[up] = 1; queue.push(up); }
-    });
-  }
-  return set;
-}
+function modVisible(n) { return matches(n.id); }
+function routeVisible(n) { return matches(n.data.moduleId || "(wrapper)"); }
 
 // ---------- selection / panel ----------
 var selected = null;
@@ -243,20 +230,22 @@ var query = "";
 document.getElementById("search").addEventListener("input", function (e) { query = e.target.value.toLowerCase(); });
 document.addEventListener("keydown", function (e) {
   if (e.key === "/" && document.activeElement !== document.getElementById("search")) { e.preventDefault(); document.getElementById("search").focus(); }
-  if (e.key === "Escape") { panel.className = ""; selected = null; query = ""; document.getElementById("search").value = ""; focusModSet = null; focusRouteSet = null; }
+  if (e.key === "Escape") { panel.className = ""; selected = null; query = ""; document.getElementById("search").value = ""; hoverHL = null; pinnedHL = null; }
 });
 
 // ---------- interaction ----------
 var dragNode = null, panning = false, lastX = 0, lastY = 0, moved = false;
 function nodeAt(sx, sy) {
-  var w = toWorld(sx, sy);
+  // Hit test in SCREEN space, tight to the dot (dot radius + 6px slack)
   var list = view === "modules" ? modNodes : routeNodes;
   for (var i = list.length - 1; i >= 0; i--) {
     var n = list[i];
     if (view === "modules" ? !modVisible(n) : !routeVisible(n)) continue;
-    var nx = view === "modules" ? n.x : n.px, ny = view === "modules" ? n.y : n.py;
-    var dx = w[0] - nx, dy = w[1] - ny;
-    if (dx * dx + dy * dy < 14 * 14 / (cam.k * cam.k) + 36) return n;
+    var wx = view === "modules" ? n.x : n.px, wy = view === "modules" ? n.y : n.py;
+    var p = toScreen(wx, wy);
+    var rad = (view === "modules" ? (n.kind === "unknown" ? 5 : 8) : 6) + 6;
+    var dx = sx - p[0], dy = sy - p[1];
+    if (dx * dx + dy * dy < rad * rad) return n;
   }
   return null;
 }
@@ -273,8 +262,7 @@ canvas.addEventListener("mousemove", function (e) {
   else if (panning) { cam.x += dx; cam.y += dy; }
   else {
     var n = nodeAt(e.clientX, e.clientY);
-    hoverNode = view === "modules" ? n : null;
-    impactSet = hoverNode ? computeImpact(hoverNode) : null;
+    hoverHL = n ? { list: relatedNodes(n), origin: n } : null;
     canvas.style.cursor = n ? "pointer" : "grab";
   }
   lastX = e.clientX; lastY = e.clientY;
@@ -282,12 +270,13 @@ canvas.addEventListener("mousemove", function (e) {
 canvas.addEventListener("mouseup", function (e) {
   if (!moved) {
     var n = nodeAt(e.clientX, e.clientY);
-    if (view === "modules") {
-      showPanel(n ? n.id : null);
-      focusModSet = n ? computeFocusModules(n.id) : null;
+    if (n) {
+      pinnedHL = { list: relatedNodes(n), origin: n };
+      var id = view === "modules" ? n.id : n.data.moduleId;
+      showPanel(id || null);
     } else {
-      if (n && n.data.moduleId) showPanel(n.data.moduleId);
-      focusRouteSet = n ? computeFocusRoutes(n) : null;
+      pinnedHL = null;
+      showPanel(null);
     }
   }
   dragNode = null; panning = false;
@@ -305,64 +294,73 @@ function matches(id) { return !query || id.toLowerCase().indexOf(query) >= 0; }
 
 function drawRoutes() {
   ctx.clearRect(0, 0, W, H);
-  ctx.strokeStyle = "#2a3247"; ctx.lineWidth = 1.2;
+  var hl = activeHL();
   routeEdges.forEach(function (e) {
     if (!routeVisible(e.from) || !routeVisible(e.to)) return;
+    var hot = hl && hl.list.indexOf(e.from) >= 0 && hl.list.indexOf(e.to) >= 0;
     var a = toScreen(e.from.px, e.from.py), b = toScreen(e.to.px, e.to.py);
+    ctx.globalAlpha = hl && !hot ? 0.08 : 1;
+    ctx.strokeStyle = hot ? "#f59e0b" : "#2a3247";
+    ctx.lineWidth = hot ? 2 : 1.2;
     ctx.beginPath();
     ctx.moveTo(a[0], a[1]);
     ctx.bezierCurveTo(a[0], (a[1] + b[1]) / 2, b[0], (a[1] + b[1]) / 2, b[0], b[1]);
     ctx.stroke();
   });
+  ctx.globalAlpha = 1;
   routeNodes.forEach(function (n) {
     var d = n.data;
     var id = d.moduleId || "(wrapper)";
     if (!routeVisible(n)) return;
     var p = toScreen(n.px, n.py);
+    var member = hl && hl.list.indexOf(n) >= 0;
+    var dim = hl && !member;
+    var isOrigin = hl && hl.origin === n;
     var color = d.isRoot ? KIND_COLORS.root : (d.children.length ? KIND_COLORS.layout : KIND_COLORS.page);
     var sel = selected === d.moduleId;
-    ctx.beginPath(); ctx.arc(p[0], p[1], sel ? 9 : 6, 0, 7);
-    ctx.fillStyle = color; ctx.fill();
+    ctx.globalAlpha = dim ? 0.15 : 1;
+    ctx.beginPath(); ctx.arc(p[0], p[1], (sel || isOrigin) ? 9 : 6, 0, 7);
+    ctx.fillStyle = isOrigin ? "#f59e0b" : color; ctx.fill();
     if (sel) { ctx.strokeStyle = "#e8edf5"; ctx.lineWidth = 2; ctx.stroke(); }
-    // level-of-detail: labels only when zoomed in enough, otherwise the
-    // overview stays clean (dots only). fullPath needs even more zoom.
-    if (cam.k >= 0.55 || sel) {
-      ctx.fillStyle = "#d7dde8"; ctx.font = "11px ui-monospace, monospace"; ctx.textAlign = "center";
+    if (!dim) {
+      ctx.fillStyle = member ? "#e8edf5" : "#d7dde8"; ctx.font = "11px ui-monospace, monospace"; ctx.textAlign = "center";
       ctx.fillText(id.split("/").pop(), p[0], p[1] - 13);
-    }
-    if (cam.k >= 0.85 || sel) {
       ctx.fillStyle = "#55607a"; ctx.font = "10px ui-monospace, monospace";
       var sub = d.fullPath || "";
       if (d.middlewares.length) sub += "  ·  " + d.middlewares.join(", ");
       ctx.fillText(sub, p[0], p[1] + 20);
     }
+    ctx.globalAlpha = 1;
   });
 }
 
 function drawModules() {
   ctx.clearRect(0, 0, W, H);
-  ctx.strokeStyle = "#232a3a"; ctx.lineWidth = 1;
+  var hl = activeHL();
   modEdges.forEach(function (e) {
     if (!modVisible(e.from) || !modVisible(e.to)) return;
-    var hot = impactSet && impactSet[e.from.id] && impactSet[e.to.id];
+    var hot = hl && hl.list.indexOf(e.from) >= 0 && hl.list.indexOf(e.to) >= 0;
     var a = toScreen(e.from.x, e.from.y), b = toScreen(e.to.x, e.to.y);
+    ctx.globalAlpha = hl && !hot ? 0.08 : 1;
     ctx.strokeStyle = hot ? "#f59e0b" : "#232a3a";
     ctx.lineWidth = hot ? 1.8 : 1;
     ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke();
   });
+  ctx.globalAlpha = 1;
   modNodes.forEach(function (n) {
     if (!modVisible(n)) return;
     var p = toScreen(n.x, n.y);
-    var dim = impactSet && !impactSet[n.id];
-    var hot = impactSet && impactSet[n.id];
-    var r = n.kind === "unknown" ? 4 : 7;
+    var member = hl && hl.list.indexOf(n) >= 0;
+    var dim = hl && !member;
+    var isOrigin = hl && hl.origin === n;
+    var r = n.kind === "unknown" ? 5 : 8;
     ctx.globalAlpha = dim ? 0.15 : 1;
-    ctx.beginPath(); ctx.arc(p[0], p[1], selected === n.id ? r + 3 : r, 0, 7);
-    ctx.fillStyle = hot === 2 ? "#f59e0b" : KIND_COLORS[n.kind] || KIND_COLORS.unknown;
+    ctx.beginPath(); ctx.arc(p[0], p[1], (selected === n.id || isOrigin) ? r + 3 : r, 0, 7);
+    ctx.fillStyle = isOrigin ? "#f59e0b" : KIND_COLORS[n.kind] || KIND_COLORS.unknown;
     ctx.fill();
     if (selected === n.id) { ctx.strokeStyle = "#e8edf5"; ctx.lineWidth = 2; ctx.stroke(); }
     if (!dim) {
-      ctx.fillStyle = hot ? "#e8edf5" : "#9aa5b8";
+      ctx.fillStyle = member ? "#e8edf5" : "#9aa5b8";
       ctx.font = "10px ui-monospace, monospace"; ctx.textAlign = "center";
       ctx.fillText(n.id.split("/").pop(), p[0], p[1] - r - 5);
     }
