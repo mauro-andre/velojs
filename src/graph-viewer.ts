@@ -58,7 +58,7 @@ const VIEWER_HTML = `<!DOCTYPE html>
   <div><i style="background:#5b8def"></i>page</div>
   <div><i style="background:#4b5565"></i>module</div>
 </div>
-<div id="hint">drag to pan · scroll to zoom · drag nodes · hover = impact highlight · / = search</div>
+<div id="hint">drag to pan · scroll to zoom · drag nodes · hover = impact · click = focus neighborhood · / = search · esc = reset</div>
 <script>
 var KIND_COLORS = { root: "#f59e0b", layout: "#a78bfa", page: "#5b8def", unknown: "#4b5565" };
 
@@ -100,16 +100,16 @@ function buildRouteLayout() {
   var leafCount = 0;
   // tidy-ish: leaves get sequential x; parents sit at the midpoint of children
   function layout(node, depth, parent) {
-    var rn = { data: node, depth: depth, x: 0, y: depth, parent: parent };
+    var rn = { data: node, depth: depth, x: 0, y: depth, parent: parent, kids: [] };
     routeNodes.push(rn);
-    if (parent) routeEdges.push({ from: parent, to: rn });
+    if (parent) { parent.kids.push(rn); routeEdges.push({ from: parent, to: rn }); }
     if (!node.children.length) { rn.x = leafCount++; return rn; }
     var xs = node.children.map(function (c) { return layout(c, depth + 1, rn).x; });
     rn.x = (xs[0] + xs[xs.length - 1]) / 2;
     return rn;
   }
   graph.routes.forEach(function (r) { layout(r, 0, null); });
-  var gapX = 210, gapY = 110;
+  var gapX = 250, gapY = 130;
   var minX = Math.min.apply(null, routeNodes.map(function (n) { return n.x; }));
   routeNodes.forEach(function (n) { n.px = (n.x - minX) * gapX + 80; n.py = n.y * gapY + 80; });
 }
@@ -128,8 +128,9 @@ function toWorld(sx, sy) { return [(sx - cam.x) / cam.k, (sy - cam.y) / cam.k]; 
 
 // ---------- force simulation (modules) ----------
 var alpha = 1;
+var MAXV = 25;
 function tick() {
-  if (view !== "modules" || alpha < 0.005) return;
+  if (alpha < 0.005) return;
   alpha *= 0.995;
   var i, j, n, m, dx, dy, d2, f;
   for (i = 0; i < modNodes.length; i++) {
@@ -155,9 +156,36 @@ function tick() {
     if (n === dragNode) return;
     n.vx += -n.x * 0.002 * alpha; n.vy += -n.y * 0.002 * alpha;
     n.vx *= 0.85; n.vy *= 0.85;
+    if (n.vx > MAXV) n.vx = MAXV; else if (n.vx < -MAXV) n.vx = -MAXV;
+    if (n.vy > MAXV) n.vy = MAXV; else if (n.vy < -MAXV) n.vy = -MAXV;
     n.x += n.vx; n.y += n.vy;
   });
 }
+
+// ---------- focus mode ----------
+// Click isolates a node's neighborhood: transitive imports + importedBy
+// (modules), or ancestors + subtree (routes). Click empty / ESC exits.
+var focusModSet = null, focusRouteSet = null;
+function computeFocusModules(id) {
+  var set = {}, q = [id];
+  set[id] = true;
+  while (q.length) {
+    var m = graph.modules[q.shift()];
+    if (!m) continue;
+    m.imports.forEach(function (i) { if (modById[i] && !set[i]) { set[i] = true; q.push(i); } });
+    m.importedBy.forEach(function (i) { if (modById[i] && !set[i]) { set[i] = true; q.push(i); } });
+  }
+  return set;
+}
+function computeFocusRoutes(rn) {
+  var set = [];
+  var p = rn.parent;
+  while (p) { set.push(p); p = p.parent; }
+  (function down(n) { set.push(n); n.kids.forEach(down); })(rn);
+  return set;
+}
+function modVisible(n) { return matches(n.id) && (!focusModSet || focusModSet[n.id]); }
+function routeVisible(n) { return matches(n.data.moduleId || "(wrapper)") && (!focusRouteSet || focusRouteSet.indexOf(n) >= 0); }
 
 // ---------- impact highlight ----------
 var hoverNode = null;
@@ -215,7 +243,7 @@ var query = "";
 document.getElementById("search").addEventListener("input", function (e) { query = e.target.value.toLowerCase(); });
 document.addEventListener("keydown", function (e) {
   if (e.key === "/" && document.activeElement !== document.getElementById("search")) { e.preventDefault(); document.getElementById("search").focus(); }
-  if (e.key === "Escape") { panel.className = ""; selected = null; query = ""; document.getElementById("search").value = ""; }
+  if (e.key === "Escape") { panel.className = ""; selected = null; query = ""; document.getElementById("search").value = ""; focusModSet = null; focusRouteSet = null; }
 });
 
 // ---------- interaction ----------
@@ -225,6 +253,7 @@ function nodeAt(sx, sy) {
   var list = view === "modules" ? modNodes : routeNodes;
   for (var i = list.length - 1; i >= 0; i--) {
     var n = list[i];
+    if (view === "modules" ? !modVisible(n) : !routeVisible(n)) continue;
     var nx = view === "modules" ? n.x : n.px, ny = view === "modules" ? n.y : n.py;
     var dx = w[0] - nx, dy = w[1] - ny;
     if (dx * dx + dy * dy < 14 * 14 / (cam.k * cam.k) + 36) return n;
@@ -253,9 +282,13 @@ canvas.addEventListener("mousemove", function (e) {
 canvas.addEventListener("mouseup", function (e) {
   if (!moved) {
     var n = nodeAt(e.clientX, e.clientY);
-    if (view === "modules") showPanel(n ? n.id : null);
-    else if (n && n.data.moduleId) showPanel(n.data.moduleId);
-    else showPanel(null);
+    if (view === "modules") {
+      showPanel(n ? n.id : null);
+      focusModSet = n ? computeFocusModules(n.id) : null;
+    } else {
+      if (n && n.data.moduleId) showPanel(n.data.moduleId);
+      focusRouteSet = n ? computeFocusRoutes(n) : null;
+    }
   }
   dragNode = null; panning = false;
 });
@@ -274,6 +307,7 @@ function drawRoutes() {
   ctx.clearRect(0, 0, W, H);
   ctx.strokeStyle = "#2a3247"; ctx.lineWidth = 1.2;
   routeEdges.forEach(function (e) {
+    if (!routeVisible(e.from) || !routeVisible(e.to)) return;
     var a = toScreen(e.from.px, e.from.py), b = toScreen(e.to.px, e.to.py);
     ctx.beginPath();
     ctx.moveTo(a[0], a[1]);
@@ -283,19 +317,25 @@ function drawRoutes() {
   routeNodes.forEach(function (n) {
     var d = n.data;
     var id = d.moduleId || "(wrapper)";
-    if (!matches(id)) return;
+    if (!routeVisible(n)) return;
     var p = toScreen(n.px, n.py);
     var color = d.isRoot ? KIND_COLORS.root : (d.children.length ? KIND_COLORS.layout : KIND_COLORS.page);
     var sel = selected === d.moduleId;
     ctx.beginPath(); ctx.arc(p[0], p[1], sel ? 9 : 6, 0, 7);
     ctx.fillStyle = color; ctx.fill();
     if (sel) { ctx.strokeStyle = "#e8edf5"; ctx.lineWidth = 2; ctx.stroke(); }
-    ctx.fillStyle = "#d7dde8"; ctx.font = "11px ui-monospace, monospace"; ctx.textAlign = "center";
-    ctx.fillText(id.split("/").pop(), p[0], p[1] - 13);
-    ctx.fillStyle = "#55607a"; ctx.font = "10px ui-monospace, monospace";
-    var sub = d.fullPath || "";
-    if (d.middlewares.length) sub += "  ·  " + d.middlewares.join(", ");
-    ctx.fillText(sub, p[0], p[1] + 20);
+    // level-of-detail: labels only when zoomed in enough, otherwise the
+    // overview stays clean (dots only). fullPath needs even more zoom.
+    if (cam.k >= 0.55 || sel) {
+      ctx.fillStyle = "#d7dde8"; ctx.font = "11px ui-monospace, monospace"; ctx.textAlign = "center";
+      ctx.fillText(id.split("/").pop(), p[0], p[1] - 13);
+    }
+    if (cam.k >= 0.85 || sel) {
+      ctx.fillStyle = "#55607a"; ctx.font = "10px ui-monospace, monospace";
+      var sub = d.fullPath || "";
+      if (d.middlewares.length) sub += "  ·  " + d.middlewares.join(", ");
+      ctx.fillText(sub, p[0], p[1] + 20);
+    }
   });
 }
 
@@ -303,7 +343,7 @@ function drawModules() {
   ctx.clearRect(0, 0, W, H);
   ctx.strokeStyle = "#232a3a"; ctx.lineWidth = 1;
   modEdges.forEach(function (e) {
-    if (!matches(e.from.id) && !matches(e.to.id)) return;
+    if (!modVisible(e.from) || !modVisible(e.to)) return;
     var hot = impactSet && impactSet[e.from.id] && impactSet[e.to.id];
     var a = toScreen(e.from.x, e.from.y), b = toScreen(e.to.x, e.to.y);
     ctx.strokeStyle = hot ? "#f59e0b" : "#232a3a";
@@ -311,7 +351,7 @@ function drawModules() {
     ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke();
   });
   modNodes.forEach(function (n) {
-    if (!matches(n.id)) return;
+    if (!modVisible(n)) return;
     var p = toScreen(n.x, n.y);
     var dim = impactSet && !impactSet[n.id];
     var hot = impactSet && impactSet[n.id];
