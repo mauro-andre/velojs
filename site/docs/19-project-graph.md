@@ -8,11 +8,7 @@ VeloJS can generate a structural snapshot of your project — the route tree hie
 
 ## When to use
 
-Always. Before reading any source file in a VeloJS project, check `.velojs/graph.json` first. It tells you:
-
-- **Route tree** — full hierarchy of layouts, pages, paths, `isRoot`, and middlewares
-- **Module dependencies** — for every module: what it imports (`imports`) and who imports it (`importedBy`)
-- **Convention exports** — which modules export `loader`, `action_*`, `stream_*`, `socket_*`
+Always. Before reading any source file in a VeloJS project, query `.velojs/graph.json` for the specific information you need. The full file can be large; use `jq` for targeted queries.
 
 ## Generating the graph
 
@@ -25,6 +21,35 @@ velojs graph
 This runs a fast Babel-based crawl of `app/routes.tsx` and its transitive imports. No build. No Vite. Sub-second. Works even if the project does not compile.
 
 The graph is also regenerated automatically on every `velojs build` (via the `velo:graph` plugin) and on every file change during `velojs dev`.
+
+## Querying the graph
+
+The graph is a compact JSON file (no whitespace). Do not read it in full — use `jq` for targeted queries:
+
+```bash
+# A single module — what it exports, what it imports, who imports it
+jq '.modules["auth/Login"]' .velojs/graph.json
+
+# The route tree (hierarchy of layouts + pages with paths and middlewares)
+jq '.routes' .velojs/graph.json
+
+# All modules that export a loader
+jq '.modules | to_entries[] | select(.value.exports.hasLoader) | .key' .velojs/graph.json
+
+# Impact analysis: what breaks if I change this service?
+jq '.modules["modules/respondent/respondent.service"] | .importedBy' .velojs/graph.json
+
+# All actions in the project (module + action name)
+jq '.modules | to_entries[] | .key as $k | .value.exports.actions[] | "\($k): action_\(.)"' .velojs/graph.json
+
+# Modules imported by a specific page
+jq '.modules["admin/DepartmentDetail"].imports' .velojs/graph.json
+
+# Which pages use a shared component?
+jq -r '.modules["components/Inputs"].importedBy[]' .velojs/graph.json \
+  | while read id; do jq -r ".modules[\"$id\"].kind" .velojs/graph.json; done \
+  | sort | uniq -c
+```
 
 ## Graph structure
 

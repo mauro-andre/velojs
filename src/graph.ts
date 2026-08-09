@@ -360,7 +360,7 @@ function collectModuleImports(
             },
         });
 
-        modules.set(moduleId, { file: filePath, imports: importIds });
+        modules.set(moduleId, { file: filePath, imports: [...new Set(importIds)] });
     }
 
     crawl(entryFile);

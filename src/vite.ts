@@ -1330,7 +1330,7 @@ function veloGraphPlugin(veloConfig: VeloConfig, appDirectory: string): Plugin {
         fs.mkdirSync(outDir, { recursive: true });
         fs.writeFileSync(
             path.join(outDir, "graph.json"),
-            JSON.stringify(graph, null, 2)
+            JSON.stringify(graph)
         );
     }
 

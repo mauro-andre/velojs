@@ -136,7 +136,7 @@ switch (command) {
         const outDir = join(rootDir, ".velojs");
         fs.mkdirSync(outDir, { recursive: true });
         const outFile = join(outDir, "graph.json");
-        fs.writeFileSync(outFile, JSON.stringify(graph, null, 2));
+        fs.writeFileSync(outFile, JSON.stringify(graph));
         console.log(`Graph written to .velojs/graph.json`);
         break;
     }
