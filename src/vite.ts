@@ -13,6 +13,8 @@ import _traverse from "@babel/traverse";
 import _generate from "@babel/generator";
 import * as t from "@babel/types";
 
+import { buildGraph } from "./graph.js";
+
 // Workaround para ESM — handle both CJS-wrapped and direct ESM exports
 const traverse = typeof _traverse === "function"
     ? _traverse
@@ -1310,6 +1312,57 @@ function veloStaticUrlPlugin(): Plugin {
 }
 
 // ============================================
+// VITE PLUGIN - GRAPH (generates .velojs/graph.json)
+// ============================================
+
+function veloGraphPlugin(veloConfig: VeloConfig, appDirectory: string): Plugin {
+    let root = "";
+    let mode = "";
+    let generated = false;
+    let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+
+    function generate(): void {
+        if (!root) return;
+        const appDir = path.resolve(root, appDirectory);
+        if (!fs.existsSync(appDir)) return;
+        const graph = buildGraph(appDir);
+        const outDir = path.join(root, ".velojs");
+        fs.mkdirSync(outDir, { recursive: true });
+        fs.writeFileSync(
+            path.join(outDir, "graph.json"),
+            JSON.stringify(graph, null, 2)
+        );
+    }
+
+    return {
+        name: "velo:graph",
+
+        configResolved(resolvedConfig) {
+            root = resolvedConfig.root;
+            mode = resolvedConfig.mode;
+        },
+
+        writeBundle() {
+            if (mode === "server") return;
+            generate();
+        },
+
+        configureServer(server) {
+            generate();
+            generated = true;
+
+            const appDir = path.resolve(root, appDirectory);
+            server.watcher.on("all", (_event, file) => {
+                if (!generated) return;
+                if (!file.startsWith(appDir)) return;
+                if (debounceTimer) clearTimeout(debounceTimer);
+                debounceTimer = setTimeout(() => generate(), 500);
+            });
+        },
+    };
+}
+
+// ============================================
 // MAIN EXPORT
 // ============================================
 
@@ -1321,6 +1374,7 @@ export function veloPlugin(config?: VeloConfig): PluginOption[] {
         veloConfigPlugin(veloConfig),
         veloTransformPlugin(veloConfig, appDirectory),
         veloStaticUrlPlugin(),
+        veloGraphPlugin(veloConfig, appDirectory),
         preact(),
         devServer({
             entry: VIRTUAL_SERVER_ENTRY,

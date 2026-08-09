@@ -7,6 +7,9 @@ dist/
 # `npm pack`/`npm publish`, so there is no path that ships a stale one.
 agent/skills/
 
+# Project graph — regenerated on every build and by `velojs graph`
+.velojs/
+
 # Environment
 .env
 .env.local
