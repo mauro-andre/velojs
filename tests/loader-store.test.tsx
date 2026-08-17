@@ -64,6 +64,21 @@ describe("extractParams", () => {
         expect(extractParams("/admin/empresas/:companyId", "/admin/consultores")).toBeNull();
     });
 
+    it("exact mode: a leaf matches its own URL but nothing deeper", () => {
+        expect(extractParams("/leads", "/leads", true)).toEqual({});
+        expect(extractParams("/leads", "/leads/1", true)).toBeNull();
+    });
+
+    it("exact mode: params are extracted and trailing slash is tolerated", () => {
+        expect(extractParams("/leads/:id", "/leads/42", true)).toEqual({ id: "42" });
+        expect(extractParams("/leads/:id", "/leads/42/", true)).toEqual({ id: "42" });
+    });
+
+    it("exact mode: the root leaf matches only `/`", () => {
+        expect(extractParams("/", "/", true)).toEqual({});
+        expect(extractParams("/", "/leads", true)).toBeNull();
+    });
+
     it("covers everything for a path-less wrapper", () => {
         expect(extractParams("", "/anything/at/all")).toEqual({});
     });
@@ -177,6 +192,177 @@ describe("loader store — navigation", () => {
 
         const calls = mockFetch.mock.calls.length;
         expect(calls).toBe(0);
+    });
+
+    it("refetches a param-less page that unmounted and remounted (return navigation)", async () => {
+        // Report: `/` (Dashboard, no params) → `/leads` → back to `/` served the
+        // SSR cache forever — no `?_data=1` was ever requested. A page that
+        // remounts must revalidate, exactly like a page whose params moved.
+        const routes: AppRoutes = [
+            {
+                module: makeModule({ moduleId: "Root", fullPath: "" }),
+                isRoot: true,
+                children: [
+                    { path: "/", module: makeModule({ moduleId: "Dashboard", fullPath: "/" }) },
+                    { path: "/leads", module: makeModule({ moduleId: "Leads", fullPath: "/leads" }) },
+                ],
+            },
+        ];
+        (window as any).__PAGE_DATA__ = { Dashboard: { count: 1 } };
+        mockFetch.mockResolvedValue({
+            ok: true,
+            json: async () => ({ Dashboard: { count: 2 } }),
+        });
+
+        render(<ClientRoutes routes={routes} />);
+        mockFetch.mockClear();
+
+        await navigate("/leads");
+        await navigate("/");
+
+        expect(mockFetch).toHaveBeenCalled();
+        expect(Loader<any>("Dashboard").data.value).toEqual({ count: 2 });
+    });
+
+    it("refetches a param-less leaf reached from a param page (and vice versa)", async () => {
+        // The report's contrast cases: `/leads/2` → `/leads` and `/leads` →
+        // `/leads/1` must both refetch — the leaf on the other side remounted.
+        const routes: AppRoutes = [
+            {
+                module: makeModule({ moduleId: "Root", fullPath: "" }),
+                isRoot: true,
+                children: [
+                    { path: "/leads", module: makeModule({ moduleId: "Leads", fullPath: "/leads" }) },
+                    {
+                        path: "/leads/:id",
+                        module: makeModule({
+                            moduleId: "LeadDetail",
+                            fullPath: "/leads/:id",
+                            Component: () => { useLoader("LeadDetail"); return null; },
+                        }),
+                    },
+                ],
+            },
+        ];
+        (window as any).__PAGE_DATA__ = { Leads: { items: ["a"] } };
+        mockFetch.mockResolvedValue({
+            ok: true,
+            json: async () => ({ Leads: { items: ["b"] }, LeadDetail: { id: "1" } }),
+        });
+
+        window.history.pushState({}, "", "/leads");
+        render(<ClientRoutes routes={routes} />);
+        mockFetch.mockClear();
+
+        await navigate("/leads/1");
+        expect(mockFetch).toHaveBeenCalled();
+
+        mockFetch.mockClear();
+        await navigate("/leads");
+        expect(mockFetch).toHaveBeenCalled();
+        expect(Loader<any>("Leads").data.value).toEqual({ items: ["b"] });
+    });
+
+    it("does not refetch when navigating to the same URL (no remount, no param change)", async () => {
+        const routes: AppRoutes = [
+            {
+                module: makeModule({ moduleId: "Root", fullPath: "" }),
+                isRoot: true,
+                children: [
+                    { path: "/leads", module: makeModule({ moduleId: "Leads", fullPath: "/leads" }) },
+                ],
+            },
+        ];
+        (window as any).__PAGE_DATA__ = { Leads: { items: ["a"] } };
+        mockFetch.mockResolvedValue({ ok: true, json: async () => ({}) });
+
+        window.history.pushState({}, "", "/leads");
+        render(<ClientRoutes routes={routes} />);
+        mockFetch.mockClear();
+
+        await navigate("/leads");
+        expect(mockFetch).not.toHaveBeenCalled();
+    });
+
+    it("refetches a layout that unmounted and remounted (left the subtree and came back)", async () => {
+        // The remount rule applies to layouts too: staying among children keeps
+        // the cache, but leaving the subtree and returning must revalidate.
+        const routes: AppRoutes = [
+            {
+                module: makeModule({ moduleId: "Root", fullPath: "" }),
+                isRoot: true,
+                children: [
+                    {
+                        path: "/admin",
+                        module: makeModule({ moduleId: "AdminLayout", fullPath: "/admin" }),
+                        children: [
+                            { path: "/users", module: makeModule({ moduleId: "Users", fullPath: "/admin/users" }) },
+                        ],
+                    },
+                    { path: "/public", module: makeModule({ moduleId: "Public", fullPath: "/public" }) },
+                ],
+            },
+        ];
+        (window as any).__PAGE_DATA__ = {
+            AdminLayout: { me: "v1" },
+            Users: { list: [1] },
+        };
+        mockFetch.mockResolvedValue({
+            ok: true,
+            json: async () => ({ AdminLayout: { me: "v2" }, Users: { list: [2] } }),
+        });
+
+        window.history.pushState({}, "", "/admin/users");
+        render(<ClientRoutes routes={routes} />);
+        mockFetch.mockClear();
+
+        await navigate("/public");
+        expect(mockFetch).not.toHaveBeenCalled(); // nothing matched-and-stale there
+
+        await navigate("/admin/users");
+        expect(mockFetch).toHaveBeenCalled();
+        expect(Loader<any>("AdminLayout").data.value).toEqual({ me: "v2" });
+    });
+
+    it("keeps a layout's client-owned state while navigating among its children", async () => {
+        // The remount rule must NOT fire here: the layout stays matched the
+        // whole time, so its entry is never stale.
+        const routes: AppRoutes = [
+            {
+                module: makeModule({ moduleId: "Root", fullPath: "" }),
+                isRoot: true,
+                children: [
+                    {
+                        path: "/admin",
+                        module: makeModule({ moduleId: "AdminLayout", fullPath: "/admin" }),
+                        children: [
+                            { path: "/users", module: makeModule({ moduleId: "Users", fullPath: "/admin/users" }) },
+                            { path: "/roles", module: makeModule({ moduleId: "Roles", fullPath: "/admin/roles" }) },
+                        ],
+                    },
+                ],
+            },
+        ];
+        (window as any).__PAGE_DATA__ = {
+            AdminLayout: { me: "v1" },
+            Users: { list: [1] },
+        };
+        mockFetch.mockResolvedValue({
+            ok: true,
+            json: async () => ({ AdminLayout: { me: "server" }, Roles: { list: [] } }),
+        });
+
+        window.history.pushState({}, "", "/admin/users");
+        render(<ClientRoutes routes={routes} />);
+
+        const { data: layoutData } = Loader<any>("AdminLayout");
+        layoutData.value = { me: "client-owned" };
+        mockFetch.mockClear();
+
+        await navigate("/admin/roles");
+
+        // The response carried AdminLayout, but the store must not write it.
+        expect(layoutData.value).toEqual({ me: "client-owned" });
     });
 
     it("coalesces one navigation into a single request for many stale entries", async () => {

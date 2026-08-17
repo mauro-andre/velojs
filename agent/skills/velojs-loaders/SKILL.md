@@ -127,8 +127,10 @@ Understanding the data flow helps you debug issues:
 
 **Client-side navigation (SPA):**
 1. User clicks a link
-2. VeloJS compares each module's route pattern against the new URL and marks stale the ones whose **declared params** changed
+2. VeloJS marks stale the modules whose **declared params** changed — or that **were not part of the previous location** (they unmounted and are remounting now)
 3. One `?_data=1` request serves all of them
 4. Only the stale modules are written — a module the client owns locally (a filtered list, an optimistic edit) is left alone
 
-That last point is why a layout at `/admin/empresas` keeps a filtered list while you navigate among its children: its route declares no param, so nothing invalidates it.
+The second rule is why returning to a page always shows fresh data: leaving `/` for `/leads` unmounts the Dashboard, so navigating back re-runs its loader. The first rule is why `/leads/1` → `/leads/2` refetches.
+
+That last point is why a layout at `/admin/empresas` keeps a filtered list while you navigate among its children: it stays matched the whole time — no param changed and it never unmounted, so nothing invalidates it. (Leaving the subtree entirely and coming back *does* revalidate it — the layout remounted.)

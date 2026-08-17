@@ -7,9 +7,12 @@
  * no module-scope mirror to keep in sync.
  *
  * Invalidation follows the route tree: an entry is stale when the params its own
- * route declares have changed. That is what the server already does — a loader
- * re-runs when a request arrives with different params — so the client stops
- * making the author restate it in `useLoader([params.id])`.
+ * route declares have changed — or when the module was not part of the previous
+ * location's matched chain (it unmounted and is now remounting). The first rule
+ * mirrors the server (a loader re-runs when a request arrives with different
+ * params); the second mirrors user expectation (returning to a page shows fresh
+ * data). A layout keeps its data while navigating among its children because it
+ * stays matched the whole time — its client-owned state survives.
  *
  * Deliberately NOT invalidated by:
  *  - a query-string change: `routes.tsx` declares path params, never `?x=`, so
@@ -36,8 +39,14 @@ const loadings = new Map<string, Signal<boolean>>();
 /** moduleId → the route pattern declaring which path params its data depends on. */
 const patterns = new Map<string, string>();
 
+/** moduleIds whose route is a leaf (no children) — matched exactly, not as prefix. */
+const exactModules = new Set<string>();
+
 /** moduleId → serialized params in effect when its data was last written. */
 const loadedParams = new Map<string, string>();
+
+/** moduleIds whose route covered the previous location — remount detection. */
+let lastMatched = new Set<string>();
 
 /** url → in-flight request, so N entries invalidated by one navigation cost one fetch. */
 const inFlight = new Map<string, Promise<Record<string, unknown>>>();
@@ -94,6 +103,9 @@ export function registerRoutePatterns(routes: AppRoutes): void {
             const meta = node.module?.metadata;
             if (meta?.moduleId && meta.fullPath !== undefined) {
                 patterns.set(meta.moduleId, meta.fullPath);
+                if (!node.children || node.children.length === 0) {
+                    exactModules.add(meta.moduleId);
+                }
             }
             if (node.children) walk(node.children);
         }
@@ -103,6 +115,7 @@ export function registerRoutePatterns(routes: AppRoutes): void {
     if (typeof window !== "undefined") {
         hydrateOnce();
         for (const moduleId of entries.keys()) markLoaded(moduleId, window.location.pathname);
+        lastMatched = matchedAt(window.location.pathname);
     }
 }
 
@@ -111,13 +124,15 @@ const escapeRe = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
 /**
  * Extract the params a pattern declares from a pathname. Layout patterns are
  * prefixes of the URL (`/x/:id` covers `/x/1/tab`), mirroring how the client
- * router matches them, so the match is prefix-tolerant.
+ * router matches them, so the match is prefix-tolerant. Leaf patterns (routes
+ * without children) match exactly, mirroring wouter's exact `<Route>` for them.
  *
  * Returns null when the pattern does not cover the pathname at all.
  */
 export function extractParams(
     pattern: string,
     pathname: string,
+    exact = false,
 ): Record<string, string> | null {
     const names: string[] = [];
     const source = pattern
@@ -130,7 +145,9 @@ export function extractParams(
             return escapeRe(seg);
         })
         .join("/");
-    const match = pathname.match(new RegExp(`^${source}(?:/.*)?$`));
+    const match = pathname.match(
+        new RegExp(exact ? `^${source}/?$` : `^${source}(?:/.*)?$`)
+    );
     if (!match) return null;
     const out: Record<string, string> = {};
     names.forEach((name, i) => {
@@ -139,10 +156,25 @@ export function extractParams(
     return out;
 }
 
+function isMatched(moduleId: string, pathname: string): boolean {
+    const pattern = patterns.get(moduleId);
+    if (pattern === undefined) return false;
+    return extractParams(pattern, pathname, exactModules.has(moduleId)) !== null;
+}
+
+/** Every moduleId whose route covers this pathname (leaves exact, layouts prefix). */
+function matchedAt(pathname: string): Set<string> {
+    const out = new Set<string>();
+    for (const moduleId of patterns.keys()) {
+        if (isMatched(moduleId, pathname)) out.add(moduleId);
+    }
+    return out;
+}
+
 function paramsKey(moduleId: string, pathname: string): string | null {
     const pattern = patterns.get(moduleId);
     if (pattern === undefined) return null;
-    const params = extractParams(pattern, pathname);
+    const params = extractParams(pattern, pathname, exactModules.has(moduleId));
     return params === null ? null : JSON.stringify(params);
 }
 
@@ -207,17 +239,20 @@ async function fetchInto(
 
 /**
  * Called on every client navigation. Refetches exactly the entries whose
- * declared params changed, in one coalesced request.
+ * declared params changed OR that were not matched at the previous location
+ * (they unmounted and are remounting now), in one coalesced request.
  */
 export function syncLocation(pathname: string): void {
     if (typeof window === "undefined") return;
     const stale: string[] = [];
+    const nowMatched = matchedAt(pathname);
     for (const moduleId of entries.keys()) {
-        const key = paramsKey(moduleId, pathname);
-        if (key === null) continue; // not declared in the tree, or not on this route
-        if (loadedParams.get(moduleId) === key) continue; // its params did not change
+        if (!nowMatched.has(moduleId)) continue; // not on this route
+        const key = paramsKey(moduleId, pathname)!;
+        if (loadedParams.get(moduleId) === key && lastMatched.has(moduleId)) continue;
         stale.push(moduleId);
     }
+    lastMatched = nowMatched;
     void fetchInto(stale, pathname, true);
 }
 
@@ -233,7 +268,9 @@ export function __resetLoaderStore(): void {
     entries.clear();
     loadings.clear();
     patterns.clear();
+    exactModules.clear();
     loadedParams.clear();
+    lastMatched = new Set<string>();
     inFlight.clear();
     hydrated = false;
     __veloUpdatePending.value = false;
