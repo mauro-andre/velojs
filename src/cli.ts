@@ -92,7 +92,7 @@ Usage:
   velojs <command>
 
 Commands:
-  init             Create a new VeloJS project
+  init             Create a new VeloJS project (fails only on file conflicts; --force overwrites)
   dev              Start development server
   build            Build for production (client + server)
   build --static   Build as static site (HTML + JSON)
@@ -115,7 +115,13 @@ Examples:
 switch (command) {
     case "init": {
         const { runInit } = await import("./init.js");
-        await runInit(args[1]);
+        try {
+            const dirArg = args[1] && !args[1].startsWith("-") ? args[1] : undefined;
+            await runInit(dirArg, { force: args.includes("--force") });
+        } catch (e) {
+            console.error((e as Error).message);
+            process.exit(1);
+        }
         break;
     }
     case "dev":
