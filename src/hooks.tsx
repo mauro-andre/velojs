@@ -10,6 +10,7 @@ import { useEffect, useRef } from "preact/hooks";
 import {
     useParams as wouterUseParams,
     useLocation as wouterUseLocation,
+    useSearch as wouterUseSearch,
 } from "wouter-preact";
 import type { EventStream } from "./events.js";
 import type { SocketHandler, SocketStub } from "./sockets.js";
@@ -242,16 +243,14 @@ export function useQuery<
         return (serverData?.__query as T) ?? ({} as T);
     }
 
-    // Cliente: lê do __PAGE_DATA__ ou parse da URL
-    const pageData = (window as any).__PAGE_DATA__;
-    if (pageData?.__query) {
-        return pageData.__query as T;
-    }
-
-    // Fallback: parse da URL atual
-    const searchParams = new URLSearchParams(window.location.search);
+    // Cliente: wouter's useSearch subscribes to location updates with
+    // location.search as the snapshot — a query-only navigation re-renders.
+    // (Reading __PAGE_DATA__.__query instead pinned the hook to the SSR query
+    // forever, and parsing the URL without a subscription never re-rendered:
+    // useLoader([query.x]) silently stopped refetching on query-only changes.)
+    const search = wouterUseSearch();
     const query: Record<string, string> = {};
-    searchParams.forEach((value, key) => {
+    new URLSearchParams(search).forEach((value, key) => {
         query[key] = value;
     });
     return query as T;
