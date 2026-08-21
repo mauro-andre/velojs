@@ -56,6 +56,44 @@ function buildRoutes(): AppRoutes {
     ];
 }
 
+describe("createApp — loader short-circuit Response", () => {
+    const routesWithRedirect = (): AppRoutes => [
+        {
+            module: Root,
+            isRoot: true,
+            children: [
+                {
+                    path: "/login",
+                    module: page("Login", "/login", "login page", {
+                        loader: async ({ c }: any) => c.redirect("/"),
+                    }),
+                },
+                { path: "/", module: page("Home", "/", "home page") },
+            ],
+        },
+    ];
+
+    it("a Response returned by a loader short-circuits rendering (redirect on direct load)", async () => {
+        // Report: in 0.0.46 the Response ended up stringified into
+        // __PAGE_DATA__ and the page rendered 200. A loader must be able to
+        // redirect — auth checks live in loaders, not only in middlewares.
+        const app = await createApp(routesWithRedirect());
+        const res = await app.fetch(new Request("http://localhost/login"));
+        expect(res.status).toBe(302);
+        expect(res.headers.get("location")).toBe("/");
+    });
+
+    it("_data=1 gets a JSON __redirect instead of the raw Response (SPA navigation)", async () => {
+        // fetch() would follow a 302 into HTML and fail on r.json() — the data
+        // endpoint hands the client the target and lets it navigate.
+        const app = await createApp(routesWithRedirect());
+        const res = await app.fetch(new Request("http://localhost/login?_data=1"));
+        expect(res.status).toBe(200);
+        const json = await res.json();
+        expect(json.__redirect).toBe("/");
+    });
+});
+
 describe("createApp — statusCode + 404", () => {
     it("serves a normal route with status 200", async () => {
         const app = await createApp(buildRoutes());

@@ -365,6 +365,46 @@ describe("loader store — navigation", () => {
         expect(layoutData.value).toEqual({ me: "client-owned" });
     });
 
+    it("hard-navigates on a __redirect answer instead of writing loader data", async () => {
+        // A loader short-circuited with a redirect during SPA navigation: the
+        // server answers `{ __redirect }` and the client must navigate (full
+        // load — server state may have changed), never write entries.
+        const routes: AppRoutes = [
+            {
+                module: makeModule({ moduleId: "Root", fullPath: "" }),
+                isRoot: true,
+                children: [
+                    { path: "/", module: makeModule({ moduleId: "Home", fullPath: "/" }) },
+                    {
+                        path: "/login",
+                        module: makeModule({
+                            moduleId: "Login",
+                            fullPath: "/login",
+                            Component: () => { useLoader("Login"); return null; },
+                        }),
+                    },
+                ],
+            },
+        ];
+        (window as any).__PAGE_DATA__ = { Home: { count: 1 } };
+        mockFetch.mockResolvedValue({
+            ok: true,
+            json: async () => ({ __redirect: "/" }),
+        });
+
+        render(<ClientRoutes routes={routes} />);
+        mockFetch.mockClear();
+
+        await navigate("/login");
+
+        expect(mockFetch).toHaveBeenCalled();
+        // Nothing was written: the redirect supersedes any data.
+        expect(Loader<any>("Login").data.value).toBeNull();
+        expect(Loader<any>("Home").data.value).toEqual({ count: 1 });
+        // And the loading flag settled (no spinner stuck on).
+        expect(Loader<any>("Login").loading.value).toBe(false);
+    });
+
     it("coalesces one navigation into a single request for many stale entries", async () => {
         (window as any).__PAGE_DATA__ = {
             CompanyDetail: { company: "A" },

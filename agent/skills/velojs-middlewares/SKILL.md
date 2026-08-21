@@ -141,3 +141,20 @@ export const action_save = async ({ body, c }: ActionArgs<{ name: string }>) => 
 ```
 
 This is the recommended pattern for passing authentication data (current user, permissions, etc) from middleware to your page code.
+
+### Typing `c.get()` — ContextVariableMap
+
+`c.get("user")` does not compile out of the box: Hono's `Context` only accepts keys declared in `ContextVariableMap`. Augment it once in your app (e.g. in `app/types.d.ts`) and every `c.get`/`c.set` becomes typed — no casts, no helper functions:
+
+```typescript
+import type { Usuario } from "./modules/auth/auth.types.js";
+
+declare module "hono" {
+    interface ContextVariableMap {
+        user: Usuario;
+    }
+}
+```
+
+After this, `c.get("user")` returns `Usuario` in middlewares, loaders, and actions, and `c.get("anythingElse")` fails at compile time.
+

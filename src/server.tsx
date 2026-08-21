@@ -124,6 +124,17 @@ const loadPage = async (modules: RouteModule[], c: Context) => {
         })
     );
 
+    // Um loader pode devolver um Response para interromper a renderização —
+    // redirect (c.redirect) é o caso comum (auth gate no loader). O primeiro
+    // Response na ordem dos módulos vence.
+    let shortCircuit: Response | undefined;
+    for (const result of results) {
+        if (result && result.loaderData instanceof Response) {
+            shortCircuit = result.loaderData;
+            break;
+        }
+    }
+
     // Monta objeto com moduleId como chave + params/query/pathname para hooks
     const data: Record<string, unknown> = {
         __params: params,
@@ -131,7 +142,7 @@ const loadPage = async (modules: RouteModule[], c: Context) => {
         __pathname: c.req.path,
     };
     for (const result of results) {
-        if (result) {
+        if (result && !(result.loaderData instanceof Response)) {
             data[result.moduleId] = result.loaderData;
         }
     }
@@ -139,6 +150,7 @@ const loadPage = async (modules: RouteModule[], c: Context) => {
     return {
         components: modules.map((m) => m.Component),
         data,
+        shortCircuit,
     };
 };
 
@@ -226,7 +238,22 @@ const registerRoutes = (
             }
 
             const handler = async (c: Context) => {
-                const { components, data } = await loadPage(currentModules, c);
+                const { components, data, shortCircuit } = await loadPage(currentModules, c);
+                if (shortCircuit) {
+                    // Navegação SPA: o fetch do cliente seguiria um 302 para o
+                    // HTML de destino e quebraria no r.json(). O endpoint de
+                    // dados devolve o alvo e deixa o cliente navegar.
+                    const location = shortCircuit.headers.get("Location");
+                    if (
+                        c.req.query("_data") === "1" &&
+                        location &&
+                        shortCircuit.status >= 300 &&
+                        shortCircuit.status < 400
+                    ) {
+                        return c.json({ __redirect: location });
+                    }
+                    return shortCircuit;
+                }
                 const nested = nestComponents(components);
                 return renderPage(c, nested, data, statusCode);
             };

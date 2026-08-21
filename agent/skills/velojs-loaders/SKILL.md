@@ -106,6 +106,23 @@ refetch();                                // e.g. aggregate counters
 
 > **Never mirror loader data into a module-level `export let`.** On the server, a module binding is per-process, not per-request — a value stored there belongs to whichever request wrote it last. `Loader`'s server value is an AsyncLocalStorage getter, so it is per-request by construction. That's the whole reason the handle is safe to export.
 
+## Redirecting from a loader
+
+A loader may return a `Response` to short-circuit rendering — the common case is an auth gate that redirects instead of rendering the page:
+
+```typescript
+export const loader = async ({ c }: LoaderArgs) => {
+    const user = c.get("user");
+    if (!user) return c.redirect("/login");   // no page render, no __PAGE_DATA__
+    return { projects: await listProjects(user) };
+};
+```
+
+- **Direct load / refresh:** the browser receives the `302` and navigates normally.
+- **SPA navigation:** the `?_data=1` endpoint answers `{ __redirect: "/login" }` and the client does a full navigation (server state — session, cookies — may have changed, so it is not an SPA transition).
+
+Any `Response` short-circuits, not only redirects (a `404` JSON, for example). If several loaders return one, the first in route order (layout → leaf) wins.
+
 ## When to use which
 
 | Scenario | Use |

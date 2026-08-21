@@ -216,6 +216,13 @@ async function fetchInto(
 
     try {
         const json = await request;
+        // A loader short-circuited with a redirect: hard-navigate (server
+        // state may have changed — session, cookies — so a full load, not an
+        // SPA transition).
+        if (json.__redirect) {
+            window.location.href = String(json.__redirect);
+            return;
+        }
         if (
             typeof __VELO_BUILD_HASH__ !== "undefined" &&
             json.__buildHash &&
