@@ -61,6 +61,22 @@ export function addRoutes(fn: (app: Hono) => void | Promise<void>): void {
 // RENDER PAGE - SSR ou JSON para navegação SPA
 // ============================================
 
+/**
+ * Serializa dados para injeção num <script> inline. JSON não escapa `<`, então
+ * uma string com `</script>` nos dados fecharia a tag no meio — o resto do
+ * payload transborda pro documento como HTML e a hidratação quebra (observado
+ * em produção com conteúdo de modelo contendo pseudo-tags). `<` é escape
+ * JSON/JS válido e decodifica transparente no cliente. Também escapa `>`
+ * (defesa para `<!--`) e U+2028/U+2029 (válidos em JSON, quebras de linha em
+ * JS antigo).
+ */
+export const jsonForScript = (value: unknown): string =>
+    JSON.stringify(value)
+        .replace(/</g, "\\u003c")
+        .replace(/>/g, "\\u003e")
+        .replace(/\u2028/g, "\\u2028")
+        .replace(/\u2029/g, "\\u2029");
+
 const renderPage = (
     c: Context,
     Component: VNode,
@@ -99,9 +115,7 @@ const renderPage = (
     }
 
     // Com dados - injeta window.__PAGE_DATA__ no <head> (antes dos scripts do app)
-    const script = `<script>window.__PAGE_DATA__=${JSON.stringify(
-        data
-    )}</script>`;
+    const script = `<script>window.__PAGE_DATA__=${jsonForScript(data)}</script>`;
     return c.html(html.replace("</head>", `${script}</head>`));
 };
 

@@ -7,6 +7,7 @@ import type { AppRoutes } from "../src/types.js";
 const Root = {
     Component: ({ children }: { children?: ComponentChildren }) => (
         <html>
+            <head></head>
             <body>{children}</body>
         </html>
     ),
@@ -91,6 +92,62 @@ describe("createApp — loader short-circuit Response", () => {
         expect(res.status).toBe(200);
         const json = await res.json();
         expect(json.__redirect).toBe("/");
+    });
+});
+
+describe("createApp — __PAGE_DATA__ script injection", () => {
+    const extractPayload = (html: string): any => {
+        const match = html.match(/window\.__PAGE_DATA__=(.*?)<\/script>/);
+        if (!match) throw new Error("payload script not found (or closed early)");
+        return JSON.parse(match[1]!);
+    };
+
+    const routesWithPayload = (payload: unknown): AppRoutes => [
+        {
+            module: Root,
+            isRoot: true,
+            children: [
+                {
+                    path: "/",
+                    module: page("Home", "/", "home page", {
+                        loader: async () => payload,
+                    }),
+                },
+            ],
+        },
+    ];
+
+    it("escapes </script> inside loader data — the tag never closes early", async () => {
+        const app = await createApp(
+            routesWithPayload({ evil: "</script><h1>owned</h1>" })
+        );
+        const html = await (await app.fetch(new Request("http://localhost/"))).text();
+
+        expect(html).toContain("\\u003c/script");
+        expect(html).not.toContain("</script><h1>owned");
+        expect(extractPayload(html).Home.evil).toBe("</script><h1>owned</h1>");
+    });
+
+    it("escapes <!-- (script data escaped state)", async () => {
+        const app = await createApp(routesWithPayload({ note: "<!-- comment -->" }));
+        const html = await (await app.fetch(new Request("http://localhost/"))).text();
+
+        expect(html).not.toContain("<!--");
+        expect(extractPayload(html).Home.note).toBe("<!-- comment -->");
+    });
+
+    it("round-trips unicode, quotes, backslashes, literal \\u003c text and nested structures", async () => {
+        const original = {
+            unicode: "olá — 你好 \u2028 separador",
+            quotes: 'aspas "duplas" e \'simples\'',
+            backslash: "c:\\temp\\x",
+            literalEscape: "o texto literal \\u003c não pode sofrer duplo-escape",
+            nested: { arr: [1, "</script>", { deep: true }], nil: null },
+        };
+        const app = await createApp(routesWithPayload(original));
+        const html = await (await app.fetch(new Request("http://localhost/"))).text();
+
+        expect(extractPayload(html).Home).toEqual(original);
     });
 });
 
