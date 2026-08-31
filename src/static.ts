@@ -52,7 +52,7 @@ async function collectStaticRoutes(
                     for (const params of paramSets) {
                         let concretePath = fullPath;
                         for (const [key, value] of Object.entries(params as Record<string, string>)) {
-                            concretePath = concretePath.replace(`:${key}`, value);
+                            concretePath = concretePath.replace(`:${key}`, () => value);
                         }
                         routes.push({ fullPath: concretePath, module: node.module });
                     }

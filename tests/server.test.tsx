@@ -149,6 +149,27 @@ describe("createApp — __PAGE_DATA__ script injection", () => {
 
         expect(extractPayload(html).Home).toEqual(original);
     });
+    it("does not interpret $-patterns in the payload during </head> injection", async () => {
+        // 0.0.48 residue: `html.replace("</head>", script + "</head>")` runs
+        // AFTER jsonForScript — and a string replacement interprets $& $' $`
+        // $1 $$ inside the payload. $' dumps the REST OF THE DOCUMENT into the
+        // JSON, reintroducing raw </script> and breaking hydration by a second
+        // path. The replacement must be a function (functions skip $-handling).
+        const original = { r: "price $& and $' and $` and $1 and $$end" };
+        const app = await createApp(routesWithPayload(original));
+        const html = await (await app.fetch(new Request("http://localhost/"))).text();
+
+        expect(html.match(/<\/head>/g)).toHaveLength(1);
+        expect(extractPayload(html).Home).toEqual(original);
+    });
+
+    it("does not interpret repeated $-patterns ($&$&$&$&)", async () => {
+        const original = { r: "$&$&$&$&" };
+        const app = await createApp(routesWithPayload(original));
+        const html = await (await app.fetch(new Request("http://localhost/"))).text();
+
+        expect(extractPayload(html).Home).toEqual(original);
+    });
 });
 
 describe("createApp — statusCode + 404", () => {

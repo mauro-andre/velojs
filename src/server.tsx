@@ -116,7 +116,10 @@ const renderPage = (
 
     // Com dados - injeta window.__PAGE_DATA__ no <head> (antes dos scripts do app)
     const script = `<script>window.__PAGE_DATA__=${jsonForScript(data)}</script>`;
-    return c.html(html.replace("</head>", `${script}</head>`));
+    // O substituto PRECISA ser função: com string, o replace interpreta
+    // $& $' $` $1 $$ dentro do payload (dados do loader) — $' injetaria o
+    // resto do documento no meio do JSON, reabrindo o vetor de quebra.
+    return c.html(html.replace("</head>", () => `${script}</head>`));
 };
 
 // ============================================
