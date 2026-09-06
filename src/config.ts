@@ -29,6 +29,14 @@ export interface VeloConfig {
      * @default 3000
      */
     port?: number;
+
+    /**
+     * Padrões adicionais de URL que o dev server deve delegar ao Vite em vez
+     * de interceptar como página (ex.: artefatos de geradores build-time como
+     * Panda CSS — "/styled-system/**"). Compostos com os defaults do
+     * @hono/vite-dev-server, não os substituem.
+     */
+    devServerExclude?: (string | RegExp)[];
 }
 
 export function defineConfig(config: VeloConfig): VeloConfig {

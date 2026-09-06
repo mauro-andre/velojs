@@ -5,7 +5,7 @@ import type { VeloConfig } from "./config.js";
 
 // External plugins
 import preact from "@preact/preset-vite";
-import devServer from "@hono/vite-dev-server";
+import devServer, { defaultOptions as devServerDefaults } from "@hono/vite-dev-server";
 
 // Babel imports
 import { parse } from "@babel/parser";
@@ -1363,6 +1363,27 @@ function veloGraphPlugin(veloConfig: VeloConfig, appDirectory: string): Plugin {
 }
 
 // ============================================
+// DEV SERVER EXCLUDE — composed, not replaced
+// ============================================
+
+/**
+ * @hono/vite-dev-server treats `exclude` as all-or-nothing: passing one
+ * replaces the defaults entirely. We compose instead — the upstream defaults
+ * (imported, so they track the installed version) plus `.mjs`, which upstream
+ * misses: build-time generators (Panda CSS, vanilla-extract) emit ESM
+ * artifacts inside the project, and a project `.mjs` that falls through to
+ * the SSR app comes back as fallback HTML/404 — the browser's ESM import
+ * dies silently.
+ */
+export function devServerExcludeFor(veloConfig: VeloConfig): (string | RegExp)[] {
+    return [
+        ...devServerDefaults.exclude,
+        /.*\.mjs$/,
+        ...(veloConfig.devServerExclude ?? []),
+    ];
+}
+
+// ============================================
 // MAIN EXPORT
 // ============================================
 
@@ -1378,6 +1399,7 @@ export function veloPlugin(config?: VeloConfig): PluginOption[] {
         preact(),
         devServer({
             entry: VIRTUAL_SERVER_ENTRY,
+            exclude: devServerExcludeFor(veloConfig),
         }),
         veloWsBridgePlugin(),
     ];

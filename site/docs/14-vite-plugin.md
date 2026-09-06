@@ -6,16 +6,35 @@ description: "The `veloPlugin` build pipeline: the 9 AST transforms that inject 
 
 The `veloPlugin()` is the core of VeloJS. It's a single function that returns 6 Vite plugins working together to handle routing, SSR, code transforms, and more.
 
-## The 6 plugins
+## The 7 plugins
 
 | Plugin | What it does |
 |--------|-------------|
 | `velo:config` | Sets up build config for client/server modes, Preact aliases, and environment defines |
 | `velo:transform` | Performs AST transforms on your code (the most important plugin) |
 | `velo:static-url` | Rewrites CSS `url(/path)` to use `STATIC_BASE_URL` in production builds |
+| `velo:graph` | Generates `.velojs/graph.json` (route tree + dependency graph) on build and dev |
 | `@preact/preset-vite` | Adds Preact JSX support |
 | `@hono/vite-dev-server` | Runs the SSR dev server |
 | `velo:ws-bridge` | Exposes Vite's HTTP server for WebSocket handlers during development |
+
+## Dev server: what is served × intercepted
+
+During `velojs dev`, every request that is **not** excluded falls through to the SSR app — if no route matches, it gets the app's 404/fallback HTML. Excluded (delegated to Vite, which serves and transforms them as modules): `.js`, `.mjs`, `.ts`, `.tsx`, `.jsx`, `.css`, `.md`, `.svelte`, `.vue`, `/@vite/*`, `/node_modules/*`, `/static/*`, and `?t=` cache-busted requests.
+
+Project `.mjs` files are covered — relevant for build-time generators (Panda CSS, vanilla-extract) that emit ESM artifacts such as `styled-system/`.
+
+Need more patterns? Declare them in the plugin config — they are **composed with** the defaults, not a replacement:
+
+```typescript
+export default defineConfig({
+    plugins: [
+        veloPlugin({
+            devServerExclude: ["/generated/**"],
+        }),
+    ],
+});
+```
 
 ## AST Transformations
 
