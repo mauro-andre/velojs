@@ -47,6 +47,12 @@ function flushServerCallbacks(server: import("http").Server): void {
 export interface StartServerOptions {
     routes: AppRoutes;
     port?: number;
+    /**
+     * Hostname/interface to bind. Precedence: HOST env > this option > Node
+     * default (all interfaces — the ecosystem norm for containers/proxies).
+     * Local/sensitive apps should bind "127.0.0.1".
+     */
+    hostname?: string;
 }
 
 // ============================================
@@ -591,6 +597,9 @@ export const startServer = async (options: StartServerOptions) => {
     const { routes } = options;
     // Precedence: PORT env (injected by most hosts) > defineConfig port > 3000.
     const port = Number(process.env.PORT) || options.port || 3000;
+    // Same precedence for the interface: HOST env > defineConfig hostname >
+    // Node default (binds all interfaces — what containers/cloud expect).
+    const hostname = process.env.HOST || options.hostname || undefined;
     const app = await createApp(routes);
 
     // Production: serve static files and start server
@@ -607,11 +616,33 @@ export const startServer = async (options: StartServerOptions) => {
             app.use("/*", serveStatic({ root: clientDir }));
         }
 
-        console.log(`Server running on http://localhost:${port}`);
-        const server = serve({ fetch: app.fetch, port });
+        const server = serve({ fetch: app.fetch, port, ...(hostname ? { hostname } : {}) });
+        // serve() returns before listen() completes — address() is null (or
+        // racy) synchronously. Wait for 'listening' so the log shows the REAL
+        // bind and onServer callbacks can read server.address() — that is
+        // what loopback fail-fast guards in sensitive apps depend on.
+        if (!server.listening) {
+            await new Promise<void>((resolve) => server.once("listening", resolve));
+        }
+        const addr = server.address();
+        if (addr && typeof addr === "object") {
+            const wildcard = addr.address === "::" || addr.address === "0.0.0.0";
+            const display = wildcard ? "0.0.0.0 (all interfaces)" : addr.address;
+            console.log(`Server running on ${display}:${addr.port}`);
+        } else {
+            console.log(`Server running on port ${port}`);
+        }
         // Inject the WebSocket adapter so upgrade requests are routed.
         await injectWebSocketServer(app, server);
         flushServerCallbacks(server as unknown as import("http").Server);
+        // A closed server must stop answering onServer: a late registrant
+        // would receive a dead instance (address() === null) instead of
+        // queueing for the next one.
+        server.once("close", () => {
+            if (activeServer === (server as unknown as import("http").Server)) {
+                activeServer = null;
+            }
+        });
     }
 
     return app;

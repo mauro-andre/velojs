@@ -1042,7 +1042,7 @@ import routes from "${routesPath}";
 import { startServer } from "@mauroandre/velojs/server";
 
 export { routes };
-export default await startServer({ routes, port: __VELO_CONFIG_PORT__ });
+export default await startServer({ routes, port: __VELO_CONFIG_PORT__, hostname: __VELO_CONFIG_HOSTNAME__ });
 `;
             }
 
@@ -1223,6 +1223,8 @@ function veloConfigPlugin(veloConfig: VeloConfig): Plugin {
                     // Baked into the server bundle as startServer's port fallback.
                     // null when unset → startServer falls back to PORT env / 3000.
                     "__VELO_CONFIG_PORT__": JSON.stringify(veloConfig.port ?? null),
+                    // Same for the bind interface: null → HOST env / Node default.
+                    "__VELO_CONFIG_HOSTNAME__": JSON.stringify(veloConfig.hostname ?? null),
                 },
                 resolve: {
                     alias: {

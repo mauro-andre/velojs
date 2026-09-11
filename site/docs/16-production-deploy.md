@@ -70,6 +70,45 @@ export default defineConfig({
 
 In dev, `velojs dev --port 5000` still overrides everything (it's passed straight to Vite).
 
+## Choosing the bind interface (hostname)
+
+By default `velojs start` binds to **all interfaces** (`::`) — the norm for Node servers and what containers and cloud platforms expect (they route traffic through the network interface; loopback-only would make the container unreachable). To change it, in order of precedence:
+
+1. The `HOST` environment variable.
+2. The `hostname` field in `defineConfig`.
+3. The Node default (all interfaces).
+
+### Secure bind for local/sensitive apps
+
+If your app is **local and single-user** — a cockpit with a terminal, file access, real user data — it must listen on loopback only. An all-interfaces bind exposes that surface to the whole network without any error: the developer finds out by scanning, not by the app telling them.
+
+```bash
+# Deploy do app local: bind em loopback, sempre
+HOST=127.0.0.1 velojs start
+```
+
+Because "set HOST" is easy to forget, sensitive apps should also **fail fast if the bind is wrong** — check the real address after the server starts, via `onServer`:
+
+```typescript
+// app/server.tsx
+import { onServer } from "@mauroandre/velojs/server";
+
+onServer((server) => {
+    const addr = server.address();
+    const loopback = ["127.0.0.1", "::1", "::ffff:127.0.0.1"];
+    if (!addr || typeof addr !== "object" || !loopback.includes(addr.address)) {
+        console.error(
+            `[${process.env.APP_NAME ?? "app"}][CRIT] ` +
+            `server bound on ${addr && typeof addr === "object" ? addr.address : "?"} — outside loopback. ` +
+            `This app runs commands on this machine: it may only listen on 127.0.0.1/::1. Aborting.`
+        );
+        process.exit(1);
+    }
+});
+```
+
+This pattern caught a real exposure in production: the server had bound to `::` and the guard aborted instead of serving. When deploying the same app to a VPS later, the bind changes **consciously** to `HOST=0.0.0.0` — together with authentication and its own security spec, not by accident.
+
 ## Static assets on CDN
 
 If you want to serve static assets (JS, CSS, images) from a CDN or S3 bucket instead of the Node.js server, set the `STATIC_BASE_URL` environment variable:
