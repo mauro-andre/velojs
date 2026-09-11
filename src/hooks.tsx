@@ -25,6 +25,35 @@ import {
 // which is what talks to the server and sees the build hash.
 export { __veloUpdatePending };
 
+declare global {
+    interface Window {
+        /** Populated by <Boot>'s pre-paint script — see components.tsx. */
+        __VELO_BOOT__?: Record<string, string>;
+    }
+}
+
+/**
+ * Reads the boot state loaded before the first paint by `<Boot>`.
+ *
+ * Values are raw strings, immutable by definition (the boot happened once —
+ * state evolves through the app's own signals, seeded with these values).
+ * On the server it returns an empty object: there is no window to read.
+ *
+ * The anti-flicker contract: visual state derived from these values must be
+ * CSS reacting to the mirrored data-attributes on `<html>`, not conditional
+ * JSX — the attribute is correct before the first paint, a conditional
+ * render only corrects after hydration.
+ *
+ * @example
+ * ```tsx
+ * const { theme, sidebarHidden } = useBoot();
+ * ```
+ */
+export function useBoot(): Record<string, string> {
+    if (typeof window === "undefined") return {};
+    return window.__VELO_BOOT__ ?? {};
+}
+
 /**
  * Força o signal a notificar mudanças após mutação de propriedades aninhadas
  *

@@ -16,7 +16,7 @@ export type { VeloConfig } from "./config.js";
 export { defineConfig } from "./config.js";
 
 // Components
-export { Scripts, Link } from "./components.js";
+export { Scripts, Link, Boot } from "./components.js";
 
 // Event Streams (SSE)
 export { createEventStream, poll } from "./events.js";

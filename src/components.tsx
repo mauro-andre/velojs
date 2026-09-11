@@ -79,6 +79,73 @@ export function Scripts({ basePath, favicon = "/favicon.ico" }: ScriptsProps = {
 }
 
 // ============================================
+// BOOT COMPONENT
+// ============================================
+
+interface BootProps {
+    /**
+     * localStorage keys to load before the first paint. The value of each
+     * key found is exposed on `window.__VELO_BOOT__` and mirrored as a
+     * sanitized `data-*` attribute on `<html>` — CSS reacting to the
+     * attribute is what makes the first paint flicker-free.
+     */
+    localStorage?: string[];
+
+    /**
+     * Cookie names to load before the first paint (same exposure/mirroring
+     * as localStorage keys). Declare storages separately: one Boot per
+     * storage keeps each script minimal.
+     */
+    cookies?: string[];
+}
+
+/**
+ * Generates the pre-paint boot script. Pure and isomorphic — Boot must
+ * render the SAME string on server and client so hydration matches.
+ * Exported for tests.
+ */
+export function bootScript({ localStorage: lsKeys, cookies: ckKeys }: BootProps = {}): string {
+    if ((!lsKeys || lsKeys.length === 0) && (!ckKeys || ckKeys.length === 0)) return "";
+
+    // Embedding keys as JSON with `<` escaped: the keys live in app source,
+    // but a `</script>` inside one must not break out of the inline script.
+    const embed = (keys: string[]): string =>
+        JSON.stringify(keys).replace(/</g, "\\u003c");
+
+    const ls = lsKeys && lsKeys.length > 0
+        ? `var L=${embed(lsKeys)};for(var i=0;i<L.length;i++){var v=localStorage.getItem(L[i]);if(v!==null)b[L[i]]=v;}`
+        : "";
+    const ck = ckKeys && ckKeys.length > 0
+        ? `var C=${embed(ckKeys)};var s=document.cookie?document.cookie.split("; "):[];var m={};for(var j=0;j<s.length;j++){var p=s[j].indexOf("=");if(p>0){m[s[j].slice(0,p)]=decodeURIComponent(s[j].slice(p+1));}}for(var k=0;k<C.length;k++){if(C[k]in m)b[C[k]]=m[C[k]];}`
+        : "";
+
+    return `(function(){var b={};try{${ls}}catch(e){}try{${ck}}catch(e){}if(Object.keys(b).length){window.__VELO_BOOT__=Object.assign(window.__VELO_BOOT__||{},b);var d=document.documentElement;for(var q in b){d.setAttribute("data-"+String(q).replace(/[^a-zA-Z0-9-]/g,"-"),b[q]);}}})();`;
+}
+
+/**
+ * Declares client state to load BEFORE the first paint. Place it in the
+ * `<head>` of client-root — a synchronous inline script is the only code
+ * that runs between the head being parsed and the body being painted, so
+ * values it mirrors as data-attributes produce a single, correct paint.
+ *
+ * Reading: `useBoot()` destructures by the declared names.
+ * Writing/persisting stays with the app (signals + storage in its gestures).
+ *
+ * @example
+ * ```tsx
+ * <head>
+ *     <Boot localStorage={["theme", "sidebarHidden"]} />
+ *     <Boot cookies={["org"]} />
+ * </head>
+ * ```
+ */
+export function Boot(props: BootProps) {
+    const script = bootScript(props);
+    if (!script) return null;
+    return <script dangerouslySetInnerHTML={{ __html: script }} />;
+}
+
+// ============================================
 // LINK COMPONENT
 // ============================================
 
