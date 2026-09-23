@@ -731,7 +731,24 @@ const { data, snapshot, closed, error } = useEventStream(stream, {
 | `closed` | `true` when server closed the stream |
 | `error` | Parse or connection error, if any |
 
-Lifecycle is automatic: opens on mount, closes on unmount, re-opens fresh when `channel` changes.
+Lifecycle is automatic: opens on mount, closes on unmount, re-opens when `channel` changes.
+
+**Reconnect is stale-while-revalidate.** When the connection re-opens — `channel`, `stream` or `enabled` changed — `data` and `snapshot` keep their previous values until the first event of the new connection overwrites them, the same choice the loader store makes (a refresh must not blank the screen). A channel switch therefore never paints an empty state; only `closed` and `error` reset, because a re-open is a fresh attempt. First mount still starts at `null` and fills in when the snapshot arrives. An app that wants to blank the view on a new channel can clear the signals itself when the channel changes.
+
+**Channel coming from loader data?** Pass `enabled` so the hook does not connect before the channel exists — the first render of a SPA navigation has `data = null`, and connecting with `channel: undefined` reaches the server without `?channel=`, which a resolver answers with `null` → 403 → a flash of `closed`:
+
+```tsx
+const { data } = useLoader<{ id: string }>();
+const channel = data.value?.id;
+
+// no connection until the loader resolves the channel
+const { snapshot, closed } = useEventStream(stream_logs, {
+    // spread only when it exists — `exactOptionalPropertyTypes` (the repo's own
+    // tsconfig) rejects an explicit `undefined` in an optional property
+    ...(channel != null && { channel }),
+    enabled: channel != null,
+});
+```
 
 ### `poll` helper
 
@@ -853,6 +870,9 @@ const { send, status, lastMessage, close } = useSocket(socket_terminal, {
 ```
 
 - `status: Signal<"connecting" | "open" | "closed">` — reactive.
+- `lastMessage: Signal<string | Uint8Array | null>` — last frame received.
+- **Reconnect preserves `lastMessage`** — changing `stub.__path`, `channel` or `enabled` opens a new socket, but the previous frame stays until the first frame of the new one arrives (stale-while-revalidate, same as `useEventStream`); `status` restarts at `"connecting"` and `error` resets. Swapping the stub object with the same `__path` does not reconnect. Clear `lastMessage` yourself in `onOpen` if a channel switch must blank the view.
+- **Channel coming from loader data?** Pass `enabled: channel != null` so the socket only opens once the channel resolves — same reason as `useEventStream`.
 - **No auto-reconnect** — sockets are usually stateful (pty sessions, collaborative state); blind reconnect loses state silently. Re-mount or toggle `enabled` to reconnect.
 
 ### Testing

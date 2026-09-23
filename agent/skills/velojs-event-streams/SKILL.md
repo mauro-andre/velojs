@@ -389,6 +389,34 @@ useEventStream(stream, {
 
 The hook handles `EventSource` lifecycle automatically: opens on mount, closes on unmount, re-opens with a fresh connection when `channel` changes.
 
+### Reconnect keeps the last value (stale-while-revalidate)
+
+When the connection re-opens — `channel`, `stream` or `enabled` changed — `data` and `snapshot` keep their previous values until the first event of the new connection overwrites them. It is the same choice the loader store makes: a refresh must not blank the screen. Without it, a channel switch (navigating from `/deploys/1` to `/deploys/2` with the stream in a layout that survives the navigation) would paint an empty state for a full round-trip before the new snapshot arrives.
+
+`closed` and `error` do reset on a re-open: a reconnect is a fresh attempt, not a closed stream. First mount still starts at `null` and fills in when the snapshot arrives — seed it from loader data if that first frame matters to your UI.
+
+If a channel switch must blank the view, clear the signals yourself in an effect keyed on the channel.
+
+### Don't connect before the channel exists
+
+When `channel` derives from loader data, the first render of a SPA navigation has it `undefined` (the loader fetch is post-mount). The hook would then connect **without** `?channel=`, and a resolver that returns `null`/`undefined` for a missing channel answers **403** — the client sees `closed = true` and paints a broken state for the milliseconds until the loader resolves and the effect reconnects.
+
+Pass `enabled` to gate the connection on the channel:
+
+```tsx
+const { data } = useLoader<{ id: string }>();
+const channel = data.value?.id;
+
+const { snapshot, closed } = useEventStream(stream_logs, {
+    // spread only when it exists — `exactOptionalPropertyTypes` (the repo's own
+    // tsconfig) rejects an explicit `undefined` in an optional property
+    ...(channel != null && { channel }),
+    enabled: channel != null,   // no connection until the loader resolves the id
+});
+```
+
+That flash is a documentation-level concern, not a hook one: the hook cannot distinguish "channel still loading" from "stream has no channel". `enabled` is the switch that expresses the difference.
+
 ## Heartbeat
 
 VeloJS sends a `:heartbeat` SSE comment every 20 seconds by default. Without this, idle connections are closed by Cloudflare (~100s), Nginx (~60s), and AWS ALB (~60s) — and the client doesn't even notice.

@@ -205,6 +205,22 @@ const { send, status, lastMessage, error, close } = useSocket(stub, {
 - `send(msg)` — queues messages sent while `connecting`; drops messages sent while `closed`.
 - `close(code?, reason?)` — client-initiated disconnect.
 
+**Reconnect keeps `lastMessage` (stale-while-revalidate).** Changing `stub.__path`, `channel` or `enabled` opens a fresh socket, but the previous frame stays in `lastMessage` until the first frame of the new socket arrives — switching from a worker terminal to another one does not paint a blank view for a round-trip. It is the same choice the loader store and `useEventStream` make. `status` restarts at `"connecting"` and `error` resets, because a reconnect is a fresh attempt; a new stub object with the same `__path` is not a reconnect at all. If a channel switch must blank the view, clear `lastMessage` in `onOpen`.
+
+**Channel coming from loader data?** The first render of a SPA navigation has no channel yet (the loader fetch is post-mount), and connecting then reaches the server without `?channel=` — for a guarded socket that is an error, not a connection. Pass `enabled: channel != null` to wait for the loader:
+
+```tsx
+const { data } = useLoader<{ workerId: string }>();
+const channel = data.value?.workerId;
+
+const { send, status, lastMessage } = useSocket(socket_terminal, {
+    // spread only when it exists — `exactOptionalPropertyTypes` (the repo's own
+    // tsconfig) rejects an explicit `undefined` in an optional property
+    ...(channel != null && { channel }),
+    enabled: channel != null,   // no socket until the loader resolves the id
+});
+```
+
 **No auto-reconnect.** If the server closes the socket (network drop, server restart), `status` goes to `"closed"` and stays there. The caller decides whether/when to reconnect — typically by toggling `enabled` or re-mounting the component. This is intentional: sockets are usually stateful (pty session, collaborative cursor) and a blind reconnect would silently lose state.
 
 ## Testing

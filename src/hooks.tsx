@@ -331,6 +331,13 @@ export function usePathname(): string {
  *
  * The connection closes automatically when the component unmounts or when
  * the channel changes (re-opens with new channel).
+ *
+ * Stale-while-revalidate: on a re-open (new `channel`/`stream`/`enabled`) the
+ * previous `data`/`snapshot` stay in place until the first event of the new
+ * connection overwrites them — the same choice the loader store makes. Only
+ * `closed`/`error` reset, because a re-open is a fresh attempt. To connect
+ * only once a channel derived from loader data has resolved, pass
+ * `enabled: channel != null`.
  */
 export function useEventStream<TEvent, TSnapshot = TEvent>(
     stream: EventStream<TEvent, TSnapshot>,
@@ -356,9 +363,10 @@ export function useEventStream<TEvent, TSnapshot = TEvent>(
             return;
         }
 
-        // Reset signals when channel changes
-        data.value = null;
-        snapshot.value = null;
+        // Stale-while-revalidate: `data`/`snapshot` intentionally survive the
+        // re-open — the previous values stay on screen until the first event of
+        // the new connection overwrites them (blanking them would paint an
+        // empty state for a round-trip). Only the attempt state resets.
         closed.value = false;
         error.value = null;
 
@@ -458,6 +466,11 @@ export interface UseSocketApi {
  * becomes `"closed"` and stays that way — user flow decides whether to
  * reconnect (typically by re-mounting or toggling `enabled`).
  *
+ * Stale-while-revalidate: on reconnect (new `stub.__path`/`channel`/`enabled`)
+ * `lastMessage` keeps its previous value until the first frame of the new
+ * socket arrives; `status`/`error` restart as a fresh attempt
+ * (`"connecting"` → `"open"`).
+ *
  * ```tsx
  * const { send, status, lastMessage } = useSocket(socket_terminal, {
  *     channel: workerId,
@@ -488,9 +501,10 @@ export function useSocket(
             return;
         }
 
-        // Reset state for a fresh connection
+        // Fresh attempt: `status`/`error` restart, but `lastMessage` keeps the
+        // previous frame (stale-while-revalidate) until the new socket emits —
+        // blanking it would flash an empty view when the channel changes.
         status.value = "connecting";
-        lastMessage.value = null;
         error.value = null;
 
         // Build ws:// or wss:// URL relative to origin

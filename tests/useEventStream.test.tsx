@@ -265,6 +265,164 @@ describe("useEventStream", () => {
         expect(MockEventSource.instances[1]!.url).toContain("channel=b");
     });
 
+    it("keeps the previous data/snapshot when the channel changes until the new connection emits", () => {
+        const stream = createEventStream<{ msg: string }, { current: number }>();
+        stream.__path = "/_event/test/swr";
+
+        let result: any;
+        function TestComponent({ channel }: { channel: string }) {
+            result = useEventStream(stream, { channel });
+            return <div>{channel}</div>;
+        }
+
+        const { rerender } = render(<TestComponent channel="a" />);
+        const first = MockEventSource.instances[0]!;
+
+        act(() => {
+            first.emit("snapshot", { current: 1 });
+            first.emit("message", { msg: "from-a" });
+        });
+        expect(result.snapshot.value).toEqual({ current: 1 });
+        expect(result.data.value).toEqual({ msg: "from-a" });
+
+        act(() => {
+            rerender(<TestComponent channel="b" />);
+        });
+
+        const second = MockEventSource.instances[1]!;
+        expect(second.url).toContain("channel=b");
+
+        // Before any event of the new connection: still A's values, never null
+        expect(result.data.value).toEqual({ msg: "from-a" });
+        expect(result.snapshot.value).toEqual({ current: 1 });
+
+        act(() => {
+            second.emit("snapshot", { current: 2 });
+        });
+        expect(result.snapshot.value).toEqual({ current: 2 });
+        // `data` only flips when its own event arrives
+        expect(result.data.value).toEqual({ msg: "from-a" });
+
+        act(() => {
+            second.emit("message", { msg: "from-b" });
+        });
+        expect(result.data.value).toEqual({ msg: "from-b" });
+    });
+
+    it("still starts null on first mount (snapshot fills the value later)", () => {
+        const stream = createEventStream<string>();
+        stream.__path = "/_event/test/firstmount";
+
+        let result: any;
+        function TestComponent() {
+            result = useEventStream(stream);
+            return <div>test</div>;
+        }
+        render(<TestComponent />);
+
+        expect(result.data.value).toBeNull();
+        expect(result.snapshot.value).toBeNull();
+
+        act(() => {
+            MockEventSource.instances[0]!.emit("snapshot", { current: 7 });
+        });
+        expect(result.snapshot.value).toEqual({ current: 7 });
+    });
+
+    it("resets closed/error and opens the new channel after the stream was closed", () => {
+        const stream = createEventStream<string>();
+        stream.__path = "/_event/test/reclose";
+
+        let result: any;
+        function TestComponent({ channel }: { channel: string }) {
+            result = useEventStream(stream, { channel });
+            return <div>{channel}</div>;
+        }
+
+        const { rerender } = render(<TestComponent channel="a" />);
+
+        act(() => {
+            MockEventSource.instances[0]!.triggerClose();
+        });
+        expect(result.closed.value).toBe(true);
+
+        act(() => {
+            rerender(<TestComponent channel="b" />);
+        });
+
+        // The re-open is a fresh attempt: not closed anymore
+        expect(result.closed.value).toBe(false);
+        expect(result.error.value).toBeNull();
+        expect(MockEventSource.instances.length).toBe(2);
+        expect(MockEventSource.instances[1]!.url).toBe("/_event/test/reclose?channel=b");
+    });
+
+    it("keeps the previous values across a disabled window and on re-enable", () => {
+        const stream = createEventStream<{ msg: string }>();
+        stream.__path = "/_event/test/reenable";
+
+        let result: any;
+        function TestComponent({ enabled }: { enabled: boolean }) {
+            result = useEventStream(stream, { channel: "a", enabled });
+            return <div>test</div>;
+        }
+
+        const { rerender } = render(<TestComponent enabled={true} />);
+
+        act(() => {
+            MockEventSource.instances[0]!.emit("message", { msg: "a-1" });
+        });
+        expect(result.data.value).toEqual({ msg: "a-1" });
+
+        act(() => {
+            rerender(<TestComponent enabled={false} />);
+        });
+        expect(MockEventSource.instances[0]!.closed).toBe(true);
+        // Disabling does not blank the UI
+        expect(result.data.value).toEqual({ msg: "a-1" });
+
+        act(() => {
+            rerender(<TestComponent enabled={true} />);
+        });
+        expect(MockEventSource.instances.length).toBe(2);
+        expect(result.data.value).toEqual({ msg: "a-1" });
+
+        act(() => {
+            MockEventSource.instances[1]!.emit("message", { msg: "a-2" });
+        });
+        expect(result.data.value).toEqual({ msg: "a-2" });
+    });
+
+    it("waits for a loader-resolved channel before connecting (enabled: channel != null)", () => {
+        const stream = createEventStream<{ msg: string }>();
+        stream.__path = "/_event/test/gate";
+
+        let result: any;
+        function TestComponent({ channel }: { channel?: string }) {
+            // the pattern the docs recommend for a channel derived from loader data
+            result = useEventStream(stream, {
+                ...(channel != null && { channel }),
+                enabled: channel != null,
+            });
+            return <div>{channel ?? "loading"}</div>;
+        }
+
+        const { rerender } = render(<TestComponent />);
+
+        // First render of a SPA navigation: the loader has not resolved yet, so
+        // there is no channel — no connection, and no 403 to paint `closed`
+        expect(MockEventSource.instances.length).toBe(0);
+        expect(result.closed.value).toBe(false);
+
+        act(() => {
+            rerender(<TestComponent channel="app-42" />);
+        });
+
+        expect(MockEventSource.instances.length).toBe(1);
+        expect(MockEventSource.instances[0]!.url).toBe("/_event/test/gate?channel=app-42");
+        expect(result.closed.value).toBe(false);
+    });
+
     it("warns and does nothing when stream has no __path", () => {
         const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
         const stream = createEventStream<string>();
