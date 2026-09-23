@@ -38,3 +38,4 @@ tests/**/*.js
 *.tmp
 .cache/
 briefing.md
+.worktrees/
