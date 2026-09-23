@@ -33,11 +33,28 @@ export function onServer(fn: ServerCallback): void {
     getAppContext().serverCallbacks.push(fn);
 }
 
-function flushServerCallbacks(server: import("http").Server): void {
+/**
+ * Points the global `activeServer` at `server` and drains the callbacks
+ * registered in the current context. Exported for the testing toolkit, which
+ * serves a TestApp over TCP and must hand the real server to `onServer()`
+ * callbacks (same flush as `startServer`).
+ */
+export function flushServerCallbacks(server: import("http").Server): void {
     activeServer = server;
     const ctx = getAppContext();
     for (const fn of ctx.serverCallbacks) fn(server);
     ctx.serverCallbacks.length = 0;
+}
+
+/**
+ * Drops the global `activeServer` when it still points at `server`. A closed
+ * server must stop answering `onServer()`: a late registrant would receive a
+ * dead instance (address() === null) instead of queueing for the next one.
+ * `startServer` does the same through `server.once("close", …)`; the testing
+ * toolkit has no such event to lean on because it closes the server itself.
+ */
+export function clearActiveServer(server: import("http").Server): void {
+    if (activeServer === server) activeServer = null;
 }
 
 // ============================================
@@ -639,9 +656,7 @@ export const startServer = async (options: StartServerOptions) => {
         // would receive a dead instance (address() === null) instead of
         // queueing for the next one.
         server.once("close", () => {
-            if (activeServer === (server as unknown as import("http").Server)) {
-                activeServer = null;
-            }
+            clearActiveServer(server as unknown as import("http").Server);
         });
     }
 

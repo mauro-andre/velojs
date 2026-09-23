@@ -8,7 +8,7 @@
 
 import type { EventStream } from "../events.js";
 import { getRegisteredStreams } from "../events.js";
-import { abortAllSocketSessions } from "../sockets.js";
+import { abortAllSocketSessions, injectWebSocketServer } from "../sockets.js";
 import {
     createIsolatedContext,
     withAppContext,
@@ -59,6 +59,14 @@ import { buildMockContext } from "./mockContext.js";
  *     getSessionCookie: async ({ user }) => ({ session: await sign(user) }),
  * });
  * ```
+ *
+ * Pass `port` to also serve the same app over real TCP — for external actors
+ * (a worker in another process) that cannot call `hono.fetch` in-memory:
+ *
+ * ```typescript
+ * const app = await createTestApp({ routes, port: 0 });
+ * await handToWorker(`${app.url}/_action/Jobs/notify`);
+ * ```
  */
 export async function createTestApp(opts: CreateTestAppOptions): Promise<TestApp> {
     const ctx = createIsolatedContext();
@@ -74,7 +82,140 @@ export async function createTestApp(opts: CreateTestAppOptions): Promise<TestApp
 
         const conventions = buildConventionRegistry(opts.routes);
 
-        return buildTestAppApi(hono, ctx, conventions, opts, undefined);
+        // Optional TCP listener, created before returning so `app.port` is the
+        // real bound port and no external request can race the bind.
+        const tcp = opts.port !== undefined
+            ? await startTcpListener(hono, opts.port, opts.hostname)
+            : undefined;
+
+        return buildTestAppApi(hono, ctx, conventions, opts, undefined, tcp);
+    });
+}
+
+// ============================================
+// TCP LISTENER — optional real-socket mode
+// ============================================
+
+interface TcpListener {
+    /** Real bound port (`port: 0` asks the kernel for a free one). */
+    readonly port: number;
+    /** Base URL a client in this process can dial. */
+    readonly url: string;
+    /** Stop the listener and drop every connection still open on it. */
+    close(): Promise<void>;
+}
+
+/**
+ * Serves `hono` over real TCP — the testing twin of `startServer`'s production
+ * path: same `serve({ fetch, port, hostname })`, same `'listening'` wait, same
+ * WebSocket injection and `onServer` flush. No static/SSR-for-`dist` branch:
+ * the listener must serve the app exactly as the in-memory path does.
+ *
+ * Runs inside the isolated context, so `onServer()` callbacks registered in
+ * `bootstrap` land on this server (parity with `startServer`).
+ */
+async function startTcpListener(
+    hono: import("hono").Hono,
+    port: number,
+    hostname: string | undefined
+): Promise<TcpListener> {
+    const { serve } = await import("@hono/node-server");
+    const { flushServerCallbacks, clearActiveServer } = await import("../server.js");
+
+    const server = serve({
+        fetch: hono.fetch,
+        port,
+        ...(hostname ? { hostname } : {}),
+    }) as unknown as import("http").Server;
+
+    // Track raw sockets from the start: `close()` must be able to drop them.
+    // The `upgrade` path detaches the socket from the HTTP server's own
+    // connection list, so `closeAllConnections()` alone leaves WebSockets
+    // behind and the teardown hangs.
+    const sockets = new Set<import("node:net").Socket>();
+    server.on("connection", (socket) => {
+        sockets.add(socket);
+        socket.on("close", () => sockets.delete(socket));
+    });
+
+    await waitForListening(server, port, hostname);
+
+    // Same wire-up as the production path: `upgrade` requests route through the
+    // app's registered `socket_*` handlers, and callbacks registered with
+    // `onServer()` receive the real server.
+    await injectWebSocketServer(hono, server);
+    flushServerCallbacks(server);
+
+    const address = server.address();
+    const boundPort = address && typeof address === "object" ? address.port : port;
+    // Wildcard hostnames are not dialable — hand out a usable address; a test
+    // that needs the exact interface composes it from `app.port`.
+    const urlHost = hostname && hostname !== "0.0.0.0" && hostname !== "::"
+        ? hostname
+        : "localhost";
+
+    let stopped = false;
+    return {
+        port: boundPort,
+        url: `http://${urlHost}:${boundPort}`,
+        async close() {
+            // Idempotent: a second close() resolves instead of rejecting with
+            // ERR_SERVER_NOT_RUNNING.
+            if (stopped) return;
+            stopped = true;
+
+            // close() only refuses NEW connections; the callback waits for the
+            // sockets still open (keep-alive, SSE, WebSocket) and would never
+            // fire with a stream in progress. Drop them, then wait.
+            const closed = new Promise<void>((resolve) => {
+                server.close(() => resolve());
+            });
+            for (const socket of sockets) socket.destroy();
+            sockets.clear();
+            server.closeAllConnections();
+            await closed;
+
+            // Parity with `startServer`'s `server.once("close", …)`: a late
+            // `onServer()` registrant must queue for the next server instead of
+            // receiving this dead instance.
+            clearActiveServer(server);
+        },
+    };
+}
+
+/**
+ * `serve()` returns before `listen()` completes, so the socket may not be
+ * bound yet and a failed bind would only surface later. Waits for
+ * `'listening'` — or for `'error'`, so `EADDRINUSE` rejects `createTestApp`
+ * with the port and hostname in the message instead of hanging until the
+ * first request.
+ */
+function waitForListening(
+    server: import("http").Server,
+    port: number,
+    hostname: string | undefined
+): Promise<void> {
+    if (server.listening) return Promise.resolve();
+
+    return new Promise<void>((resolve, reject) => {
+        const target = `${hostname ?? "0.0.0.0"}:${port}`;
+        const cleanup = () => {
+            server.off("listening", onListening);
+            server.off("error", onError);
+        };
+        const onListening = () => {
+            cleanup();
+            resolve();
+        };
+        const onError = (err: NodeJS.ErrnoException) => {
+            cleanup();
+            const detail = err.code ? `${err.code}: ${err.message}` : err.message;
+            reject(new Error(
+                `[velojs/testing] could not bind the test server on ${target} — ${detail}`
+            ));
+        };
+        server.once("listening", onListening);
+        server.once("error", onError);
     });
 }
 
@@ -83,7 +224,8 @@ function buildTestAppApi(
     ctx: AppContext,
     conventions: ConventionRegistry,
     opts: CreateTestAppOptions,
-    boundCookies: Cookies | undefined
+    boundCookies: Cookies | undefined,
+    tcp: TcpListener | undefined
 ): TestApp {
     async function rawRequest(
         method: string,
@@ -136,6 +278,9 @@ function buildTestAppApi(
 
     const api: TestApp = {
         hono,
+        // `undefined` unless `port` was passed — no listener, no behavior change.
+        port: tcp?.port,
+        url: tcp?.url,
 
         // HTTP
         get: (path, o) => rawRequest("GET", path, o ?? {}),
@@ -234,6 +379,8 @@ function buildTestAppApi(
 
             const sub: TestApp = {
                 hono,
+                port: api.port,
+                url: api.url,
                 get: wrap(api.get),
                 post: wrap(api.post),
                 put: wrap(api.put),
@@ -279,6 +426,10 @@ function buildTestAppApi(
                 }
             }
             ctx.disposers.clear();
+            // Then the TCP listener, if any: it drops the connections still
+            // open on it (SSE, WebSocket) so close() resolves promptly even
+            // mid-stream, and releases the global activeServer.
+            await tcp?.close();
         },
     };
 

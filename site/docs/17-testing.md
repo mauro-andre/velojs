@@ -1,10 +1,10 @@
 ---
-description: "Writing tests with `createTestApp` from `@mauroandre/velojs/testing`: HTTP requests, actions, loaders, auth, SSE subscriptions, sockets. Use when writing or fixing a test for a VeloJS app."
+description: "Writing tests with `createTestApp` from `@mauroandre/velojs/testing`: HTTP requests, actions, loaders, auth, SSE subscriptions, sockets, and serving the app on a real TCP port for external actors. Use when writing or fixing a test for a VeloJS app."
 ---
 
 # Testing
 
-VeloJS ships a backend testing toolkit at `@mauroandre/velojs/testing`. It spins up your app in memory, fires HTTP requests against the registered handlers, subscribes to event streams, and asserts on the result. No socket. No browser. No fragile mocks of the framework internals.
+VeloJS ships a backend testing toolkit at `@mauroandre/velojs/testing`. It spins up your app in memory, fires HTTP requests against the registered handlers, subscribes to event streams, and asserts on the result. No browser. No fragile mocks of the framework internals. And when an actor outside this process has to reach the app — a worker sending a notify callback — the same app instance is served over a real TCP port.
 
 You test the whole stack — middleware, auth, routing, conventions, serialization — through the API your real users hit.
 
@@ -76,6 +76,7 @@ const app = await createTestApp({
     routes,
     bootstrap?: async () => { ... },
     getSessionCookie?: async ({ user }) => ({ ... }),
+    port?: 0,
 });
 ```
 
@@ -84,10 +85,12 @@ const app = await createTestApp({
 | `routes` | Required. Your app's `routes` array — typically `import routes from "./app/routes.js"` (it is the **default** export of `routes.tsx`) |
 | `bootstrap` | Runs once before the app is created. Use for DB connections, index creation, anything `app/server.tsx` does at startup. `addRoutes()` and `onServer()` calls here are **scoped to this app only** |
 | `getSessionCookie` | Maps a user object to cookies the test client will attach. Required for `app.as(user)` and `app.sessionCookies(user)` |
+| `port` | Optional. Serves the same app over real TCP on this port (`0` → free port, see [External actors over TCP](#external-actors-over-tcp)) |
+| `hostname` | Interface to bind when `port` is set (e.g. `"127.0.0.1"`). Omitted → Node's default, all interfaces |
 
 ### app.close()
 
-Tears down everything: heartbeats, retention timers, listeners, callbacks. After `close()`, Vitest must report **zero open handles**. Always call it in `afterAll`.
+Tears down everything: heartbeats, retention timers, listeners, callbacks — and the TCP listener when `port` was passed, terminating the SSE/WebSocket connections still open on it. After `close()`, Vitest must report **zero open handles**. Always call it in `afterAll`.
 
 ### app.reset()
 
@@ -157,6 +160,34 @@ Pass `cookies: { name: value }` and the toolkit serializes them into the `Cookie
 await app.get("/api/posts", { query: { tag: ["preact", "ssr"] } });
 // → /api/posts?tag=preact&tag=ssr
 ```
+
+## External actors over TCP
+
+The in-memory client never leaves the process. When the actor under test *does* — a worker in another VM POSTing a notify callback to the control-plane — pass `port` and the **same instance** is served over real TCP:
+
+```typescript
+const app = await createTestApp({ routes, port: 0 });   // 0 → free port
+
+// `app.url` / `app.port` are the real, usable address — hand it to the worker
+await provisioning.startWorker({ notifyUrl: `${app.url}/_action/Jobs/notify` });
+
+// The worker POSTs over real HTTP. It's the same instance behind app.get and
+// app.subscribe, so a stream watched in-memory sees the event — no glue and no
+// "test watches an empty stream because it hit another instance":
+const sub = await app.subscribe(stream_progress, { channel: jobId });
+const event = await sub.next({ timeoutMs: 5000 });
+
+await app.close();   // listener down; in-flight SSE/WS connections dropped
+```
+
+Everything answers as in production — pages, endpoints, `action_*`, `?_data=1` loaders, SSE (`stream_*`) and WebSocket (`socket_*`). `app.close()` refuses new connections and terminates the ones still open, so a suite that keeps the app alive across tests tears down promptly even with a worker mid-SSE.
+
+Two rules keep tests deterministic:
+
+- **Ports come from the options only.** `port` and `hostname` are never read from `process.env.PORT`/`HOST`.
+- **The bind follows the option.** An explicit `hostname` (e.g. `"127.0.0.1"`) keeps the listener loopback; omitted, Node's default applies — all interfaces, reachable from the local network. `app.url` reports `http://localhost:<port>` unless an explicit hostname was given.
+
+Without `port`, nothing changes: the app is purely in-memory, and `app.port`/`app.url` are `undefined`.
 
 ## Auth — getSessionCookie and .as
 
@@ -292,7 +323,7 @@ it("perChannelSource aborts when the last subscriber leaves", async () => {
 
 ## Sockets — `.socket(handler)`
 
-`app.socket(handlerOrStubOrPath, opts)` opens an **in-memory** WebSocket session against a `socket_*` handler — no real TCP, no upgrade handshake. The handler runs directly with a mock Context.
+`app.socket(handlerOrStubOrPath, opts)` opens an **in-memory** WebSocket session against a `socket_*` handler — no real TCP, no upgrade handshake. The handler runs directly with a mock Context. (For a real handshake, create the app with `port` and connect a client to `ws://...` — see [External actors over TCP](#external-actors-over-tcp).)
 
 ```typescript
 import { socket_terminal } from "../app/workers/WorkerTerminal.js";

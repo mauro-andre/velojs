@@ -1320,7 +1320,7 @@ Hooks (`useParams`, `useQuery`, `usePathname`, `Loader`, `useLoader`) access thi
 
 ## Testing
 
-VeloJS ships a backend testing toolkit at `@mauroandre/velojs/testing`. Spin up the app in memory, fire HTTP requests against the registered handlers, subscribe to event streams. No socket, no browser, no fragile mocks of framework internals.
+VeloJS ships a backend testing toolkit at `@mauroandre/velojs/testing`. Spin up the app in memory, fire HTTP requests against the registered handlers, subscribe to event streams. No browser, no fragile mocks of framework internals — and a real TCP port when an external actor has to reach the app.
 
 ```typescript
 import { createTestApp } from "@mauroandre/velojs/testing";
@@ -1332,6 +1332,7 @@ const app = await createTestApp({
     routes,
     bootstrap: async () => { await connect(process.env.MONGO_URI!); },
     getSessionCookie: async ({ user }) => ({ session: await sign(user) }),
+    // port: 0,   // optional — also serve this app over real TCP (see below)
 });
 
 // HTTP
@@ -1358,6 +1359,7 @@ await app.close();
 | API | Purpose |
 |-----|---------|
 | `createTestApp(options)` | Build isolated app with bootstrap + auth callback |
+| `app.port` / `app.url` | Real port and base URL of the TCP listener — `undefined` in the default in-memory mode |
 | `app.get/post/put/patch/delete` | HTTP requests (cookies, headers, query, JSON/FormData body) |
 | `app.action(fn, opts)` | Invoke `action_*` by function reference |
 | `app.loader(fn, opts)` | Invoke `loader` and unwrap response data |
@@ -1367,6 +1369,26 @@ await app.close();
 | `app.mockContext(opts)` | Escape hatch — partial Hono Context for direct invocation |
 | `app.reset()` | Clear stream buffers/listeners between tests |
 | `app.close()` | Tear down everything (zero open handles guaranteed) |
+
+### External actors over TCP
+
+In-memory requests never leave the process, so an actor that does — a worker in another VM POSTing a notify callback — needs a real socket. Pass `port` and the **same app instance** is served over TCP as well:
+
+```typescript
+const app = await createTestApp({ routes, port: 0 });   // 0 → free port
+
+// Hand the URL to the external client (worker, container, another test process)
+await provisioning.startWorker({ notifyUrl: `${app.url}/_action/Jobs/notify` });
+
+// The worker POSTs over real HTTP; the in-memory subscription sees the event —
+// same app, same stream registry, no glue and no second instance
+const sub = await app.subscribe(stream_progress, { channel: jobId });
+const event = await sub.next({ timeoutMs: 5000 });
+
+await app.close();   // closes the listener, dropping in-flight SSE/WebSocket connections
+```
+
+Pages, endpoints, actions, `?_data=1` loaders, SSE and WebSocket all answer as in production; `app.close()` also terminates connections still open on the listener. `port` and `hostname` come from the options only — never from `process.env.PORT`/`HOST` (test determinism). Omitted `hostname` follows Node's default bind (all interfaces — the listener is reachable from the local network); `app.url` reports `http://localhost:<port>` unless an explicit hostname was given.
 
 See [Testing docs](https://github.com/mauro-andre/velojs/blob/dev/site/docs/17-testing.md) for the full guide with patterns, isolation, and FAQ.
 

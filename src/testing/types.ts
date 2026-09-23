@@ -29,6 +29,25 @@ export interface CreateTestAppOptions {
      * `app.sessionCookies(user)`.
      */
     getSessionCookie?: (input: { user: any }) => Promise<Cookies> | Cookies;
+    /**
+     * Serve the app over real TCP on this port, in addition to the in-memory
+     * API. Needed when an actor outside this process must reach the app over
+     * HTTP (a callback from a worker, a remote webhook sender) — the in-memory
+     * methods (`app.get`, `app.action`, …) never leave the process.
+     *
+     * `0` picks a free port; the real one is on `app.port`/`app.url`. The
+     * listener serves the same app instance as the in-memory API, so a request
+     * over TCP and a `app.subscribe()` on the same stream see the same registry.
+     *
+     * Ports always come from this option — never from `process.env.PORT`/`HOST`.
+     */
+    port?: number;
+    /**
+     * Interface to bind when `port` is set, mirroring `StartServerOptions`
+     * (e.g. `"127.0.0.1"`). Omitted, Node's default applies — all interfaces,
+     * which makes the test listener reachable from the local network.
+     */
+    hostname?: string;
 }
 
 export interface RequestOptions {
@@ -129,6 +148,18 @@ export interface MockContextOptions {
 export interface TestApp {
     /** Underlying Hono app. */
     readonly hono: Hono;
+
+    /**
+     * Real port this app listens on when `port` was passed to `createTestApp`
+     * (the OS-assigned port when it was `0`). `undefined` in the default
+     * in-memory-only mode.
+     */
+    readonly port: number | undefined;
+    /**
+     * Base URL of the TCP listener (`http://localhost:<port>` for wildcard or
+     * omitted hostnames). `undefined` in the default in-memory-only mode.
+     */
+    readonly url: string | undefined;
 
     // HTTP
     get(path: string, opts?: RequestOptions): Promise<TestResponse>;
