@@ -175,6 +175,8 @@ npm run dev
 
 Open `http://localhost:3000` in your browser. Changes to your code will hot-reload instantly.
 
+The dev server binds loopback by default. To expose it beyond that — a VPS behind a reverse proxy, an app reached by a real hostname — set `HOST=0.0.0.0`, in the shell or in the project's `.env`; no `--host` flag by hand. A broad bind in dev (`0.0.0.0`, `::`, or `--host` with no value) also turns Vite's Host check off, so a request whose `Host` header carries that domain is served instead of 403'd — the DNS-rebinding protection you get on loopback is consciously traded away. A `server.allowedHosts` declared in `vite.config.ts` still pins the allowed list.
+
 ## Configuration
 
 The `veloPlugin()` accepts optional configuration:

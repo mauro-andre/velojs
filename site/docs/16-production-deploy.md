@@ -78,6 +78,12 @@ By default `velojs start` binds to **all interfaces** (`::`) — the norm for No
 2. The `hostname` field in `defineConfig`.
 3. The Node default (all interfaces).
 
+The same declaration covers the dev server, with one extra step at the top: `velojs dev --host <value>` (or a `server.host` in `vite.config.ts`) wins, then `HOST`, then `hostname`, then Vite's default (loopback). `HOST=0.0.0.0` in the shell or in the project's `.env` therefore lifts `velojs dev` beyond loopback with no flag by hand.
+
+### Dev behind a reverse proxy: the Host check
+
+When a dev server binds broad it sits behind the proxy (or is reached by hostname), and requests arrive carrying the proxy's domain in the `Host` header. Vite's DNS-rebinding protection answers `403 Blocked request. This host is not allowed.` for any host outside its allow list — so the framework opens it whenever the declared bind is broad (`0.0.0.0`, `::`, or `--host` with no value): any `Host` is served. That is a conscious trade-off — the guard exists for loopback development, and leaving loopback means giving it up. If the project declared `server.allowedHosts`, that list wins and stays restrictive even on a broad bind.
+
 ### Secure bind for local/sensitive apps
 
 If your app is **local and single-user** — a cockpit with a terminal, file access, real user data — it must listen on loopback only. An all-interfaces bind exposes that surface to the whole network without any error: the developer finds out by scanning, not by the app telling them.

@@ -150,5 +150,6 @@ Callbacks registered with `onServer` queue until the server starts. If called af
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `PORT` | `3000` | The port the server listens on. Overrides `defineConfig`'s `port`. |
+| `HOST` | — | The bind interface, in dev and production. Overrides `defineConfig`'s `hostname`; in dev an explicit `--host`/`server.host` still wins. |
 | `NODE_ENV` | — | Set automatically by `velojs start` to `production` |
 | `STATIC_BASE_URL` | `""` | CDN/bucket prefix for static assets |

@@ -31,9 +31,11 @@ export interface VeloConfig {
     port?: number;
 
     /**
-     * Interface de bind do servidor de produção. A env `HOST` tem precedência.
-     * Default do Node: todas as interfaces (o que Docker/cloud esperam).
-     * Apps locais/sensíveis devem declarar "127.0.0.1".
+     * Interface de bind do servidor, em dev e em produção. A env `HOST` tem
+     * precedência nos dois modos; em dev a ordem é: `server.host` do Vite
+     * (`--host`/vite.config) > env `HOST` > este campo. Default do Node:
+     * todas as interfaces (o que Docker/cloud esperam). Apps
+     * locais/sensíveis devem declarar "127.0.0.1".
      */
     hostname?: string;
 

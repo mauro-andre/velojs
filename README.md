@@ -159,6 +159,8 @@ export const Component = () => {
 npm run dev     # http://localhost:3000
 ```
 
+To expose the dev server beyond loopback — a VPS behind a reverse proxy, an app reached by hostname — set `HOST=0.0.0.0`, in the shell or in the project's `.env`; no `--host` flag by hand. The security trade-off: a broad bind in dev (`0.0.0.0`, `::`, or `--host` with no value) turns Vite's Host check off, so a request whose `Host` header carries that domain is served instead of 403'd — the DNS-rebinding protection you get on loopback is consciously given up. Stay on localhost unless you are behind a proxy; a `server.allowedHosts` declared in `vite.config.ts` still pins the allowed list.
+
 ### Configuration
 
 ```typescript
@@ -167,6 +169,7 @@ veloPlugin({
     routesFile: "routes.tsx",   // default
     serverInit: "server.tsx",   // default
     clientInit: "client.tsx",   // default
+    hostname: "127.0.0.1",      // bind interface, dev and production (the HOST env wins)
 });
 ```
 
@@ -1272,6 +1275,7 @@ Callbacks queue until the server starts. If called after startup, executes immed
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `PORT` | `3000` | Server port. Overrides the `port` set in `defineConfig` |
+| `HOST` | — | Bind interface, in dev and production. Overrides `defineConfig`'s `hostname`; in dev an explicit `--host`/`server.host` still wins |
 | `NODE_ENV` | — | Set automatically by `velojs start`. Enables static file serving |
 | `STATIC_BASE_URL` | `""` | CDN/bucket prefix for static assets |
 
@@ -1475,6 +1479,8 @@ interface VeloConfig {
     routesFile?: string;     // default: "routes.tsx"
     serverInit?: string;     // default: "server.tsx"
     clientInit?: string;     // default: "client.tsx"
+    port?: number;           // default: 3000; the PORT env wins
+    hostname?: string;       // bind interface, dev and production; the HOST env wins
 }
 ```
 

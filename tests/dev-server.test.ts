@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { createServer, type ViteDevServer } from "vite";
 import http from "node:http";
+import net from "node:net";
 import fs from "node:fs";
 import path from "node:path";
 import { veloPlugin, devServerExcludeFor } from "../src/vite.js";
@@ -70,6 +71,80 @@ let vite: ViteDevServer;
 let httpServer: http.Server;
 let port: number;
 
+// Framework subpaths resolve to this repo's source, so the fixture runs
+// against the real plugin rather than a packed tarball.
+const SOURCE_ALIAS = {
+    "@mauroandre/velojs/server": path.join(VELOJS_ROOT, "src/server.tsx"),
+    "@mauroandre/velojs/client": path.join(VELOJS_ROOT, "src/client.tsx"),
+    "@mauroandre/velojs/hooks": path.join(VELOJS_ROOT, "src/hooks.tsx"),
+    "@mauroandre/velojs": path.join(VELOJS_ROOT, "src/index.ts"),
+};
+
+/**
+ * Starts the fixture dev server with a given veloPlugin config, at a random
+ * loopback port. Returns the pieces the caller must close.
+ */
+async function startFixtureServer(
+    veloConfig: Record<string, unknown> = {},
+    server: Record<string, unknown> = {},
+) {
+    const serverImpl = await createServer({
+        root: FIXTURE,
+        configFile: false,
+        plugins: veloPlugin(veloConfig),
+        server: { middlewareMode: true, hmr: false, ws: false, ...server },
+        optimizeDeps: { noDiscovery: true },
+        resolve: { alias: SOURCE_ALIAS },
+    });
+    const listener = http.createServer(serverImpl.middlewares);
+    await new Promise<void>((r) => listener.listen(0, "127.0.0.1", r));
+    return { vite: serverImpl, httpServer: listener, port: (listener.address() as any).port };
+}
+
+/** A free loopback TCP port (Vite ignores `server.port: 0`). */
+function freePort(): Promise<number> {
+    return new Promise((resolve, reject) => {
+        const probe = net.createServer();
+        probe.once("error", reject);
+        probe.listen(0, "127.0.0.1", () => {
+            const p = (probe.address() as any).port;
+            probe.close(() => resolve(p));
+        });
+    });
+}
+
+/**
+ * Starts the real fixture dev server — Vite owns the listener, no
+ * `middlewareMode` — with `HOST` set in the environment (`undefined` clears
+ * it), and returns the address the OS actually bound. This locks the last
+ * link of the criteria chain: HOST → server.host → the listening socket.
+ */
+async function startBoundServer(hostEnv: string | undefined) {
+    const saved = process.env.HOST;
+    if (hostEnv === undefined) delete process.env.HOST;
+    else process.env.HOST = hostEnv;
+    try {
+        const server = await createServer({
+            root: FIXTURE,
+            configFile: false,
+            plugins: veloPlugin(),
+            server: {
+                port: await freePort(),
+                strictPort: true,
+                hmr: false,
+                ws: false,
+            },
+            optimizeDeps: { noDiscovery: true },
+            resolve: { alias: SOURCE_ALIAS },
+        });
+        await server.listen();
+        return { server, address: server.httpServer!.address() as any };
+    } finally {
+        if (saved === undefined) delete process.env.HOST;
+        else process.env.HOST = saved;
+    }
+}
+
 beforeAll(async () => {
     writeFixture();
     vite = await createServer({
@@ -79,12 +154,7 @@ beforeAll(async () => {
         server: { middlewareMode: true, hmr: false },
         optimizeDeps: { noDiscovery: true },
         resolve: {
-            alias: {
-                "@mauroandre/velojs/server": path.join(VELOJS_ROOT, "src/server.tsx"),
-                "@mauroandre/velojs/client": path.join(VELOJS_ROOT, "src/client.tsx"),
-                "@mauroandre/velojs/hooks": path.join(VELOJS_ROOT, "src/hooks.tsx"),
-                "@mauroandre/velojs": path.join(VELOJS_ROOT, "src/index.ts"),
-            },
+            alias: SOURCE_ALIAS,
         },
     });
     httpServer = http.createServer(vite.middlewares);
@@ -143,4 +213,104 @@ describe("dev server — project .mjs modules", () => {
         const body = await res.text();
         expect(body).toContain("home");
     });
+});
+
+/**
+ * HTTP GET with a forged Host header — Node's fetch treats Host as a
+ * forbidden header, so we go through net/http directly.
+ */
+function requestWithHost(
+    port: number,
+    host: string,
+): Promise<{ status: number; body: string }> {
+    return new Promise((resolve, reject) => {
+        const req = http.request(
+            { host: "127.0.0.1", port, path: "/", headers: { Host: host } },
+            (res) => {
+                let body = "";
+                res.on("data", (chunk) => (body += chunk));
+                res.on("end", () => resolve({ status: res.statusCode ?? 0, body }));
+            },
+        );
+        req.on("error", reject);
+        req.end();
+    });
+}
+
+describe("dev server — Host header policy", () => {
+    it("a broad bind accepts a request carrying an arbitrary domain in Host", async () => {
+        // `HOST=0.0.0.0`/`--host` (no value) declares the dev server sits
+        // behind a proxy: the DNS-rebinding guard is dropped, so the domain
+        // the proxy forwards is served instead of 403'd.
+        const s = await startFixtureServer({ hostname: "0.0.0.0" });
+        try {
+            const res = await requestWithHost(s.port, "app.exemplo.com");
+            expect(res.status).toBe(200);
+            expect(res.body).toContain("home");
+        } finally {
+            s.httpServer.close();
+            await s.vite.close();
+        }
+    }, 60000);
+
+    it("keeps Vite's block on an arbitrary Host outside a broad bind", async () => {
+        const s = await startFixtureServer();
+        try {
+            const res = await requestWithHost(s.port, "app.exemplo.com");
+            expect(res.status).toBe(403);
+            expect(res.body).toContain("Blocked request");
+        } finally {
+            s.httpServer.close();
+            await s.vite.close();
+        }
+    }, 60000);
+
+    it("respects a project-declared server.allowedHosts even on a broad bind", async () => {
+        // Same broad bind, but the project pinned the list: it wins.
+        const s = await startFixtureServer(
+            { hostname: "0.0.0.0" },
+            { allowedHosts: ["permitido.exemplo.com"] },
+        );
+        try {
+            const blocked = await requestWithHost(s.port, "outro.exemplo.com");
+            expect(blocked.status).toBe(403);
+
+            const allowed = await requestWithHost(s.port, "permitido.exemplo.com");
+            expect(allowed.status).toBe(200);
+        } finally {
+            s.httpServer.close();
+            await s.vite.close();
+        }
+    }, 60000);
+});
+
+describe("dev server — listener bind (HOST in dev)", () => {
+    it("binds every interface when HOST=0.0.0.0", async () => {
+        const { server, address } = await startBoundServer("0.0.0.0");
+        try {
+            expect(address.address).toBe("0.0.0.0");
+        } finally {
+            await server.close();
+        }
+    }, 60000);
+
+    it("binds loopback when HOST=127.0.0.1", async () => {
+        const { server, address } = await startBoundServer("127.0.0.1");
+        try {
+            expect(address.address).toBe("127.0.0.1");
+        } finally {
+            await server.close();
+        }
+    }, 60000);
+
+    it("binds loopback when nothing is declared", async () => {
+        const { server, address } = await startBoundServer(undefined);
+        try {
+            // Vite resolves the loopback default to 127.0.0.1 or ::1 depending
+            // on the machine; both are loopback.
+            expect(["127.0.0.1", "::1"]).toContain(address.address);
+        } finally {
+            await server.close();
+        }
+    }, 60000);
 });

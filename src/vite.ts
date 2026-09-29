@@ -1,4 +1,4 @@
-import type { Plugin, PluginOption, UserConfig } from "vite";
+import { loadEnv, type Plugin, type PluginOption, type UserConfig } from "vite";
 import path from "node:path";
 import fs from "node:fs";
 import type { VeloConfig } from "./config.js";
@@ -1197,6 +1197,37 @@ function veloConfigPlugin(veloConfig: VeloConfig): Plugin {
                 userConfig.server?.port ??
                 (Number(process.env.PORT) || veloConfig.port || 3000);
 
+            // Unified bind interface, now the same declaration in both modes.
+            // Precedence: an explicit server.host (`velojs dev --host <value>`,
+            // or the project's own vite.config) > HOST env (process first, then
+            // the .env files Vite loads for this mode) > veloPlugin/
+            // defineConfig `hostname`. Unset → Vite default (loopback).
+            const projectRoot = path.resolve(
+                process.cwd(),
+                userConfig.root ?? "."
+            );
+            // `envDir` is relative to the project root in Vite; resolve it the
+            // same way so we read the very files Vite loads for this mode.
+            const envDir = userConfig.envDir
+                ? path.resolve(projectRoot, userConfig.envDir)
+                : projectRoot;
+            const fileEnv = loadEnv(mode, envDir, "");
+            const envHost =
+                process.env.HOST?.trim() || fileEnv.HOST?.trim() || undefined;
+            const host = userConfig.server?.host ?? envHost ?? veloConfig.hostname;
+
+            // A broad bind (`0.0.0.0`, `::`, or `--host` with no value) means
+            // the server sits behind a proxy/hostname: Vite's DNS-rebinding
+            // guard would answer 403 for every request carrying that domain,
+            // so we open it (allowedHosts: true), consciously trading the
+            // protection away. A `server.allowedHosts` declared by the project
+            // always wins — the framework never overwrites a declared policy.
+            const isBroadBind =
+                host === true || host === "0.0.0.0" || host === "::";
+            const allowedHosts =
+                userConfig.server?.allowedHosts ??
+                (isBroadBind ? true : undefined);
+
             // In server build, read the client manifest to get hashed asset filenames
             let clientJs = "client.js";
             let clientCss = "client.css";
@@ -1234,6 +1265,12 @@ function veloConfigPlugin(veloConfig: VeloConfig): Plugin {
                 },
                 server: {
                     port,
+                    // Host and allowedHosts only shape the dev server; in build
+                    // they are inert, so we keep them out of the build config.
+                    ...(isDev && host !== undefined ? { host } : {}),
+                    ...(isDev && allowedHosts !== undefined
+                        ? { allowedHosts }
+                        : {}),
                 },
             };
 
