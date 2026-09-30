@@ -246,9 +246,10 @@ describe("live loader — write chain", () => {
         try {
             const written: string[] = [];
             const enqueue = createChannelWriteChain("gastosFamilia", async (payload) => {
+                const data = typeof payload === "string" ? payload : payload.data;
                 // A dead connection: the client went away mid-event.
-                if (payload.data === "boom") throw new Error("socket gone");
-                written.push(payload.data);
+                if (data === "boom") throw new Error("socket gone");
+                written.push(data);
             });
 
             await enqueue({ event: "snapshot", data: "boom" });

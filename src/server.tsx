@@ -9,14 +9,17 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { getAppContext } from "./app-context.js";
 import { flushPendingStreamRoutes, registerStreamHandler } from "./events.js";
 import { registerSocketRoutes, injectWebSocketServer, abortAllSocketSessions } from "./sockets.js";
-import { registerChannelRoute } from "./channels.js";
+import { inspectChannels, registerChannelRoute } from "./channels.js";
 
 // The live loader's server API: `emit` signals a channel's partition changed —
 // by name (the runtime re-executes the loader) or by module with a typed slice
 // (the value travels as-is) — and both modes throw immediately on a channel with
 // no entry in `app/channels.ts` (never a silent no-op). `registerChannels`
-// takes the coalescing window and the emit log.
-export { emit, registerChannels } from "./channels.js";
+// takes the coalescing window, the emit log, the idle timeout and the
+// heartbeat. `inspectChannels` reports the live state (groups, connections,
+// last deliveries, open windows) — the incident lens, exposed how the app
+// judges.
+export { emit, inspectChannels, registerChannels } from "./channels.js";
 export type {
     ChannelDefinition,
     ChannelMap,
@@ -25,6 +28,10 @@ export type {
     ChannelEmitModule,
     ChannelEmitKind,
     ChannelSlice,
+    ChannelInspectGroup,
+    ChannelInspectChannel,
+    ChannelInspectWindow,
+    ChannelInspectReport,
 } from "./channels.js";
 
 // ============================================
@@ -641,6 +648,14 @@ export const createApp = async (routes: AppRoutes): Promise<Hono> => {
 
     // Channel routes (live loader, SSE) — convenção channels por módulo
     registerChannelRoutes(app, routes);
+
+    // Dev-only inspector: the map of live channels and partitions is internal
+    // information — it never ships in a production build. An app that wants
+    // something similar in production exposes `inspectChannels()` itself,
+    // with whatever guard it judges.
+    if (process.env.NODE_ENV !== "production") {
+        app.get("/_channel-inspect", (c) => c.json(inspectChannels()));
+    }
 
     // Endpoint routes (declarative HTTP endpoints mixed into the route tree)
     const pageGetPaths = collectPageGetPaths(routes);

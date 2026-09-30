@@ -45,6 +45,7 @@
  */
 
 import type { Context, Hono, MiddlewareHandler } from "hono";
+import { DEFAULT_HEARTBEAT_MS } from "./events.js";
 import type { LoaderArgs, RouteModule } from "./types.js";
 
 // ============================================
@@ -80,6 +81,16 @@ export const CHANNEL_CLOSE_EVENT = "close";
 /** Default coalescing window, in milliseconds. */
 export const DEFAULT_COALESCE_MS = 50;
 
+/**
+ * Default idle timeout of a channel connection, in milliseconds: a connection
+ * with no deliveries (snapshot or slice) for this long is closed by the
+ * server. The heartbeat does NOT reset it — idle is about data delivery,
+ * heartbeat is transport. The close makes a live page cycle
+ * (close → EventSource reconnect → snapshot on connect), which repairs the
+ * state, and frees an abandoned page's resources for good.
+ */
+export const DEFAULT_IDLE_MS = 300000;
+
 /** The two modes of `emit`, as they appear in the emit log. */
 export type ChannelEmitKind = "invalidate" | "slice";
 
@@ -95,10 +106,24 @@ export type ChannelEmitKind = "invalidate" | "slice";
  *
  * `logEmits` writes one line per emit gesture (never per consolidated
  * delivery). Default: on.
+ *
+ * `idleMs` closes a connection that had no deliveries (snapshot or slice) for
+ * that long — a silent connection is closed even though its heartbeat keeps
+ * flowing; heartbeats never reset the idle clock. Default: `DEFAULT_IDLE_MS`
+ * (5 min) in any registration without options; `0` disables it.
+ * `createTestApp` registers with `0` for determinism.
+ *
+ * `heartbeatMs` writes an SSE comment (`: ping`) through the write chain every
+ * interval, keeping proxies and the browser from buffering or closing an idle
+ * stream. A comment generates no client event and never counts as a delivery
+ * (no effect on freshness or idle). Default: `DEFAULT_HEARTBEAT_MS` (20s) in
+ * any registration without options; `0` disables it.
  */
 export interface ChannelRegistryOptions {
     coalesceMs?: number;
     logEmits?: boolean;
+    idleMs?: number;
+    heartbeatMs?: number;
 }
 
 /**
@@ -137,6 +162,12 @@ let channelMap: ChannelMap = {};
 /** Coalescing window in force (`0` = immediate). */
 let coalesceMs = DEFAULT_COALESCE_MS;
 
+/** Idle timeout in force (`0` = disabled). */
+let idleMs = DEFAULT_IDLE_MS;
+
+/** Heartbeat interval in force (`0` = disabled). */
+let heartbeatMs = DEFAULT_HEARTBEAT_MS;
+
 /** Whether every emit writes its log line. */
 let logEmits = true;
 
@@ -153,6 +184,8 @@ export function registerChannels(
 ): void {
     channelMap = map ? { ...map } : {};
     coalesceMs = options?.coalesceMs ?? DEFAULT_COALESCE_MS;
+    idleMs = options?.idleMs ?? DEFAULT_IDLE_MS;
+    heartbeatMs = options?.heartbeatMs ?? DEFAULT_HEARTBEAT_MS;
     logEmits = options?.logEmits ?? true;
     // A re-registration invalidates the windows still open.
     cancelPendingWindows();
@@ -192,9 +225,16 @@ export interface ChannelConnection {
     send: (event: string, data: string) => Promise<void>;
     /**
      * Ends this connection: a `close` event on the wire, then the group entry
-     * and the stream. Used when the connection's partition no longer holds.
+     * and the stream. Used when the connection's partition no longer holds —
+     * or when its idle timeout elapsed.
      */
-    terminate: () => Promise<void>;
+    terminate: (reason?: string) => Promise<void>;
+    /**
+     * Epoch ms of this connection's last delivery (snapshot or slice) — the
+     * clock the idle timeout runs on and what the inspector reports. Heartbeat
+     * comments never touch it.
+     */
+    lastDeliveryAt?: number | undefined;
 }
 
 /** channel → partition key → live connections. Empty groups do not exist. */
@@ -239,6 +279,102 @@ function openWindow(channel: string, partition: string): void {
 function cancelPendingWindows(): void {
     for (const window of windows.values()) clearTimeout(window.timer);
     windows.clear();
+}
+
+// ============================================
+// INSPECTOR — the live state, for the incident
+// ============================================
+
+/** One live group of a channel: the connections of one module in one partition. */
+export interface ChannelInspectGroup {
+    /** The route module holding these connections (`metadata.moduleId`). */
+    moduleId: string;
+    /** The partition key resolved at subscribe time. */
+    partition: string;
+    /** Live connections in this (module, partition) pair. */
+    connections: number;
+    /** ISO timestamp of the last delivery; `null` when none was delivered yet. */
+    lastDeliveryAt: string | null;
+}
+
+/** One live channel: its groups and its total. */
+export interface ChannelInspectChannel {
+    channel: string;
+    /** Groups identified by (moduleId, partition) — which page holds what. */
+    groups: ChannelInspectGroup[];
+    connections: number;
+}
+
+/** One open coalescing window: the invalidations not yet delivered. */
+export interface ChannelInspectWindow {
+    channel: string;
+    partition: string;
+}
+
+/** The full live state of the channel registry, as `inspectChannels()` sees it. */
+export interface ChannelInspectReport {
+    channels: ChannelInspectChannel[];
+    /** Open coalescing windows, per (channel, partition). */
+    openCoalesceWindows: ChannelInspectWindow[];
+    totalConnections: number;
+}
+
+/**
+ * Server-side snapshot of the live channels: per channel, the groups
+ * identified by (moduleId, partition key), each with its connection count and
+ * the timestamp of its last delivery; the coalescing windows still open; and
+ * the grand totals. Always available — the app decides how (and with what
+ * guard) to expose it; the dev server exposes it as `GET /_channel-inspect`.
+ */
+export function inspectChannels(): ChannelInspectReport {
+    const channels: ChannelInspectChannel[] = [];
+    let totalConnections = 0;
+
+    for (const [channel, byPartition] of groups) {
+        const reportGroups: ChannelInspectGroup[] = [];
+        // Connections of a (channel, partition) group can belong to several
+        // modules (a layout and a page sharing the channel name): the group
+        // report is per (moduleId, partition) pair — the "per page" dimension.
+        for (const [partition, set] of byPartition) {
+            const byModule = new Map<string, { count: number; last: number | undefined }>();
+            for (const conn of set) {
+                const entry = byModule.get(conn.moduleId) ?? { count: 0, last: undefined };
+                entry.count += 1;
+                if (conn.lastDeliveryAt !== undefined &&
+                    (entry.last === undefined || conn.lastDeliveryAt > entry.last)) {
+                    entry.last = conn.lastDeliveryAt;
+                }
+                byModule.set(conn.moduleId, entry);
+            }
+            for (const [moduleId, entry] of byModule) {
+                reportGroups.push({
+                    moduleId,
+                    partition,
+                    connections: entry.count,
+                    lastDeliveryAt: entry.last === undefined ? null : new Date(entry.last).toISOString(),
+                });
+            }
+        }
+        channels.push({
+            channel,
+            groups: reportGroups,
+            connections: byPartitionSize(byPartition),
+        });
+        totalConnections += byPartitionSize(byPartition);
+    }
+
+    const openCoalesceWindows: ChannelInspectWindow[] = [];
+    for (const window of windows.values()) {
+        openCoalesceWindows.push({ channel: window.channel, partition: window.partition });
+    }
+
+    return { channels, openCoalesceWindows, totalConnections };
+}
+
+function byPartitionSize(byPartition: Map<string, Set<ChannelConnection>>): number {
+    let size = 0;
+    for (const set of byPartition.values()) size += set.size;
+    return size;
 }
 
 function addConnection(conn: ChannelConnection): void {
@@ -563,8 +699,8 @@ function logEmit(
  */
 export function createChannelWriteChain(
     channel: string,
-    write: (payload: { event: string; data: string }) => Promise<unknown>,
-): (payload: { event: string; data: string }) => Promise<void> {
+    write: (payload: ChannelWritePayload) => Promise<unknown>,
+): (payload: ChannelWritePayload) => Promise<void> {
     let chain: Promise<void> = Promise.resolve();
     return (payload) => {
         chain = chain
@@ -580,6 +716,13 @@ export function createChannelWriteChain(
         return chain;
     };
 }
+
+/**
+ * What the write chain carries: an SSE event (`{ event, data }`) or a raw
+ * chunk — the heartbeat is a comment (`": ping\n\n"`), which is no event at
+ * all: no client event fires for it and no delivery clock moves.
+ */
+export type ChannelWritePayload = { event: string; data: string } | string;
 
 /**
  * Registers the internal SSE route of one declared channel:
@@ -638,7 +781,7 @@ export function registerChannelRoute(
 
         const { streamSSE } = await import("hono/streaming");
 
-        return streamSSE(c, async (sse) => {
+        const response = await streamSSE(c, async (sse) => {
             let disposed = false;
             let resolveDone: () => void = () => {};
             const done = new Promise<void>((resolve) => {
@@ -646,9 +789,12 @@ export function registerChannelRoute(
             });
 
             // Serialize writes: a burst of emits must not interleave mid-event,
-            // and a dead connection is logged, never silenced.
+            // and a dead connection is logged, never silenced. A raw string is
+            // the heartbeat comment — no event on the wire, no delivery clock.
             const enqueue = createChannelWriteChain(channel, (payload) =>
-                sse.writeSSE(payload),
+                typeof payload === "string"
+                    ? sse.write(payload)
+                    : sse.writeSSE(payload),
             );
 
             const conn: ChannelConnection = {
@@ -662,14 +808,26 @@ export function registerChannelRoute(
                 query: c.req.query(),
                 send: (event, data) => {
                     if (disposed) return Promise.resolve();
-                    return enqueue({ event, data });
+                    const isDelivery =
+                        event === SNAPSHOT_EVENT || event === SLICE_EVENT;
+                    if (!isDelivery) return enqueue({ event, data });
+                    // A delivery is what the idle clock runs on: it is stamped
+                    // when it hits the wire and the idle countdown restarts.
+                    // A heartbeat comment never comes through here.
+                    return enqueue({ event, data }).then(() => {
+                        if (disposed) return;
+                        conn.lastDeliveryAt = Date.now();
+                        armIdle();
+                    });
                 },
-                terminate: () => terminateConnection(),
+                terminate: (reason) => terminateConnection(reason),
             };
 
             const cleanup = (): void => {
                 if (disposed) return;
                 disposed = true;
+                if (idleTimer !== null) clearTimeout(idleTimer);
+                if (heartbeat !== null) clearInterval(heartbeat);
                 removeConnection(conn);
                 resolveDone();
             };
@@ -677,25 +835,72 @@ export function registerChannelRoute(
             /**
              * Ends the connection from the server side: the client sees the
              * `close` event (and the stream end) and follows the normal flow —
-             * no retry, no silent resubscription on a partition it left.
+             * no retry, no silent resubscription on a partition it left. The
+             * idle timeout closes with the same gesture: a live page cycles
+             * (close → EventSource reconnect → snapshot on connect), an
+             * abandoned page's resources are freed for good.
              */
-            const terminateConnection = async (): Promise<void> => {
+            const terminateConnection = async (
+                reason: string = "partition",
+            ): Promise<void> => {
                 if (disposed) return;
-                await conn.send(CHANNEL_CLOSE_EVENT, JSON.stringify({ reason: "partition" }));
+                await conn.send(CHANNEL_CLOSE_EVENT, JSON.stringify({ reason }));
                 cleanup();
             };
+
+            // ---------- Idle timeout (no delivery ⇒ close) ----------
+            let idleTimer: ReturnType<typeof setTimeout> | null = null;
+            const armIdle = (): void => {
+                if (idleMs <= 0 || disposed) return;
+                if (idleTimer !== null) clearTimeout(idleTimer);
+                idleTimer = setTimeout(() => {
+                    idleTimer = null;
+                    void terminateConnection("idle");
+                }, idleMs);
+                // A pending idle must never hold the process open.
+                const unref = (idleTimer as { unref?: () => void }).unref;
+                if (typeof unref === "function") unref.call(idleTimer);
+            };
+
+            // ---------- Heartbeat (transport, never a delivery) ----------
+            let heartbeat: ReturnType<typeof setInterval> | null = null;
+            if (heartbeatMs > 0) {
+                heartbeat = setInterval(() => {
+                    if (disposed) return;
+                    void enqueue(": ping\n\n");
+                }, heartbeatMs);
+            }
 
             // Registered before the connect snapshot so an emit that lands in
             // between still reaches this connection.
             addConnection(conn);
             sse.onAbort(cleanup);
+            armIdle();
+            if (heartbeat !== null) {
+                const unref = (heartbeat as unknown as { unref?: () => void }).unref;
+                if (typeof unref === "function") unref.call(heartbeat);
+            }
 
             // Snapshot on connect: the pane never shows the SSR value while the
             // server has already moved on. A reconnect is a new connection and
-            // therefore a new snapshot — no extra refetch.
+            // therefore a new snapshot — no extra refetch. The snapshot is a
+            // delivery: it stamps `lastDeliveryAt` and restarts the idle clock.
             await pushSnapshot(conn);
 
             await done;
+        });
+
+        // Proxies and the browser must never serve a cached channel snapshot:
+        // a stale snapshot is exactly the illusion the live loader exists to
+        // kill. `streamSSE` writes `no-cache`; the channel answer demands the
+        // stronger `no-store`. (The heartbeat comment keeps the proxy from
+        // buffering or closing the idle stream — documented operation note.)
+        const headers = new Headers(response.headers);
+        headers.set("Cache-Control", "no-store");
+        return new Response(response.body, {
+            status: response.status,
+            statusText: response.statusText,
+            headers,
         });
     };
 

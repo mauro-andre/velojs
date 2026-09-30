@@ -4,6 +4,7 @@ declare const __VELO_BUILD_HASH__: string;
 import {
     signal,
     useSignal,
+    type ReadonlySignal,
     type Signal,
 } from "@preact/signals";
 import { useEffect, useRef } from "preact/hooks";
@@ -20,22 +21,32 @@ import {
     refetchModule,
     __veloUpdatePending,
 } from "./loader-store.js";
-import { loaderFreshness, type Freshness } from "./live-loader.js";
+import {
+    loaderFreshness,
+    moduleChannelFreshness,
+    type Freshness,
+} from "./live-loader.js";
 
 export type { Freshness } from "./live-loader.js";
 
 /**
  * What `Loader()`/`useLoader()` return. `freshness` is the page-level state of
- * the live loader: `"live"` (connected), `"stale"` (connection closed or
- * reconnecting) and `"error"` (the last loader re-execution failed). On a page
- * with no `channels` it exists and stays `"live"`. The framework exposes it as
- * data for CSS to react to — it renders no JSX of its own.
+ * the live loader: `"live"` (connected), `"stale"` (connection closed,
+ * reconnecting or silent) and `"error"` (the last loader re-execution failed).
+ * On a page with no `channels` it exists and stays `"live"`. The framework
+ * exposes it as data for CSS to react to — it renders no JSX of its own.
+ *
+ * `freshnessByChannel` is the same state with per-channel granularity, keyed
+ * by the channel names the module declares — a page with two channels, one
+ * fallen and one following, shows both states at once. Empty record when the
+ * module declares no channels.
  */
 export interface LoaderHandle<T> {
     data: Signal<T | null>;
     loading: Signal<boolean>;
     refetch: () => void;
     freshness: Signal<Freshness>;
+    freshnessByChannel: ReadonlySignal<Record<string, Freshness>>;
 }
 
 // Flag: true when a newer build has been deployed. Owned by the loader store,
@@ -129,6 +140,7 @@ export function Loader<T>(moduleId?: string): LoaderHandle<T> {
             loading: signal(false),
             refetch: () => {},
             freshness: loaderFreshness(),
+            freshnessByChannel: signal<Record<string, Freshness>>({}),
         };
     }
 
@@ -138,6 +150,7 @@ export function Loader<T>(moduleId?: string): LoaderHandle<T> {
             loading: signal(false),
             refetch: () => {},
             freshness: loaderFreshness(),
+            freshnessByChannel: signal<Record<string, Freshness>>({}),
         };
     }
 
@@ -150,6 +163,7 @@ export function Loader<T>(moduleId?: string): LoaderHandle<T> {
         loading: loaderLoading(moduleId),
         refetch: () => refetchModule(moduleId),
         freshness: loaderFreshness(),
+        freshnessByChannel: moduleChannelFreshness(moduleId),
     };
 }
 
@@ -202,6 +216,7 @@ export function useLoader<T>(
             loading: useSignal(false),
             refetch: () => {},
             freshness: loaderFreshness(),
+            freshnessByChannel: useSignal<Record<string, Freshness>>({}),
         };
     }
 
@@ -211,6 +226,7 @@ export function useLoader<T>(
             loading: useSignal(false),
             refetch: () => {},
             freshness: loaderFreshness(),
+            freshnessByChannel: useSignal<Record<string, Freshness>>({}),
         };
     }
 
@@ -235,7 +251,7 @@ export function useLoader<T>(
         refetch();
     }, resolvedDeps ?? []);
 
-    return { data, loading, refetch, freshness };
+    return { data, loading, refetch, freshness, freshnessByChannel: moduleChannelFreshness(moduleId) };
 }
 
 /**

@@ -327,7 +327,12 @@ interface StreamListener<TEvent> {
 // CONSTANTS
 // ============================================
 
-const DEFAULT_HEARTBEAT_MS = 20000;
+/**
+ * The house's single SSE transport heartbeat, in milliseconds — the same
+ * default the live-loader channels use. Exported so the two surfaces never
+ * diverge in operational expectation.
+ */
+export const DEFAULT_HEARTBEAT_MS = 20000;
 const DEFAULT_RETAIN_MS = 5 * 60 * 1000;
 const BROADCAST_CHANNEL = "";
 

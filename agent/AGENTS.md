@@ -154,6 +154,10 @@ name keeps reaching every module of the channel.
   **The window changes what `await emit(…)` means.** With the window off (`0`, and the test toolkit's default) the await resolves after the round was delivered; with a window open it resolves as soon as the gesture is registered — the log line is already out, the delivery comes later. Never assert a screen update right after `await emit(…)` under the default window: assert the arrival (`next()`/`nextEvent()`) or wait for the effect.
 - **Emit log.** Every `emit`, in either mode, writes one `console.log` line at the moment of the gesture: `channel`, `partition`, `kind` (`invalidate`/`slice`), `connections` (the size of the group at that instant — before coalescing and before revalidation) and a timestamp. The consolidated delivery writes no second line; an emit whose `scope` resolves to nothing logs `partition=null connections=0`. `registerChannels(map, { logEmits: false })` silences it; `createTestApp` registers with window `0` and takes the same options in `channelOptions` — the map itself stays in `channels`, the options are a sibling key.
 - **Partition revalidation.** Before delivering anything, the runtime re-derives each connection's partition by running the `scope` again with the principal captured at subscribe. A connection whose partition moved — or whose scope now returns `null` — is removed from the group and closed: the client sees the connection closed (`freshness` goes `"stale"`) and receives none of that emit's data. A `scope` that **throws** on re-derivation is treated the same way (fail-closed: a resolver that failed cannot vouch for the partition) and the failure is logged naming the channel — a scope that does I/O must handle its own failures. Only the partition is revalidated; session/cookie expiry stays with the normal request pipeline.
+- **Heartbeat and idle timeout — the transport clocks.** Every channel answer carries `Cache-Control: no-store` (a proxy or the browser must never serve a cached snapshot) and a heartbeat: an SSE comment (`: ping`) written through the write chain every `heartbeatMs` — default `20000`, the same ruler the `stream_*` SSE surface uses; `0` disables it. A comment generates no client event and does not count as a delivery. A connection with **no deliveries** (snapshot or slice) for `idleMs` — default `300000` (5 min); `0` disables — is closed by the server, and the heartbeat does **not** reset the idle clock: idle is about data, heartbeat is transport.
+  **Practical consequences.** A live but quiet page cycles by design: the server closes it, the `EventSource` reconnects by itself and the snapshot on connect repairs the state — do not build anything against that cycle, and do not interpret a periodic reconnect of a quiet page as a bug. In tests, `createTestApp` defaults both clocks to `0` (deterministic); a test exercising them passes `idleMs`/`heartbeatMs` in `channelOptions` and drives them with fake timers — **never assert freshness without advancing the fake timers through the window**.
+- **Behind a reverse proxy (the house recipe, Caddy).** SSE needs the proxy to flush immediately and never buffer the response, or the page goes silent with everything alive. In the Caddyfile: `flush_interval -1` on the app's `reverse_proxy` (negative value = flush as data arrives; a positive interval would batch chunks and delay every snapshot). For nginx in front: `X-Accel-Buffering: no`. The heartbeat keeps the proxy from killing the idle stream; the idle timeout closes what nobody reads anymore.
+- **Inspector — asking the server what is alive.** `inspectChannels()` (from `@mauroandre/velojs/server`) returns the live state: per channel, the groups identified by the pair (moduleId, partition key) — which page holds every connection — each with its connection count and the timestamp of its last delivery; the coalescing windows still open; the grand totals. Always available; expose it with whatever guard the app judges. In development only, `GET /_channel-inspect` answers the same JSON in the browser — it never ships in a production build (the map of channels and partitions is internal information); a production app that wants something similar exposes `inspectChannels()` itself.
 
 **The partition contract is fixed.** On subscribe the scope receives
 `c.get("user")` — the house key, the same one used by stream/socket resolvers. If
@@ -167,9 +171,21 @@ Same channel declared by a layout and by a page → one connection per module,
 each feeding its own module's data; a single `emit` by channel name reaches both.
 
 `useLoader()` and `Loader()` also expose `freshness` — a signal with `"live"`,
-`"stale"` (connection closed/reconnecting) and `"error"` (the last re-execution
-failed), aggregated per page. It is data for CSS to react to; the framework
-renders no JSX for it. Without `channels` it exists and stays `"live"`.
+`"stale"` (connection closed, reconnecting **or silent**) and `"error"` (the
+last re-execution failed), aggregated per page — and `freshnessByChannel`, the
+same states keyed by the channel names the module declares: a page with two
+channels, one fallen and one following, shows both states at once. They are
+data for CSS to react to; the framework renders no JSX for them. Without
+`channels`, the record is empty and `freshness` stays `"live"`.
+
+The **silence detector** is the client half of the idle timeout: a connection
+open but without deliveries for `CHANNEL_SILENCE_MS` (60s, a runtime constant,
+not a configuration) is marked `"stale"` even with `EventSource` in `OPEN` —
+the tab in the background, the sleeping notebook, the proxy that stopped
+flushing without closing. Any delivery (or a reconnect's snapshot) brings the
+channel back to `"live"`; the heartbeat comment cannot mask the silence because
+it generates no client event. The aggregate folds it by the same rule: a
+silenced channel counts as not-open.
 
 Guards are explicit, never silent: `channels` in a module without a `loader`
 ("nothing to synchronize") and a channel with no entry in `app/channels.ts` both

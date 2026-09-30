@@ -24,12 +24,23 @@
  * name reaches both, because the server groups connections by channel and
  * partition, not by module.
  *
- * `freshness` is aggregated per page (the refinements — idle timeout and
- * per-channel granularity — belong to a later slice): every connection closed
- * → `"stale"`; a failed loader re-execution → `"error"`; otherwise `"live"`.
- * A page with no channels stays `"live"` for its whole life, and a static
- * build never opens a connection at all, so its freshness is constant `"live"`
- * too.
+ * `freshness` is aggregated per page: every connection closed → `"stale"`; a
+ * failed loader re-execution → `"error"`; otherwise `"live"`. A page with no
+ * channels stays `"live"` for its whole life, and a static build never opens a
+ * connection at all, so its freshness is constant `"live"` too.
+ *
+ * The per-channel refinement: `freshnessByChannel` is a signal record keyed by
+ * the channel names the module declares, so a page with two channels — one
+ * fallen, one following — shows both states at once. The aggregate folds it by
+ * the same rule: a silenced or closed channel counts as not-open.
+ *
+ * The silence detector is the client half of the idle timeout: a connection
+ * open but without deliveries for `CHANNEL_SILENCE_MS` (60s — a constant, not
+ * a configuration) is marked `"stale"` even though `EventSource` still reads
+ * `OPEN` — the tab in the background, the sleeping notebook, the proxy that
+ * stopped flushing without closing. Any delivery (or a reconnect's snapshot)
+ * brings the channel back to `"live"`. The server's heartbeat comment never
+ * generates a client event, so it cannot mask the silence.
  */
 import { signal, type Signal } from "@preact/signals";
 import { useEffect } from "preact/hooks";
@@ -41,6 +52,15 @@ declare const __VELO_STATIC__: boolean;
 /** Freshness of the page's live data, as data for CSS to react to. */
 export type Freshness = "live" | "stale" | "error";
 
+/**
+ * How long an open connection may stay without a delivery (snapshot or slice)
+ * before the client calls it stale — the detector of the connection that a
+ * proxy silenced without closing. A runtime constant, documented, not a
+ * configuration: a channel goes stale on the wire's silence, not on the
+ * heartbeat (a comment generates no client event).
+ */
+export const CHANNEL_SILENCE_MS = 60000;
+
 /** SSE event name of a value that replaces the module's data. */
 const SNAPSHOT_EVENT = "snapshot";
 /** SSE event name of a slice to be merged into the module's current value. */
@@ -51,10 +71,43 @@ interface ConnectionState {
     state: "open" | "reconnecting" | "closed";
     /** True when the last loader re-execution failed (server-reported). */
     failed: boolean;
+    /**
+     * True when the connection is open but silent past `CHANNEL_SILENCE_MS`:
+     * stale on the wire's silence, even with `EventSource` in `OPEN`. Any
+     * delivery (or a reconnect's snapshot) clears it.
+     */
+    silent: boolean;
+    /** The module that declared the channel — the per-module freshness key. */
+    moduleId: string;
+    channel: string;
 }
 
 const connections = new Set<ConnectionState>();
 const freshness = signal<Freshness>("live");
+
+/**
+ * Per-module channel freshness: moduleId → signal of
+ * `{ channel → Freshness }`, the record `freshnessByChannel` exposes. The
+ * signal is created when a handle asks for it (before any connection) and
+ * filled by `recompute` as the module's connections open, deliver and close.
+ */
+const moduleFreshness = new Map<string, Signal<Record<string, Freshness>>>();
+
+/**
+ * The per-channel freshness signal of one module — what
+ * `useLoader()`/`Loader()` return as `freshnessByChannel`. Created empty: the
+ * keys appear as the module's connections open, the values follow them.
+ */
+export function moduleChannelFreshness(
+    moduleId: string,
+): Signal<Record<string, Freshness>> {
+    let sig = moduleFreshness.get(moduleId);
+    if (!sig) {
+        sig = signal<Record<string, Freshness>>({});
+        moduleFreshness.set(moduleId, sig);
+    }
+    return sig;
+}
 
 /** The page-level freshness signal shared by every loader handle. */
 export function loaderFreshness(): Signal<Freshness> {
@@ -122,12 +175,21 @@ function parseSlice(data: unknown): Record<string, unknown> | null {
     }
 }
 
+function channelFreshness(conns: ConnectionState[]): Freshness {
+    if (conns.some((c) => c.failed)) return "error";
+    if (conns.some((c) => c.state === "open" && !c.silent)) return "live";
+    return "stale";
+}
+
 function recompute(): void {
+    // The aggregate folds every connection of the page: a failed re-execution
+    // errors it; silence counts as not-open (the same rule as a closed or
+    // reconnecting connection); anything open and delivering keeps it live.
     let failed = false;
     let open = false;
     for (const conn of connections) {
         if (conn.failed) failed = true;
-        if (conn.state === "open") open = true;
+        if (conn.state === "open" && !conn.silent) open = true;
     }
     if (failed) {
         freshness.value = "error";
@@ -135,6 +197,22 @@ function recompute(): void {
         freshness.value = "stale";
     } else {
         freshness.value = "live";
+    }
+
+    // The per-module record: the channels the module's connections hold.
+    for (const [moduleId, sig] of moduleFreshness) {
+        const byChannel = new Map<string, ConnectionState[]>();
+        for (const conn of connections) {
+            if (conn.moduleId !== moduleId) continue;
+            const list = byChannel.get(conn.channel);
+            if (list) list.push(conn);
+            else byChannel.set(conn.channel, [conn]);
+        }
+        const record: Record<string, Freshness> = {};
+        for (const [channel, conns] of byChannel) {
+            record[channel] = channelFreshness(conns);
+        }
+        sig.value = record;
     }
 }
 
@@ -153,9 +231,30 @@ export function connectChannel(moduleId: string, channel: string): () => void {
         return () => {};
     }
 
-    const record: ConnectionState = { state: "open", failed: false };
+    const record: ConnectionState = {
+        state: "open",
+        failed: false,
+        silent: false,
+        moduleId,
+        channel,
+    };
     connections.add(record);
     recompute();
+
+    // The silence clock: armed on connect (the connect snapshot is the first
+    // delivery) and restarted by every delivery that follows. A heartbeat
+    // comment never fires a client event, so it can neither restart it nor
+    // mask the silence.
+    let silenceTimer: ReturnType<typeof setTimeout> | null = null;
+    const armSilence = (): void => {
+        if (silenceTimer !== null) clearTimeout(silenceTimer);
+        silenceTimer = setTimeout(() => {
+            silenceTimer = null;
+            record.silent = true;
+            recompute();
+        }, CHANNEL_SILENCE_MS);
+    };
+    armSilence();
 
     // Slices are accumulated per module and flushed together, so a second
     // slice that lands while an earlier one is pending joins the same flush,
@@ -172,6 +271,8 @@ export function connectChannel(moduleId: string, channel: string): () => void {
             loaderEntry(moduleId).value = JSON.parse((e as MessageEvent).data);
             record.state = "open";
             record.failed = false;
+            record.silent = false;
+            armSilence();
             recompute();
         } catch {
             // Malformed payload: keep the previous value (a failed push must
@@ -184,6 +285,8 @@ export function connectChannel(moduleId: string, channel: string): () => void {
         if (!slice) return; // malformed: keep the previous value
         record.state = "open";
         record.failed = false;
+        record.silent = false;
+        armSilence();
         recompute();
         queueSlice(moduleId, slice);
     });
@@ -209,6 +312,7 @@ export function connectChannel(moduleId: string, channel: string): () => void {
 
     return () => {
         connections.delete(record);
+        if (silenceTimer !== null) clearTimeout(silenceTimer);
         try {
             es.close();
         } catch {
@@ -248,10 +352,11 @@ export function ChannelBoundary({
     return children;
 }
 
-/** Test-only. Drops every connection and resets the aggregate freshness. */
+/** Test-only. Drops every connection and resets every freshness signal. */
 export function __resetLiveLoader(): void {
     connections.clear();
     pendingSlices.clear();
     flushScheduled = false;
     freshness.value = "live";
+    for (const sig of moduleFreshness.values()) sig.value = {};
 }

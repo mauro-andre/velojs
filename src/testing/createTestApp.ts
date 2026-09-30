@@ -86,11 +86,15 @@ export async function createTestApp(opts: CreateTestAppOptions): Promise<TestApp
         //
         // The toolkit registers with the coalescing window off (immediate,
         // deterministic: `await emit(…)` is the delivery) unless the test asks
-        // for a window explicitly. `logEmits` keeps the production default and
-        // is configurable the same way.
+        // for a window explicitly. Same for the idle timeout and the
+        // heartbeat: both default to `0` here — fake-timer tests arm them
+        // explicitly with the window they mean. `logEmits` keeps the
+        // production default and is configurable the same way.
         const channelOptions = {
             ...opts.channelOptions,
             coalesceMs: opts.channelOptions?.coalesceMs ?? 0,
+            idleMs: opts.channelOptions?.idleMs ?? 0,
+            heartbeatMs: opts.channelOptions?.heartbeatMs ?? 0,
         };
         if (opts.channels) {
             registerChannels(opts.channels, channelOptions);
