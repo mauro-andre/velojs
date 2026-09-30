@@ -13,23 +13,23 @@ import { createChannelWriteChain, emit, registerChannels } from "../src/channels
 import type { AppRoutes, RouteModule } from "../src/types.js";
 
 // ============================================
-// Fixture — an app with a family-scoped channel
+// Fixture — an app with a team-scoped channel
 // ============================================
 
-type FamUser = { id: number; familiaId: number };
+type TeamUser = { id: number; teamId: number };
 
-/** Per-family totals the loader reads — mutable, so an emit changes the state. */
+/** Per-team totals the loader reads — mutable, so an emit changes the state. */
 const store: Record<number, number> = {};
 
 const CHANNELS = {
-    gastosFamilia: { scope: (ctx: any) => `familia:${ctx.familiaId}` },
-    publico: { scope: () => "all" },
-    particionada: {
-        scope: (ctx: any) => (ctx?.familiaId != null ? `familia:${ctx.familiaId}` : null),
+    teamExpenses: { scope: (ctx: any) => `team:${ctx.teamId}` },
+    public: { scope: () => "all" },
+    partitioned: {
+        scope: (ctx: any) => (ctx?.teamId != null ? `team:${ctx.teamId}` : null),
     },
 };
 
-const getSessionCookie = async ({ user }: { user: FamUser }) => ({
+const getSessionCookie = async ({ user }: { user: TeamUser }) => ({
     user: JSON.stringify(user),
 });
 
@@ -56,18 +56,18 @@ function makeModule(opts: {
     return mod as RouteModule;
 }
 
-const somaFamilia = async ({ c }: any) => ({
-    soma: store[(c.get as any)("user").familiaId] ?? 0,
+const teamTotal = async ({ c }: any) => ({
+    teamTotal: store[(c.get as any)("user").teamId] ?? 0,
 });
 
-function familiaRoutes(): AppRoutes {
-    const Gastos = makeModule({
-        moduleId: "gastos/Gastos",
-        fullPath: "/gastos",
-        loader: somaFamilia,
-        channels: ["gastosFamilia", "publico"],
+function expensesRoutes(): AppRoutes {
+    const Expenses = makeModule({
+        moduleId: "expenses/Expenses",
+        fullPath: "/expenses",
+        loader: teamTotal,
+        channels: ["teamExpenses", "public"],
     });
-    return [{ path: "/gastos", module: Gastos, middlewares: [requireUser] }];
+    return [{ path: "/expenses", module: Expenses, middlewares: [requireUser] }];
 }
 
 async function appWith(routes: AppRoutes) {
@@ -81,13 +81,13 @@ async function appWith(routes: AppRoutes) {
 describe("live loader — snapshot on connect", () => {
     it("a fresh connection receives the current state, with its own principal", async () => {
         store[7] = 42;
-        const routes = familiaRoutes();
+        const routes = expensesRoutes();
         const app = await appWith(routes);
-        const Gastos = routes[0]!.module!;
+        const Expenses = routes[0]!.module!;
 
-        const sub = await app.as({ user: { id: 1, familiaId: 7 } }).channel(Gastos, "gastosFamilia");
+        const sub = await app.as({ user: { id: 1, teamId: 7 } }).channel(Expenses, "teamExpenses");
         expect(sub.status).toBe(200);
-        expect(await sub.next({ timeoutMs: 1000 })).toEqual({ soma: 42 });
+        expect(await sub.next({ timeoutMs: 1000 })).toEqual({ teamTotal: 42 });
 
         await sub.close();
         await app.close();
@@ -95,19 +95,19 @@ describe("live loader — snapshot on connect", () => {
 
     it("a reconnect is a new connection and gets a new snapshot", async () => {
         store[7] = 1;
-        const routes = familiaRoutes();
+        const routes = expensesRoutes();
         const app = await appWith(routes);
-        const Gastos = routes[0]!.module!;
-        const user = app.as({ user: { id: 1, familiaId: 7 } });
+        const Expenses = routes[0]!.module!;
+        const user = app.as({ user: { id: 1, teamId: 7 } });
 
-        const first = await user.channel(Gastos, "gastosFamilia");
-        expect(await first.next({ timeoutMs: 1000 })).toEqual({ soma: 1 });
+        const first = await user.channel(Expenses, "teamExpenses");
+        expect(await first.next({ timeoutMs: 1000 })).toEqual({ teamTotal: 1 });
         await first.close();
 
         // The server moved on while nobody was connected.
         store[7] = 99;
-        const second = await user.channel(Gastos, "gastosFamilia");
-        expect(await second.next({ timeoutMs: 1000 })).toEqual({ soma: 99 });
+        const second = await user.channel(Expenses, "teamExpenses");
+        expect(await second.next({ timeoutMs: 1000 })).toEqual({ teamTotal: 99 });
 
         await second.close();
         await app.close();
@@ -116,15 +116,15 @@ describe("live loader — snapshot on connect", () => {
     it("two principals of different partitions receive distinct snapshots (CA4)", async () => {
         store[7] = 10;
         store[8] = 20;
-        const routes = familiaRoutes();
+        const routes = expensesRoutes();
         const app = await appWith(routes);
-        const Gastos = routes[0]!.module!;
+        const Expenses = routes[0]!.module!;
 
-        const a = await app.as({ user: { id: 1, familiaId: 7 } }).channel(Gastos, "gastosFamilia");
-        const b = await app.as({ user: { id: 2, familiaId: 8 } }).channel(Gastos, "gastosFamilia");
+        const a = await app.as({ user: { id: 1, teamId: 7 } }).channel(Expenses, "teamExpenses");
+        const b = await app.as({ user: { id: 2, teamId: 8 } }).channel(Expenses, "teamExpenses");
 
-        expect(await a.next({ timeoutMs: 1000 })).toEqual({ soma: 10 });
-        expect(await b.next({ timeoutMs: 1000 })).toEqual({ soma: 20 });
+        expect(await a.next({ timeoutMs: 1000 })).toEqual({ teamTotal: 10 });
+        expect(await b.next({ timeoutMs: 1000 })).toEqual({ teamTotal: 20 });
 
         await a.close();
         await b.close();
@@ -139,17 +139,17 @@ describe("live loader — snapshot on connect", () => {
 describe("live loader — emit", () => {
     it("re-executes the loader and pushes the snapshot to the emitting partition (CA6a)", async () => {
         store[7] = 10;
-        const routes = familiaRoutes();
+        const routes = expensesRoutes();
         const app = await appWith(routes);
-        const Gastos = routes[0]!.module!;
+        const Expenses = routes[0]!.module!;
 
-        const sub = await app.as({ user: { id: 1, familiaId: 7 } }).channel(Gastos, "gastosFamilia");
+        const sub = await app.as({ user: { id: 1, teamId: 7 } }).channel(Expenses, "teamExpenses");
         await sub.next({ timeoutMs: 1000 });
 
         store[7] = 25;
-        await emit("gastosFamilia", { familiaId: 7 });
+        await emit("teamExpenses", { teamId: 7 });
 
-        expect(await sub.next({ timeoutMs: 1000 })).toEqual({ soma: 25 });
+        expect(await sub.next({ timeoutMs: 1000 })).toEqual({ teamTotal: 25 });
 
         await sub.close();
         await app.close();
@@ -158,24 +158,24 @@ describe("live loader — emit", () => {
     it("does not reach a connection of another partition (CA6b)", async () => {
         store[7] = 1;
         store[8] = 2;
-        const routes = familiaRoutes();
+        const routes = expensesRoutes();
         const app = await appWith(routes);
-        const Gastos = routes[0]!.module!;
+        const Expenses = routes[0]!.module!;
 
-        const a = await app.as({ user: { id: 1, familiaId: 7 } }).channel(Gastos, "gastosFamilia");
-        const b = await app.as({ user: { id: 2, familiaId: 8 } }).channel(Gastos, "gastosFamilia");
+        const a = await app.as({ user: { id: 1, teamId: 7 } }).channel(Expenses, "teamExpenses");
+        const b = await app.as({ user: { id: 2, teamId: 8 } }).channel(Expenses, "teamExpenses");
         await a.next({ timeoutMs: 1000 });
         await b.next({ timeoutMs: 1000 });
 
         store[7] = 11;
-        await emit("gastosFamilia", { familiaId: 7 });
-        expect(await a.next({ timeoutMs: 1000 })).toEqual({ soma: 11 });
+        await emit("teamExpenses", { teamId: 7 });
+        expect(await a.next({ timeoutMs: 1000 })).toEqual({ teamTotal: 11 });
 
         // B's stream is FIFO: a snapshot wrongly pushed by A's emit would be
         // parsed before B's own, so the next event would not be B's value.
         store[8] = 22;
-        await emit("gastosFamilia", { familiaId: 8 });
-        expect(await b.next({ timeoutMs: 1000 })).toEqual({ soma: 22 });
+        await emit("teamExpenses", { teamId: 8 });
+        expect(await b.next({ timeoutMs: 1000 })).toEqual({ teamTotal: 22 });
         expect(b.events.length).toBe(2); // connect + own emit — nothing else
 
         await a.close();
@@ -186,37 +186,37 @@ describe("live loader — emit", () => {
     it("reaches every module of the channel — layout and page (CA11)", async () => {
         store[7] = 5;
         const Layout = makeModule({
-            moduleId: "gastos/Layout",
-            loader: somaFamilia,
-            channels: ["gastosFamilia"],
+            moduleId: "expenses/Layout",
+            loader: teamTotal,
+            channels: ["teamExpenses"],
         });
         const Page = makeModule({
-            moduleId: "gastos/Gastos",
-            fullPath: "/gastos",
-            loader: somaFamilia,
-            channels: ["gastosFamilia"],
+            moduleId: "expenses/Expenses",
+            fullPath: "/expenses",
+            loader: teamTotal,
+            channels: ["teamExpenses"],
         });
         const app = await appWith([
             {
-                path: "/gastos",
+                path: "/expenses",
                 module: Layout,
                 middlewares: [requireUser],
                 children: [{ path: "/", module: Page }],
             },
         ]);
-        const user = app.as({ user: { id: 1, familiaId: 7 } });
+        const user = app.as({ user: { id: 1, teamId: 7 } });
 
         // One connection per (module, channel) — each feeds its own module.
-        const layoutSub = await user.channel(Layout, "gastosFamilia");
-        const pageSub = await user.channel(Page, "gastosFamilia");
-        expect(await layoutSub.next({ timeoutMs: 1000 })).toEqual({ soma: 5 });
-        expect(await pageSub.next({ timeoutMs: 1000 })).toEqual({ soma: 5 });
+        const layoutSub = await user.channel(Layout, "teamExpenses");
+        const pageSub = await user.channel(Page, "teamExpenses");
+        expect(await layoutSub.next({ timeoutMs: 1000 })).toEqual({ teamTotal: 5 });
+        expect(await pageSub.next({ timeoutMs: 1000 })).toEqual({ teamTotal: 5 });
 
         store[7] = 15;
-        await emit("gastosFamilia", { familiaId: 7 });
+        await emit("teamExpenses", { teamId: 7 });
 
-        expect(await layoutSub.next({ timeoutMs: 1000 })).toEqual({ soma: 15 });
-        expect(await pageSub.next({ timeoutMs: 1000 })).toEqual({ soma: 15 });
+        expect(await layoutSub.next({ timeoutMs: 1000 })).toEqual({ teamTotal: 15 });
+        expect(await pageSub.next({ timeoutMs: 1000 })).toEqual({ teamTotal: 15 });
 
         await layoutSub.close();
         await pageSub.close();
@@ -224,14 +224,14 @@ describe("live loader — emit", () => {
     });
 
     it("is a no-op on a valid channel with no subscribers", async () => {
-        const app = await appWith(familiaRoutes());
-        await expect(emit("gastosFamilia", { familiaId: 7 })).resolves.toBeUndefined();
+        const app = await appWith(expensesRoutes());
+        await expect(emit("teamExpenses", { teamId: 7 })).resolves.toBeUndefined();
         await app.close();
     });
 
     it("throws immediately on a channel with no entry in the map, naming it (CA6)", async () => {
-        const app = await appWith(familiaRoutes());
-        await expect(emit("gastosFamila", { familiaId: 7 })).rejects.toThrow(/gastosFamila/);
+        const app = await appWith(expensesRoutes());
+        await expect(emit("teamExpense", { teamId: 7 })).rejects.toThrow(/teamExpense/);
         await app.close();
     });
 });
@@ -245,7 +245,7 @@ describe("live loader — write chain", () => {
         const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
         try {
             const written: string[] = [];
-            const enqueue = createChannelWriteChain("gastosFamilia", async (payload) => {
+            const enqueue = createChannelWriteChain("teamExpenses", async (payload) => {
                 const data = typeof payload === "string" ? payload : payload.data;
                 // A dead connection: the client went away mid-event.
                 if (data === "boom") throw new Error("socket gone");
@@ -258,7 +258,7 @@ describe("live loader — write chain", () => {
             // The failure is named (channel + that the snapshot did not land)…
             expect(warn).toHaveBeenCalledTimes(1);
             const message = String(warn.mock.calls[0]![0]);
-            expect(message).toContain("gastosFamilia");
+            expect(message).toContain("teamExpenses");
             expect(message).toContain("SSE write failed");
             // …and the next write still goes through.
             expect(written).toEqual(["after"]);
@@ -274,17 +274,17 @@ describe("live loader — write chain", () => {
 
 describe("live loader — guards", () => {
     it("inherits the route node middlewares: no session, no subscription (CA3)", async () => {
-        const routes = familiaRoutes();
+        const routes = expensesRoutes();
         const app = await appWith(routes);
-        const Gastos = routes[0]!.module!;
+        const Expenses = routes[0]!.module!;
 
-        const anonymous = await app.channel(Gastos, "gastosFamilia");
+        const anonymous = await app.channel(Expenses, "teamExpenses");
         expect(anonymous.status).toBe(401);
         expect(anonymous.closed).toBe(true);
 
         const authenticated = await app
-            .as({ user: { id: 1, familiaId: 7 } })
-            .channel(Gastos, "gastosFamilia");
+            .as({ user: { id: 1, teamId: 7 } })
+            .channel(Expenses, "teamExpenses");
         expect(authenticated.status).toBe(200);
         await authenticated.next({ timeoutMs: 1000 });
 
@@ -294,13 +294,13 @@ describe("live loader — guards", () => {
 
     it("denies with 403 when the scope returns null (CA5)", async () => {
         const Mod = makeModule({
-            moduleId: "publico/Mod",
+            moduleId: "public/Mod",
             loader: async () => ({ ok: true }),
-            channels: ["particionada"],
+            channels: ["partitioned"],
         });
         const app = await appWith([{ path: "/p", module: Mod }]);
 
-        const denied = await app.channel(Mod, "particionada");
+        const denied = await app.channel(Mod, "partitioned");
         expect(denied.status).toBe(403);
         expect(denied.closed).toBe(true);
 
@@ -309,13 +309,13 @@ describe("live loader — guards", () => {
 
     it("a channel with no principal is public when its scope ignores it (CA5)", async () => {
         const Mod = makeModule({
-            moduleId: "publico/Mod",
+            moduleId: "public/Mod",
             loader: async () => ({ ok: true }),
-            channels: ["publico"],
+            channels: ["public"],
         });
         const app = await appWith([{ path: "/p", module: Mod }]);
 
-        const sub = await app.channel(Mod, "publico");
+        const sub = await app.channel(Mod, "public");
         expect(sub.status).toBe(200);
         expect(await sub.next({ timeoutMs: 1000 })).toEqual({ ok: true });
 
@@ -326,26 +326,26 @@ describe("live loader — guards", () => {
     it("forging query input never changes the partition (CA5)", async () => {
         store[7] = 3;
         store[9] = 999;
-        const routes = familiaRoutes();
+        const routes = expensesRoutes();
         const app = await appWith(routes);
-        const Gastos = routes[0]!.module!;
+        const Expenses = routes[0]!.module!;
 
         // A client sending someone else's partition in the query string.
         const sub = await app
-            .as({ user: { id: 1, familiaId: 7 } })
-            .channel(Gastos, "gastosFamilia", {
-                channel: "familia:9",
-                query: { partition: "familia:9", scope: "9" },
+            .as({ user: { id: 1, teamId: 7 } })
+            .channel(Expenses, "teamExpenses", {
+                channel: "team:9",
+                query: { partition: "team:9", scope: "9" },
             });
-        expect(await sub.next({ timeoutMs: 1000 })).toEqual({ soma: 3 });
+        expect(await sub.next({ timeoutMs: 1000 })).toEqual({ teamTotal: 3 });
 
         // An emit for the forged partition reaches nobody on this connection.
         store[9] = 1234;
-        await emit("gastosFamilia", { familiaId: 9 });
+        await emit("teamExpenses", { teamId: 9 });
 
         store[7] = 4;
-        await emit("gastosFamilia", { familiaId: 7 });
-        expect(await sub.next({ timeoutMs: 1000 })).toEqual({ soma: 4 });
+        await emit("teamExpenses", { teamId: 7 });
+        expect(await sub.next({ timeoutMs: 1000 })).toEqual({ teamTotal: 4 });
         expect(sub.events.length).toBe(2);
 
         await sub.close();
@@ -354,20 +354,20 @@ describe("live loader — guards", () => {
 
     it("a module without channels produces no channel route (CA12f)", async () => {
         const Mod = makeModule({
-            moduleId: "sem/Canais",
+            moduleId: "no/Channels",
             fullPath: "/sem",
             loader: async () => ({ ok: true }),
         });
         const app = await appWith([{ path: "/sem", module: Mod }]);
 
-        const res = await app.get("/_channel/sem/Canais/gastosFamilia");
+        const res = await app.get("/_channel/no/Channels/teamExpenses");
         expect(res.status).toBe(404);
 
         await app.close();
     });
 
     it("throws a loud error for channels without a loader", async () => {
-        const Mod = makeModule({ moduleId: "quebrado/Mod", channels: ["gastosFamilia"] });
+        const Mod = makeModule({ moduleId: "broken/Mod", channels: ["teamExpenses"] });
         await expect(appWith([{ path: "/q", module: Mod }])).rejects.toThrow(
             /without a `loader`/,
         );
@@ -375,24 +375,24 @@ describe("live loader — guards", () => {
 
     it("throws a loud error for a channel missing from the app map", async () => {
         const Mod = makeModule({
-            moduleId: "quebrado/Mod",
+            moduleId: "broken/Mod",
             loader: async () => ({}),
-            channels: ["naoExiste"],
+            channels: ["notInMap"],
         });
-        await expect(appWith([{ path: "/q", module: Mod }])).rejects.toThrow(/naoExiste/);
+        await expect(appWith([{ path: "/q", module: Mod }])).rejects.toThrow(/notInMap/);
     });
 
     it("registerChannels() accepts the map from bootstrap too", async () => {
         const Mod = makeModule({
-            moduleId: "boot/Mod",
+            moduleId: "boot/Module",
             loader: async () => ({ ok: 1 }),
-            channels: ["publico"],
+            channels: ["public"],
         });
         const app = await createTestApp({
             routes: [{ path: "/b", module: Mod }],
             bootstrap: () => registerChannels(CHANNELS),
         });
-        const sub = await app.channel(Mod, "publico");
+        const sub = await app.channel(Mod, "public");
         expect(sub.status).toBe(200);
         await sub.close();
         await app.close();

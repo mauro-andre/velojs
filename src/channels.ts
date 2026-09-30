@@ -11,7 +11,7 @@
  *
  * ```ts
  * export const channels = {
- *     gastosFamilia: { scope: (ctx) => `familia:${ctx.familiaId}` },
+ *     teamExpenses: { scope: (ctx) => `team:${ctx.teamId}` },
  * };
  * ```
  *
@@ -524,7 +524,7 @@ export async function pushSnapshot(conn: ChannelConnection): Promise<void> {
  *
  * ```ts
  * import { emit } from "@mauroandre/velojs/server";
- * await emit("gastosFamilia", { familiaId: 7 });
+ * await emit("teamExpenses", { teamId: 7 });
  * ```
  */
 export function emit(channel: string, ctx?: unknown): Promise<void>;
@@ -535,8 +535,8 @@ export function emit(channel: string, ctx?: unknown): Promise<void>;
  * module's loader returns, and the merge on arrival is shallow by key.
  *
  * ```ts
- * import * as Gastos from "../app/gastos/Gastos.js";
- * await emit(Gastos, "gastosFamilia", { familiaId: 7 }, { somaFamilia: 880 });
+ * import * as Expenses from "../app/expenses/Expenses.js";
+ * await emit(Expenses, "teamExpenses", { teamId: 7 }, { teamTotal: 880 });
  * ```
  */
 export function emit<M extends ChannelEmitModule>(

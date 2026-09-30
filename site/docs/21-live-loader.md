@@ -4,34 +4,34 @@ description: "Keep a loader value faithful to server state in real time: declare
 
 # Live loader
 
-A `loader` fetches a page's data once per request and re-fetches it on SPA navigation. That is everything a page needs when its data changes because of the user themselves — or not at all. A **value that must track server state over time** (a family total another person's request changes, data a background scheduler mutates) needs the loader to stay faithful. That is the live loader: the same `loader`, the same `useLoader()` read, plus a sibling `channels` export.
+A `loader` fetches a page's data once per request and re-fetches it on SPA navigation. That is everything a page needs when its data changes because of the user themselves — or not at all. A **value that must track server state over time** (a team total another person's request changes, data a background scheduler mutates) needs the loader to stay faithful. That is the live loader: the same `loader`, the same `useLoader()` read, plus a sibling `channels` export.
 
 ## The three declarations
 
 ```tsx
-// app/gastos/Gastos.tsx — the page module
+// app/expenses/Expenses.tsx — the page module
 export const loader = async ({ c }: LoaderArgs) => {
     const user = c.get("user");
     return {
-        somaFamilia: await gastosService.somaFamilia(user.familiaId),
-        gastos: await gastosService.daFamilia(user.familiaId),
+        teamTotal: await expensesService.teamTotal(user.teamId),
+        expenses: await expensesService.byTeam(user.teamId),
     };
 };
-export const channels = ["gastosFamilia"];
+export const channels = ["teamExpenses"];
 
 export const Component = () => {
     const { data, freshness } = useLoader();
-    return <h2 class={freshness.value}>Família: R$ {data.value?.somaFamilia}</h2>;
+    return <h2 class={freshness.value}>Team: ${data.value?.teamTotal}</h2>;
 };
 ```
 
 ```ts
 // app/channels.ts — the app's channel map: name → partition resolver
 export const channels = {
-    gastosFamilia: {
+    teamExpenses: {
         // ctx: on subscribe, the principal materialized in c.get("user");
         // on emit, the object the emitter passed. Returns the partition key.
-        scope: (ctx) => `familia:${ctx.familiaId}`,
+        scope: (ctx) => `team:${ctx.teamId}`,
     },
 };
 ```
@@ -40,7 +40,7 @@ export const channels = {
 // anywhere server-side: an action, server.tsx, a scheduler, a webhook
 import { emit } from "@mauroandre/velojs/server";
 
-await emit("gastosFamilia", { familiaId: 7 });
+await emit("teamExpenses", { teamId: 7 });
 ```
 
 `export const channels = [...]` is the whole opt-in. A module without it behaves exactly as before — no connection, no cost.
@@ -62,13 +62,13 @@ The emit has two modes, and the difference is *who knows the new value*.
 **Slice** — `emit(module, channel, ctx, slice)`. The producer already holds the new value (the webhook arrived with the payload, the job just computed the total). The slice travels to the connections of that (module, channel) pair in the partition exactly as it is, and **no loader runs**.
 
 ```ts
-import * as Gastos from "../app/gastos/Gastos.js";
+import * as Expenses from "../app/expenses/Expenses.js";
 
-// Invalidation: Gastos.loader runs once per connection of the partition.
-await emit("gastosFamilia", { familiaId: 7 });
+// Invalidation: Expenses.loader runs once per connection of the partition.
+await emit("teamExpenses", { teamId: 7 });
 
 // Slice: nothing runs; the connections merge this payload into their data.
-await emit(Gastos, "gastosFamilia", { familiaId: 7 }, { somaFamilia: 880 });
+await emit(Expenses, "teamExpenses", { teamId: 7 }, { teamTotal: 880 });
 ```
 
 The slice is typed as `Partial` of what the module's loader returns:
@@ -77,17 +77,17 @@ The slice is typed as `Partial` of what the module's loader returns:
 export const loader = async ({ c }: LoaderArgs) => {
     const user = c.get("user");
     return {
-        somaFamilia: await gastosService.somaFamilia(user.familiaId),
-        gastos: await gastosService.daFamilia(user.familiaId),
+        teamTotal: await expensesService.teamTotal(user.teamId),
+        expenses: await expensesService.byTeam(user.teamId),
     };
 };
 
 // OK — known key, right type
-await emit(Gastos, "gastosFamilia", { familiaId: 7 }, { somaFamilia: 880 });
+await emit(Expenses, "teamExpenses", { teamId: 7 }, { teamTotal: 880 });
 // tsc error — the key does not exist in the loader's return
-await emit(Gastos, "gastosFamilia", { familiaId: 7 }, { total: 880 });
+await emit(Expenses, "teamExpenses", { teamId: 7 }, { total: 880 });
 // tsc error — wrong value type
-await emit(Gastos, "gastosFamilia", { familiaId: 7 }, { somaFamilia: "880" });
+await emit(Expenses, "teamExpenses", { teamId: 7 }, { teamTotal: "880" });
 ```
 
 Why does the module take part in the address? Because the same channel can be declared by a layout **and** by a page, and each has its own loader and its own data shape — a slice is the shape of one of them. The runtime delivers the slice only to the connections of the pair `(module, channel)`; `emit(channel, ctx)` by name keeps reaching every module that declares the channel.
@@ -99,21 +99,21 @@ The client merges every slice into the module's current value, with rules short 
 | Rule | Meaning |
 |---|---|
 | A snapshot **replaces**, a slice **merges** | The connect snapshot and the invalidation snapshot are the whole value; a slice is applied on top of the current one |
-| The key sent is replaced **whole** | Sending `somaFamilia` replaces the entire `somaFamilia`; lists travel whole inside their key |
-| Keys not sent stay **intact** | A slice with only `somaFamilia` leaves `gastos` exactly as it was |
+| The key sent is replaced **whole** | Sending `teamTotal` replaces the entire `teamTotal`; lists travel whole inside their key |
+| Keys not sent stay **intact** | A slice with only `teamTotal` leaves `expenses` exactly as it was |
 | An absent key **never removes** | Removal is explicit: re-send the key with the new whole list, without the item |
 | The merge happens **on arrival** | Slices that arrive in the same frame are applied together before the next render; for the same key, the last one in arrival order wins |
 | A malformed payload **keeps the previous value** | A slice that fails to parse never blanks the screen |
 
 ```ts
-// Current data: { somaFamilia: 4, gastos: ["mercado", "luz"] }
-await emit("gastosFamilia", { familiaId: 7 });                          // whole value
-await emit(Gastos, "gastosFamilia", { familiaId: 7 }, { somaFamilia: 9 });
-// → { somaFamilia: 9, gastos: ["mercado", "luz"] }
+// Current data: { teamTotal: 4, expenses: ["mercado", "luz"] }
+await emit("teamExpenses", { teamId: 7 });                          // whole value
+await emit(Expenses, "teamExpenses", { teamId: 7 }, { teamTotal: 9 });
+// → { teamTotal: 9, expenses: ["mercado", "luz"] }
 
 // Removing "luz" is re-sending the whole list without it
-await emit(Gastos, "gastosFamilia", { familiaId: 7 }, { gastos: ["mercado"] });
-// → { somaFamilia: 9, gastos: ["mercado"] }
+await emit(Expenses, "teamExpenses", { teamId: 7 }, { expenses: ["mercado"] });
+// → { teamTotal: 9, expenses: ["mercado"] }
 ```
 
 There is no deep patch and no list diff: the semantics stop at one level, by design. The runtime merges blindly — it is JavaScript — so the shape safety comes from the emit typing; a key that does not exist in the loader's data only gets in through a cast, and that is a usage error, not a feature.
@@ -137,8 +137,8 @@ The window also decides what `await emit(…)` waits for. With the window off (`
 **Emit log.** Every emit, in either mode, writes one line the moment it happens — so an incident ("the screen did not update") has a starting point: who emitted, to which partition, how many connections were in it.
 
 ```
-[velojs] emit kind=invalidate channel="gastosFamilia" partition="familia:7" connections=2 at=2026-09-30T12:00:00.000Z
-[velojs] emit kind=slice channel="gastosFamilia" partition="familia:7" connections=2 at=2026-09-30T12:00:01.104Z
+[velojs] emit kind=invalidate channel="teamExpenses" partition="team:7" connections=2 at=2026-09-30T12:00:00.000Z
+[velojs] emit kind=slice channel="teamExpenses" partition="team:7" connections=2 at=2026-09-30T12:00:01.104Z
 ```
 
 `connections` is the size of the group **at the instant of the gesture** — before coalescing and before revalidation — and the consolidated delivery writes no second line. An emit whose `scope` resolves to nothing logs `partition=null connections=0`: reaching nobody is exactly what the log is for. The log is off with `registerChannels(channels, { logEmits: false })`.
@@ -172,11 +172,11 @@ import { inspectChannels } from "@mauroandre/velojs/server";
 const report = inspectChannels();
 // {
 //   channels: [{
-//     channel: "gastosFamilia",
+//     channel: "teamExpenses",
 //     groups: [
-//       { moduleId: "gastos/Layout", partition: "familia:7",
+//       { moduleId: "expenses/Layout", partition: "team:7",
 //         connections: 1, lastDeliveryAt: "2026-09-30T12:00:00.000Z" },
-//       { moduleId: "gastos/Gastos", partition: "familia:7",
+//       { moduleId: "expenses/Expenses", partition: "team:7",
 //         connections: 1, lastDeliveryAt: "2026-09-30T12:00:01.104Z" },
 //     ],
 //     connections: 2,
@@ -204,14 +204,14 @@ It is aggregated per page and is **data for CSS to react to** — the framework 
 
 ```tsx
 const { data, freshness } = useLoader();
-return <h2 class={freshness.value}>Família: R$ {data.value?.somaFamilia}</h2>;
+return <h2 class={freshness.value}>Team: ${data.value?.teamTotal}</h2>;
 ```
 
 The same handles expose `freshnessByChannel` — a signal record keyed by the channel names the module declares, with the same three values per channel. A page with two channels, one fallen and one following, shows both states at once:
 
 ```tsx
 const { freshness, freshnessByChannel } = useLoader();
-// freshnessByChannel.value → { gastosFamilia: "stale", precos: "live" }
+// freshnessByChannel.value → { teamExpenses: "stale", precos: "live" }
 ```
 
 The aggregate folds the per-channel states by one rule: any channel in error errors the page; a silenced or closed channel counts as not-open — the page is stale only when nothing is open and delivering.
@@ -269,7 +269,7 @@ The failures that would otherwise be silent are explicit:
 import { createTestApp } from "@mauroandre/velojs/testing";
 import { emit } from "@mauroandre/velojs/server";
 import { channels } from "../app/channels.js";
-import * as Gastos from "../app/gastos/Gastos.js";
+import * as Expenses from "../app/expenses/Expenses.js";
 
 const app = await createTestApp({
     routes,
@@ -277,18 +277,18 @@ const app = await createTestApp({
     getSessionCookie: async ({ user }) => ({ session: await sign(user) }),
 });
 
-const sub = await app.as({ user: { familiaId: 7 } }).channel(Gastos, "gastosFamilia");
-expect(await sub.next({ timeoutMs: 1000 })).toEqual({ somaFamilia: 4 });  // connect
+const sub = await app.as({ user: { teamId: 7 } }).channel(Expenses, "teamExpenses");
+expect(await sub.next({ timeoutMs: 1000 })).toEqual({ teamTotal: 4 });  // connect
 
-await emit("gastosFamilia", { familiaId: 7 });
-expect(await sub.next({ timeoutMs: 1000 })).toEqual({ somaFamilia: 9 });  // emit
+await emit("teamExpenses", { teamId: 7 });
+expect(await sub.next({ timeoutMs: 1000 })).toEqual({ teamTotal: 9 });  // emit
 
-await emit(Gastos, "gastosFamilia", { familiaId: 7 }, { somaFamilia: 880 });
-expect(await sub.next({ timeoutMs: 1000 })).toEqual({ somaFamilia: 880 }); // raw slice
+await emit(Expenses, "teamExpenses", { teamId: 7 }, { teamTotal: 880 });
+expect(await sub.next({ timeoutMs: 1000 })).toEqual({ teamTotal: 880 }); // raw slice
 
 expect(await sub.nextEvent({ timeoutMs: 1000 })).toEqual({              // discriminated
     type: "slice",
-    data: { somaFamilia: 880 },
+    data: { teamTotal: 880 },
 });
 
 await sub.close();

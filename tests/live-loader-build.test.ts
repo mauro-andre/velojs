@@ -19,8 +19,8 @@ import {
 const ROOT = fs.mkdtempSync(path.join(os.tmpdir(), "velo-live-loader-"));
 
 const CHANNEL_MAP = `export const channels = {
-    gastosFamilia: { scope: (ctx: any) => \`familia:\${ctx.familiaId}\` },
-    publico: { scope: () => "all" },
+    teamExpenses: { scope: (ctx: any) => \`team:\${ctx.teamId}\` },
+    public: { scope: () => "all" },
 };
 `;
 
@@ -38,8 +38,8 @@ function transformPlugin(): any {
 }
 
 const PAGE = `export const Component = () => null;
-export const loader = async ({ c }: any) => ({ soma: 1 });
-export const channels = ["gastosFamilia"];
+export const loader = async ({ c }: any) => ({ teamTotal: 1 });
+export const channels = ["teamExpenses"];
 `;
 
 const pagePath = (file: string) => path.join(ROOT, "app/pages", file);
@@ -64,15 +64,15 @@ afterEach(() => {
 
 describe("live loader — dev/build guards (CA9)", () => {
     it("a declared channel with an entry in the map transforms normally (control)", () => {
-        const out = transformPlugin().transform(PAGE, pagePath("Gastos.tsx"), {});
+        const out = transformPlugin().transform(PAGE, pagePath("Expenses.tsx"), {});
         expect(out).not.toBeNull();
-        expect(out.code).toContain("gastosFamilia");
+        expect(out.code).toContain("teamExpenses");
         expect(out.code).toContain("moduleId");
     });
 
     it("`channels` without a `loader` is an explicit error", () => {
         const code = `export const Component = () => null;
-export const channels = ["gastosFamilia"];
+export const channels = ["teamExpenses"];
 `;
         expect(() => transformPlugin().transform(code, pagePath("Bad.tsx"), {})).toThrow(
             /without a `loader`/,
@@ -82,16 +82,16 @@ export const channels = ["gastosFamilia"];
     it("a channel with no entry in app/channels.ts is an explicit error naming it", () => {
         const code = `export const Component = () => null;
 export const loader = async () => ({});
-export const channels = ["gastosFamila"];
+export const channels = ["teamExpense"];
 `;
         expect(() => transformPlugin().transform(code, pagePath("Typo.tsx"), {})).toThrow(
-            /gastosFamila/,
+            /teamExpense/,
         );
     });
 
     it("with no app/channels.ts at all, every declared channel is unknown", () => {
         writeApp(false);
-        expect(() => transformPlugin().transform(PAGE, pagePath("Gastos.tsx"), {})).toThrow(
+        expect(() => transformPlugin().transform(PAGE, pagePath("Expenses.tsx"), {})).toThrow(
             /app\/channels\.ts/,
         );
     });
@@ -118,19 +118,19 @@ describe("live loader — static build (CA10)", () => {
         const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
         const plugin = transformPlugin();
 
-        plugin.transform(PAGE, pagePath("Gastos.tsx"), {});
-        plugin.transform(PAGE, pagePath("Gastos.tsx"), {});
-        plugin.transform(PAGE, pagePath("Gastos.tsx"), {});
+        plugin.transform(PAGE, pagePath("Expenses.tsx"), {});
+        plugin.transform(PAGE, pagePath("Expenses.tsx"), {});
+        plugin.transform(PAGE, pagePath("Expenses.tsx"), {});
 
         const warnings = warn.mock.calls.map((c) => String(c[0]));
         expect(warnings).toHaveLength(1);
-        expect(warnings[0]).toContain("pages/Gastos");
-        expect(warnings[0]).toContain("gastosFamilia");
+        expect(warnings[0]).toContain("pages/Expenses");
+        expect(warnings[0]).toContain("teamExpenses");
     });
 
     it("does not warn outside a static build", () => {
         const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-        transformPlugin().transform(PAGE, pagePath("Gastos.tsx"), {});
+        transformPlugin().transform(PAGE, pagePath("Expenses.tsx"), {});
         expect(warn).not.toHaveBeenCalled();
     });
 });
@@ -141,14 +141,14 @@ describe("live loader — static build (CA10)", () => {
 
 describe("live loader — reading the conventions", () => {
     it("declaredChannelNames reads the array form and ignores the object form", () => {
-        expect(declaredChannelNames(PAGE)).toEqual(["gastosFamilia"]);
+        expect(declaredChannelNames(PAGE)).toEqual(["teamExpenses"]);
         expect(declaredChannelNames(CHANNEL_MAP)).toBeNull();
         expect(declaredChannelNames(`export const Component = () => null;`)).toBeNull();
     });
 
     it("readChannelMapNames collects the keys of the app map", () => {
         const names = readChannelMapNames(path.join(ROOT, "app/channels.ts"));
-        expect([...names]).toEqual(["gastosFamilia", "publico"]);
+        expect([...names]).toEqual(["teamExpenses", "public"]);
         expect(readChannelMapNames(path.join(ROOT, "app/nope.ts")).size).toBe(0);
     });
 });

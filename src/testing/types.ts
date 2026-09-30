@@ -249,16 +249,16 @@ export interface TestApp {
      * production.
      *
      * ```ts
-     * const sub = await app.as({ id: 7 }).channel(Gastos, "gastosFamilia");
+     * const sub = await app.as({ id: 7 }).channel(Expenses, "teamExpenses");
      * await sub.next({ timeoutMs: 1000 });        // snapshot on connect
-     * await emit("gastosFamilia", { familiaId: 7 });
-     * expect(await sub.next({ timeoutMs: 1000 })).toEqual({ somaFamilia: 2 });
+     * await emit("teamExpenses", { teamId: 7 });
+     * expect(await sub.next({ timeoutMs: 1000 })).toEqual({ teamTotal: 2 });
      *
      * // The same arrivals discriminated: nextEvent() tells a snapshot from a slice.
-     * await emit(Gastos, "gastosFamilia", { familiaId: 7 }, { somaFamilia: 880 });
+     * await emit(Expenses, "teamExpenses", { teamId: 7 }, { teamTotal: 880 });
      * expect(await sub.nextEvent({ timeoutMs: 1000 })).toEqual({
      *     type: "slice",
-     *     data: { somaFamilia: 880 },
+     *     data: { teamTotal: 880 },
      * });
      * ```
      */

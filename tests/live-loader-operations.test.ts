@@ -23,12 +23,12 @@ import type { AppRoutes, RouteModule } from "../src/types.js";
 const store: Record<number, number> = {};
 
 const CHANNELS = {
-    publico: { scope: () => "all" },
-    gastosFamilia: { scope: (ctx: any) => `familia:${ctx.familiaId}` },
+    public: { scope: () => "all" },
+    teamExpenses: { scope: (ctx: any) => `team:${ctx.teamId}` },
 };
 
-const somaFamilia = async ({ c }: any) => ({
-    soma: store[(c.get as any)("user")?.familiaId] ?? 0,
+const teamTotal = async ({ c }: any) => ({
+    teamTotal: store[(c.get as any)("user")?.teamId] ?? 0,
 });
 
 function makeModule(opts: {
@@ -46,17 +46,17 @@ function makeModule(opts: {
     return mod as RouteModule;
 }
 
-function familiaRoutes(): AppRoutes {
-    const Gastos = makeModule({
-        moduleId: "gastos/Gastos",
-        fullPath: "/gastos",
-        loader: somaFamilia,
-        channels: ["gastosFamilia"],
+function expensesRoutes(): AppRoutes {
+    const Expenses = makeModule({
+        moduleId: "expenses/Expenses",
+        fullPath: "/expenses",
+        loader: teamTotal,
+        channels: ["teamExpenses"],
     });
-    return [{ path: "/gastos", module: Gastos, middlewares: [requireUser] }];
+    return [{ path: "/expenses", module: Expenses, middlewares: [requireUser] }];
 }
 
-const getSessionCookie = async ({ user }: { user: { id: number; familiaId: number } }) => ({
+const getSessionCookie = async ({ user }: { user: { id: number; teamId: number } }) => ({
     user: JSON.stringify(user),
 });
 
@@ -125,16 +125,16 @@ afterEach(() => {
 describe("live loader — transport headers", () => {
     it("the channel SSE answer carries Cache-Control: no-store", async () => {
         const Mod = makeModule({
-            moduleId: "pub/Mod",
+            moduleId: "pub/Module",
             loader: async () => ({ ok: 1 }),
-            channels: ["publico"],
+            channels: ["public"],
         });
         const app = await createTestApp({
             routes: [{ path: "/p", module: Mod }],
             channels: CHANNELS,
         });
 
-        const res = await app.hono.request("/_channel/pub/Mod/publico");
+        const res = await app.hono.request("/_channel/pub/Module/public");
         expect(res.status).toBe(200);
         expect(res.headers.get("cache-control")).toBe("no-store");
 
@@ -151,18 +151,18 @@ describe("live loader — idle timeout", () => {
     it("closes a connection with no deliveries past idleMs, and frees the group", async () => {
         vi.useFakeTimers();
         store[7] = 1;
-        const routes = familiaRoutes();
+        const routes = expensesRoutes();
         const app = await createTestApp({
             routes,
             channels: CHANNELS,
             getSessionCookie,
             channelOptions: { idleMs: 100 },
         });
-        const Gastos = routes[0]!.module!;
-        const user = app.as({ user: { id: 1, familiaId: 7 } });
+        const Expenses = routes[0]!.module!;
+        const user = app.as({ user: { id: 1, teamId: 7 } });
 
-        const sub = await user.channel(Gastos, "gastosFamilia");
-        expect(await sub.next({ timeoutMs: 1000 })).toEqual({ soma: 1 });
+        const sub = await user.channel(Expenses, "teamExpenses");
+        expect(await sub.next({ timeoutMs: 1000 })).toEqual({ teamTotal: 1 });
 
         await vi.advanceTimersByTimeAsync(100);
         expect(sub.closed).toBe(true);
@@ -172,8 +172,8 @@ describe("live loader — idle timeout", () => {
         // The client half of the cycle: the reconnect is a new connection and
         // gets a snapshot on connect — the state is repaired.
         store[7] = 2;
-        const again = await user.channel(Gastos, "gastosFamilia");
-        expect(await again.next({ timeoutMs: 1000 })).toEqual({ soma: 2 });
+        const again = await user.channel(Expenses, "teamExpenses");
+        expect(await again.next({ timeoutMs: 1000 })).toEqual({ teamTotal: 2 });
 
         await again.close();
         await app.close();
@@ -182,24 +182,24 @@ describe("live loader — idle timeout", () => {
     it("a delivery inside the window restarts the count", async () => {
         vi.useFakeTimers();
         store[7] = 1;
-        const routes = familiaRoutes();
+        const routes = expensesRoutes();
         const app = await createTestApp({
             routes,
             channels: CHANNELS,
             getSessionCookie,
             channelOptions: { idleMs: 100 },
         });
-        const Gastos = routes[0]!.module!;
+        const Expenses = routes[0]!.module!;
 
         const sub = await app
-            .as({ user: { id: 1, familiaId: 7 } })
-            .channel(Gastos, "gastosFamilia");
+            .as({ user: { id: 1, teamId: 7 } })
+            .channel(Expenses, "teamExpenses");
         await sub.next({ timeoutMs: 1000 });
 
         await vi.advanceTimersByTimeAsync(60);
         store[7] = 2;
-        await emit("gastosFamilia", { familiaId: 7 });
-        expect(await sub.next({ timeoutMs: 1000 })).toEqual({ soma: 2 });
+        await emit("teamExpenses", { teamId: 7 });
+        expect(await sub.next({ timeoutMs: 1000 })).toEqual({ teamTotal: 2 });
 
         // 60 + 60 > 100 since the last delivery: still open.
         await vi.advanceTimersByTimeAsync(60);
@@ -216,16 +216,16 @@ describe("live loader — idle timeout", () => {
     it("idleMs: 0 disables it — the toolkit's default keeps connections alive", async () => {
         vi.useFakeTimers();
         const Mod = makeModule({
-            moduleId: "pub/Mod",
+            moduleId: "pub/Module",
             loader: async () => ({ ok: 1 }),
-            channels: ["publico"],
+            channels: ["public"],
         });
         const app = await createTestApp({
             routes: [{ path: "/p", module: Mod }],
             channels: CHANNELS,
         });
 
-        const sub = await app.channel(Mod, "publico");
+        const sub = await app.channel(Mod, "public");
         await sub.next({ timeoutMs: 1000 });
 
         await vi.advanceTimersByTimeAsync(600000);
@@ -239,9 +239,9 @@ describe("live loader — idle timeout", () => {
     it("the default 300000 applies on a registration without options — server-side, not via the toolkit", async () => {
         vi.useFakeTimers();
         const Mod = makeModule({
-            moduleId: "pub/Mod",
+            moduleId: "pub/Module",
             loader: async () => ({ ok: 1 }),
-            channels: ["publico"],
+            channels: ["public"],
         });
         const app = await createTestApp({
             routes: [{ path: "/p", module: Mod }],
@@ -250,7 +250,7 @@ describe("live loader — idle timeout", () => {
         // Mirror the option-less call the app entry injects.
         registerChannels(CHANNELS);
 
-        const tap = tapRaw(app, "/_channel/pub/Mod/publico");
+        const tap = tapRaw(app, "/_channel/pub/Module/public");
         const raw = await tap.ready();
 
         // 299999ms of silence: the default idle has not elapsed.
@@ -269,9 +269,9 @@ describe("live loader — idle timeout", () => {
     it("heartbeats do not reset the idle clock", async () => {
         vi.useFakeTimers();
         const Mod = makeModule({
-            moduleId: "pub/Mod",
+            moduleId: "pub/Module",
             loader: async () => ({ ok: 1 }),
-            channels: ["publico"],
+            channels: ["public"],
         });
         const app = await createTestApp({
             routes: [{ path: "/p", module: Mod }],
@@ -279,7 +279,7 @@ describe("live loader — idle timeout", () => {
             channelOptions: { idleMs: 100, heartbeatMs: 20 },
         });
 
-        const tap = tapRaw(app, "/_channel/pub/Mod/publico");
+        const tap = tapRaw(app, "/_channel/pub/Module/public");
         const raw = await tap.ready();
 
         // Pings at 20, 40, 60, 80, 100 — and the connection still dies at 100:
@@ -302,9 +302,9 @@ describe("live loader — heartbeat", () => {
     it("writes the `: ping` comment through the write chain on the interval", async () => {
         vi.useFakeTimers();
         const Mod = makeModule({
-            moduleId: "pub/Mod",
+            moduleId: "pub/Module",
             loader: async () => ({ ok: 1 }),
-            channels: ["publico"],
+            channels: ["public"],
         });
         const app = await createTestApp({
             routes: [{ path: "/p", module: Mod }],
@@ -312,7 +312,7 @@ describe("live loader — heartbeat", () => {
             channelOptions: { heartbeatMs: 50 },
         });
 
-        const tap = tapRaw(app, "/_channel/pub/Mod/publico");
+        const tap = tapRaw(app, "/_channel/pub/Module/public");
         const raw = await tap.ready();
 
         await vi.advanceTimersByTimeAsync(49);
@@ -330,9 +330,9 @@ describe("live loader — heartbeat", () => {
     it("heartbeatMs: 0 disables it", async () => {
         vi.useFakeTimers();
         const Mod = makeModule({
-            moduleId: "pub/Mod",
+            moduleId: "pub/Module",
             loader: async () => ({ ok: 1 }),
-            channels: ["publico"],
+            channels: ["public"],
         });
         const app = await createTestApp({
             routes: [{ path: "/p", module: Mod }],
@@ -340,7 +340,7 @@ describe("live loader — heartbeat", () => {
             channelOptions: { heartbeatMs: 0 },
         });
 
-        const tap = tapRaw(app, "/_channel/pub/Mod/publico");
+        const tap = tapRaw(app, "/_channel/pub/Module/public");
         const raw = await tap.ready();
 
         await vi.advanceTimersByTimeAsync(60000);
@@ -353,9 +353,9 @@ describe("live loader — heartbeat", () => {
     it("the default 20000 applies on a registration without options — one ruler with stream_*", async () => {
         vi.useFakeTimers();
         const Mod = makeModule({
-            moduleId: "pub/Mod",
+            moduleId: "pub/Module",
             loader: async () => ({ ok: 1 }),
-            channels: ["publico"],
+            channels: ["public"],
         });
         const app = await createTestApp({
             routes: [{ path: "/p", module: Mod }],
@@ -363,7 +363,7 @@ describe("live loader — heartbeat", () => {
         });
         registerChannels(CHANNELS);
 
-        const tap = tapRaw(app, "/_channel/pub/Mod/publico");
+        const tap = tapRaw(app, "/_channel/pub/Module/public");
         const raw = await tap.ready();
 
         await vi.advanceTimersByTimeAsync(19999);
@@ -385,20 +385,20 @@ describe("live loader — inspectChannels", () => {
         store[7] = 5;
         store[8] = 6;
         const Layout = makeModule({
-            moduleId: "gastos/Layout",
-            loader: somaFamilia,
-            channels: ["gastosFamilia"],
+            moduleId: "expenses/Layout",
+            loader: teamTotal,
+            channels: ["teamExpenses"],
         });
         const Page = makeModule({
-            moduleId: "gastos/Gastos",
-            fullPath: "/gastos",
-            loader: somaFamilia,
-            channels: ["gastosFamilia"],
+            moduleId: "expenses/Expenses",
+            fullPath: "/expenses",
+            loader: teamTotal,
+            channels: ["teamExpenses"],
         });
         const app = await createTestApp({
             routes: [
                 {
-                    path: "/gastos",
+                    path: "/expenses",
                     module: Layout,
                     middlewares: [requireUser],
                     children: [{ path: "/", module: Page }],
@@ -407,12 +407,12 @@ describe("live loader — inspectChannels", () => {
             channels: CHANNELS,
             getSessionCookie,
         });
-        const user = app.as({ user: { id: 1, familiaId: 7 } });
-        const other = app.as({ user: { id: 2, familiaId: 8 } });
+        const user = app.as({ user: { id: 1, teamId: 7 } });
+        const other = app.as({ user: { id: 2, teamId: 8 } });
 
-        const layoutSub = await user.channel(Layout, "gastosFamilia");
-        const pageSub = await user.channel(Page, "gastosFamilia");
-        const otherSub = await other.channel(Page, "gastosFamilia");
+        const layoutSub = await user.channel(Layout, "teamExpenses");
+        const pageSub = await user.channel(Page, "teamExpenses");
+        const otherSub = await other.channel(Page, "teamExpenses");
         await layoutSub.next({ timeoutMs: 1000 });
         await pageSub.next({ timeoutMs: 1000 });
         await otherSub.next({ timeoutMs: 1000 });
@@ -420,14 +420,14 @@ describe("live loader — inspectChannels", () => {
         const report = inspectChannels();
         console.log('DBG1', JSON.stringify(report));
         expect(report.totalConnections).toBe(3);
-        const channel = report.channels.find((c) => c.channel === "gastosFamilia")!;
+        const channel = report.channels.find((c) => c.channel === "teamExpenses")!;
         expect(channel.connections).toBe(3);
         // Groups are (moduleId, partition) pairs — which page holds what.
-        const grupo = (moduleId: string, partition: string) =>
+        const group = (moduleId: string, partition: string) =>
             channel.groups.find((g) => g.moduleId === moduleId && g.partition === partition);
-        expect(grupo("gastos/Layout", "familia:7")!.connections).toBe(1);
-        expect(grupo("gastos/Gastos", "familia:7")!.connections).toBe(1);
-        expect(grupo("gastos/Gastos", "familia:8")!.connections).toBe(1);
+        expect(group("expenses/Layout", "team:7")!.connections).toBe(1);
+        expect(group("expenses/Expenses", "team:7")!.connections).toBe(1);
+        expect(group("expenses/Expenses", "team:8")!.connections).toBe(1);
         // The connect snapshot is a delivery: the timestamp is set, ISO.
         for (const g of channel.groups) {
             expect(g.lastDeliveryAt).not.toBeNull();
@@ -442,16 +442,16 @@ describe("live loader — inspectChannels", () => {
 
     it("reflects emits and terminations", async () => {
         const Mod = makeModule({
-            moduleId: "pub/Mod",
+            moduleId: "pub/Module",
             loader: async () => ({ ok: 1 }),
-            channels: ["publico"],
+            channels: ["public"],
         });
         const app = await createTestApp({
             routes: [{ path: "/p", module: Mod }],
             channels: CHANNELS,
         });
 
-        const sub = await app.channel(Mod, "publico");
+        const sub = await app.channel(Mod, "public");
         await sub.next({ timeoutMs: 1000 });
         console.log('DBG2', JSON.stringify(inspectChannels()));
         expect(inspectChannels().totalConnections).toBe(1);
@@ -460,7 +460,7 @@ describe("live loader — inspectChannels", () => {
         await sub.close();
         const after = inspectChannels();
         expect(after.totalConnections).toBe(0);
-        expect(after.channels.find((c) => c.channel === "publico")).toBeUndefined();
+        expect(after.channels.find((c) => c.channel === "public")).toBeUndefined();
         expect(after.openCoalesceWindows).toEqual([]);
 
         await app.close();
@@ -469,26 +469,26 @@ describe("live loader — inspectChannels", () => {
     it("reports the coalescing windows still open, and their close", async () => {
         vi.useFakeTimers();
         const Mod = makeModule({
-            moduleId: "gastos/Gastos",
-            fullPath: "/gastos",
-            loader: somaFamilia,
-            channels: ["gastosFamilia"],
+            moduleId: "expenses/Expenses",
+            fullPath: "/expenses",
+            loader: teamTotal,
+            channels: ["teamExpenses"],
         });
         const app = await createTestApp({
-            routes: [{ path: "/gastos", module: Mod, middlewares: [requireUser] }],
+            routes: [{ path: "/expenses", module: Mod, middlewares: [requireUser] }],
             channels: CHANNELS,
             getSessionCookie,
             channelOptions: { coalesceMs: 50 },
         });
 
         const sub = await app
-            .as({ user: { id: 1, familiaId: 7 } })
-            .channel(Mod, "gastosFamilia");
+            .as({ user: { id: 1, teamId: 7 } })
+            .channel(Mod, "teamExpenses");
         await sub.next({ timeoutMs: 1000 });
 
-        await emit("gastosFamilia", { familiaId: 7 });
+        await emit("teamExpenses", { teamId: 7 });
         expect(inspectChannels().openCoalesceWindows).toEqual([
-            { channel: "gastosFamilia", partition: "familia:7" },
+            { channel: "teamExpenses", partition: "team:7" },
         ]);
 
         await vi.advanceTimersByTimeAsync(50);
@@ -513,15 +513,15 @@ describe("live loader — inspectChannels", () => {
 describe("GET /_channel-inspect", () => {
     it("answers the inspector JSON in a non-production environment", async () => {
         const Mod = makeModule({
-            moduleId: "pub/Mod",
+            moduleId: "pub/Module",
             loader: async () => ({ ok: 1 }),
-            channels: ["publico"],
+            channels: ["public"],
         });
         const app = await createTestApp({
             routes: [{ path: "/p", module: Mod }],
             channels: CHANNELS,
         });
-        const sub = await app.channel(Mod, "publico");
+        const sub = await app.channel(Mod, "public");
         await sub.next({ timeoutMs: 1000 });
 
         const res = await app.get("/_channel-inspect");
@@ -529,7 +529,7 @@ describe("GET /_channel-inspect", () => {
         const json: any = await res.json();
         expect(json).toEqual(inspectChannels());
         expect(json.totalConnections).toBe(1);
-        expect(json.channels[0].groups[0].moduleId).toBe("pub/Mod");
+        expect(json.channels[0].groups[0].moduleId).toBe("pub/Module");
 
         await sub.close();
         await app.close();
@@ -540,9 +540,9 @@ describe("GET /_channel-inspect", () => {
         process.env.NODE_ENV = "production";
         try {
             const Mod = makeModule({
-                moduleId: "pub/Mod",
+                moduleId: "pub/Module",
                 loader: async () => ({ ok: 1 }),
-                channels: ["publico"],
+                channels: ["public"],
             });
             const app = await createTestApp({
                 routes: [{ path: "/p", module: Mod }],

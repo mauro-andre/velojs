@@ -19,19 +19,19 @@ import { emit, registerChannels } from "../src/channels.js";
 import type { AppRoutes, LoaderArgs, RouteModule } from "../src/types.js";
 
 // ============================================
-// Fixture — a family-scoped channel with a shaped loader
+// Fixture — a team-scoped channel with a shaped loader
 // ============================================
 
-interface GastosData {
-    soma: number;
-    itens: string[];
+interface ExpensesData {
+    teamTotal: number;
+    items: string[];
 }
 
-/** Per-family state the loader reads — mutable, so an emit changes the value. */
-let store: Record<number, GastosData> = {};
+/** Per-team state the loader reads — mutable, so an emit changes the value. */
+let store: Record<number, ExpensesData> = {};
 
 const CHANNELS = {
-    gastosFamilia: { scope: (ctx: any) => `familia:${ctx.familiaId}` },
+    teamExpenses: { scope: (ctx: any) => `team:${ctx.teamId}` },
 };
 
 const getSessionCookie = async ({ user }: { user: any }) => ({
@@ -51,28 +51,28 @@ const requireUser: MiddlewareHandler = async (c, next) => {
  * slice is checked against. `calls` counts loader executions, which is how the
  * tests prove a slice does not re-execute anything.
  */
-function gastosModule(opts: {
+function expensesModule(opts: {
     moduleId: string;
     channels?: readonly string[];
     calls?: { n: number };
 }) {
-    const loader = async ({ c }: LoaderArgs): Promise<GastosData> => {
+    const loader = async ({ c }: LoaderArgs): Promise<ExpensesData> => {
         if (opts.calls) opts.calls.n++;
-        const familiaId = (c.get as unknown as (k: string) => any)("user").familiaId;
-        const value = store[familiaId]!;
-        return { soma: value.soma, itens: [...value.itens] };
+        const teamId = (c.get as unknown as (k: string) => any)("user").teamId;
+        const value = store[teamId]!;
+        return { teamTotal: value.teamTotal, items: [...value.items] };
     };
 
     return {
         Component: () => null,
-        metadata: { moduleId: opts.moduleId, fullPath: "/gastos" },
-        channels: opts.channels ?? ["gastosFamilia"],
+        metadata: { moduleId: opts.moduleId, fullPath: "/expenses" },
+        channels: opts.channels ?? ["teamExpenses"],
         loader,
     };
 }
 
 function routesFor(module: RouteModule): AppRoutes {
-    return [{ path: "/gastos", module, middlewares: [requireUser] }];
+    return [{ path: "/expenses", module, middlewares: [requireUser] }];
 }
 
 async function appWith(
@@ -88,7 +88,7 @@ async function appWith(
 }
 
 beforeEach(() => {
-    store = { 7: { soma: 10, itens: ["a"] }, 8: { soma: 20, itens: ["b"] } };
+    store = { 7: { teamTotal: 10, items: ["a"] }, 8: { teamTotal: 20, items: ["b"] } };
 });
 
 // ============================================
@@ -98,19 +98,19 @@ beforeEach(() => {
 describe("live loader — slice mode", () => {
     it("delivers the slice to the pair's connection without re-executing the loader (CA2)", async () => {
         const calls = { n: 0 };
-        const Page = gastosModule({ moduleId: "gastos/Gastos", calls });
+        const Page = expensesModule({ moduleId: "expenses/Expenses", calls });
         const app = await appWith(routesFor(Page));
 
         const sub = await app
-            .as({ user: { id: 1, familiaId: 7 } })
-            .channel(Page, "gastosFamilia");
-        expect(await sub.next({ timeoutMs: 1000 })).toEqual({ soma: 10, itens: ["a"] });
+            .as({ user: { id: 1, teamId: 7 } })
+            .channel(Page, "teamExpenses");
+        expect(await sub.next({ timeoutMs: 1000 })).toEqual({ teamTotal: 10, items: ["a"] });
         expect(calls.n).toBe(1); // the connect snapshot ran the loader
 
-        await emit(Page, "gastosFamilia", { familiaId: 7 }, { soma: 880 });
+        await emit(Page, "teamExpenses", { teamId: 7 }, { teamTotal: 880 });
 
         // The wire carries the raw slice, and the loader did not run again.
-        expect(await sub.next({ timeoutMs: 1000 })).toEqual({ soma: 880 });
+        expect(await sub.next({ timeoutMs: 1000 })).toEqual({ teamTotal: 880 });
         expect(calls.n).toBe(1);
 
         await sub.close();
@@ -121,26 +121,26 @@ describe("live loader — slice mode", () => {
         const calls = { n: 0 };
         // A layout and a page sharing the channel name, with different shapes:
         // the reason the slice is addressed to a module at all.
-        const Layout = gastosModule({ moduleId: "gastos/Layout", calls });
-        const Page = gastosModule({ moduleId: "gastos/Gastos", calls });
+        const Layout = expensesModule({ moduleId: "expenses/Layout", calls });
+        const Page = expensesModule({ moduleId: "expenses/Expenses", calls });
         const app = await appWith([
             {
-                path: "/gastos",
+                path: "/expenses",
                 module: Layout as RouteModule,
                 middlewares: [requireUser],
                 children: [{ path: "/", module: Page as RouteModule }],
             },
         ]);
-        const user = app.as({ user: { id: 1, familiaId: 7 } });
+        const user = app.as({ user: { id: 1, teamId: 7 } });
 
-        const layoutSub = await user.channel(Layout, "gastosFamilia");
-        const pageSub = await user.channel(Page, "gastosFamilia");
-        expect(await layoutSub.next({ timeoutMs: 1000 })).toEqual({ soma: 10, itens: ["a"] });
-        expect(await pageSub.next({ timeoutMs: 1000 })).toEqual({ soma: 10, itens: ["a"] });
+        const layoutSub = await user.channel(Layout, "teamExpenses");
+        const pageSub = await user.channel(Page, "teamExpenses");
+        expect(await layoutSub.next({ timeoutMs: 1000 })).toEqual({ teamTotal: 10, items: ["a"] });
+        expect(await pageSub.next({ timeoutMs: 1000 })).toEqual({ teamTotal: 10, items: ["a"] });
 
-        await emit(Page, "gastosFamilia", { familiaId: 7 }, { soma: 15 });
+        await emit(Page, "teamExpenses", { teamId: 7 }, { teamTotal: 15 });
 
-        expect(await pageSub.next({ timeoutMs: 1000 })).toEqual({ soma: 15 });
+        expect(await pageSub.next({ timeoutMs: 1000 })).toEqual({ teamTotal: 15 });
         expect(layoutSub.events).toHaveLength(1); // connect only — no slice, no snapshot
 
         await layoutSub.close();
@@ -149,28 +149,28 @@ describe("live loader — slice mode", () => {
     });
 
     it("the invalidation mode by name keeps reaching every module of the channel (CA2)", async () => {
-        const Layout = gastosModule({ moduleId: "gastos/Layout" });
-        const Page = gastosModule({ moduleId: "gastos/Gastos" });
+        const Layout = expensesModule({ moduleId: "expenses/Layout" });
+        const Page = expensesModule({ moduleId: "expenses/Expenses" });
         const app = await appWith([
             {
-                path: "/gastos",
+                path: "/expenses",
                 module: Layout as RouteModule,
                 middlewares: [requireUser],
                 children: [{ path: "/", module: Page as RouteModule }],
             },
         ]);
-        const user = app.as({ user: { id: 1, familiaId: 7 } });
+        const user = app.as({ user: { id: 1, teamId: 7 } });
 
-        const layoutSub = await user.channel(Layout, "gastosFamilia");
-        const pageSub = await user.channel(Page, "gastosFamilia");
+        const layoutSub = await user.channel(Layout, "teamExpenses");
+        const pageSub = await user.channel(Page, "teamExpenses");
         await layoutSub.next({ timeoutMs: 1000 });
         await pageSub.next({ timeoutMs: 1000 });
 
-        store[7] = { soma: 33, itens: ["z"] };
-        await emit("gastosFamilia", { familiaId: 7 });
+        store[7] = { teamTotal: 33, items: ["z"] };
+        await emit("teamExpenses", { teamId: 7 });
 
-        expect(await layoutSub.next({ timeoutMs: 1000 })).toEqual({ soma: 33, itens: ["z"] });
-        expect(await pageSub.next({ timeoutMs: 1000 })).toEqual({ soma: 33, itens: ["z"] });
+        expect(await layoutSub.next({ timeoutMs: 1000 })).toEqual({ teamTotal: 33, items: ["z"] });
+        expect(await pageSub.next({ timeoutMs: 1000 })).toEqual({ teamTotal: 33, items: ["z"] });
 
         await layoutSub.close();
         await pageSub.close();
@@ -179,16 +179,16 @@ describe("live loader — slice mode", () => {
 
     it("does not reach a connection of another partition (CA2)", async () => {
         const calls = { n: 0 };
-        const Page = gastosModule({ moduleId: "gastos/Gastos", calls });
+        const Page = expensesModule({ moduleId: "expenses/Expenses", calls });
         const app = await appWith(routesFor(Page));
 
-        const a = await app.as({ user: { id: 1, familiaId: 7 } }).channel(Page, "gastosFamilia");
-        const b = await app.as({ user: { id: 2, familiaId: 8 } }).channel(Page, "gastosFamilia");
+        const a = await app.as({ user: { id: 1, teamId: 7 } }).channel(Page, "teamExpenses");
+        const b = await app.as({ user: { id: 2, teamId: 8 } }).channel(Page, "teamExpenses");
         await a.next({ timeoutMs: 1000 });
         await b.next({ timeoutMs: 1000 });
 
-        await emit(Page, "gastosFamilia", { familiaId: 7 }, { soma: 111 });
-        expect(await a.next({ timeoutMs: 1000 })).toEqual({ soma: 111 });
+        await emit(Page, "teamExpenses", { teamId: 7 }, { teamTotal: 111 });
+        expect(await a.next({ timeoutMs: 1000 })).toEqual({ teamTotal: 111 });
         expect(b.events).toHaveLength(1);
 
         await a.close();
@@ -207,18 +207,18 @@ describe("live loader — slice mode", () => {
  * unused `@ts-expect-error` (the line below failing to be an error) is too.
  */
 function __typeOnlySliceChecks(): void {
-    const Page = gastosModule({ moduleId: "gastos/Gastos" });
+    const Page = expensesModule({ moduleId: "expenses/Expenses" });
 
     // A valid slice: known keys, right types.
-    void emit(Page, "gastosFamilia", { familiaId: 7 }, { soma: 880 });
+    void emit(Page, "teamExpenses", { teamId: 7 }, { teamTotal: 880 });
     // Partial: sending one key is the point.
-    void emit(Page, "gastosFamilia", { familiaId: 7 }, { itens: ["a", "b"] });
+    void emit(Page, "teamExpenses", { teamId: 7 }, { items: ["a", "b"] });
     // @ts-expect-error — the key does not exist in the loader's return
-    void emit(Page, "gastosFamilia", { familiaId: 7 }, { inexistente: 1 });
+    void emit(Page, "teamExpenses", { teamId: 7 }, { unknownKey: 1 });
     // @ts-expect-error — the value type does not match the loader's return
-    void emit(Page, "gastosFamilia", { familiaId: 7 }, { soma: "880" });
+    void emit(Page, "teamExpenses", { teamId: 7 }, { teamTotal: "880" });
     // @ts-expect-error — the slice is required in the module form
-    void emit(Page, "gastosFamilia", { familiaId: 7 });
+    void emit(Page, "teamExpenses", { teamId: 7 });
 }
 
 describe("live loader — slice typing (CA3)", () => {
@@ -236,50 +236,50 @@ describe("live loader — slice typing (CA3)", () => {
 
 describe("live loader — slice guards", () => {
     it("throws when the module does not declare that channel, naming both", async () => {
-        const Page = gastosModule({ moduleId: "gastos/Gastos" });
-        await expect(emit(Page, "naoDeclarada", {}, { soma: 1 })).rejects.toThrow(
-            /does not declare channel "naoDeclarada"/,
+        const Page = expensesModule({ moduleId: "expenses/Expenses" });
+        await expect(emit(Page, "notDeclared", {}, { teamTotal: 1 })).rejects.toThrow(
+            /does not declare channel "notDeclared"/,
         );
-        await expect(emit(Page, "naoDeclarada", {}, { soma: 1 })).rejects.toThrow(
-            /gastos\/Gastos/,
+        await expect(emit(Page, "notDeclared", {}, { teamTotal: 1 })).rejects.toThrow(
+            /expenses\/Expenses/,
         );
     });
 
     it("throws when the module has no loader", async () => {
         const NoLoader = {
             Component: () => null,
-            metadata: { moduleId: "sem/Loader" },
-            channels: ["gastosFamilia"],
+            metadata: { moduleId: "no/Loader" },
+            channels: ["teamExpenses"],
         };
         await expect(
-            emit(NoLoader as any, "gastosFamilia", {}, { soma: 1 }),
-        ).rejects.toThrow(/sem\/Loader.*no `loader`/);
+            emit(NoLoader as any, "teamExpenses", {}, { teamTotal: 1 }),
+        ).rejects.toThrow(/no\/Loader.*no `loader`/);
     });
 
     it("throws when the module has no metadata.moduleId", async () => {
-        const Anonymous = { channels: ["gastosFamilia"], loader: async () => ({}) };
-        await expect(emit(Anonymous as any, "gastosFamilia", {}, {})).rejects.toThrow(
+        const Anonymous = { channels: ["teamExpenses"], loader: async () => ({}) };
+        await expect(emit(Anonymous as any, "teamExpenses", {}, {})).rejects.toThrow(
             /metadata\.moduleId/,
         );
     });
 
     it("throws when the channel has no entry in app/channels.ts", async () => {
-        const Page = gastosModule({
-            moduleId: "gastos/Gastos",
-            channels: ["gastosFamilia", "semMapa"],
+        const Page = expensesModule({
+            moduleId: "expenses/Expenses",
+            channels: ["teamExpenses", "notInMap"],
         });
         await expect(
-            emit(Page, "semMapa", { familiaId: 7 }, { soma: 1 }),
-        ).rejects.toThrow(/semMapa/);
+            emit(Page, "notInMap", { teamId: 7 }, { teamTotal: 1 }),
+        ).rejects.toThrow(/notInMap/);
     });
 
     it("throws when the slice is not an object of changed keys", async () => {
-        const Page = gastosModule({ moduleId: "gastos/Gastos" });
+        const Page = expensesModule({ moduleId: "expenses/Expenses" });
         await expect(
-            emit(Page, "gastosFamilia", { familiaId: 7 }, [1, 2] as any),
+            emit(Page, "teamExpenses", { teamId: 7 }, [1, 2] as any),
         ).rejects.toThrow(/slice must be the object of changed keys/);
         await expect(
-            emit(Page, "gastosFamilia", { familiaId: 7 }, 7 as any),
+            emit(Page, "teamExpenses", { teamId: 7 }, 7 as any),
         ).rejects.toThrow(/slice must be the object/);
     });
 });
@@ -296,21 +296,21 @@ describe("live loader — coalescing (CA7)", () => {
     it("folds N invalidation emits of one (channel, partition) into one round per connection", async () => {
         vi.useFakeTimers();
         const calls = { n: 0 };
-        const Page = gastosModule({ moduleId: "gastos/Gastos", calls });
+        const Page = expensesModule({ moduleId: "expenses/Expenses", calls });
         const app = await appWith(routesFor(Page), { coalesceMs: 20 });
 
         const sub = await app
-            .as({ user: { id: 1, familiaId: 7 } })
-            .channel(Page, "gastosFamilia");
-        expect(await sub.next({ timeoutMs: 1000 })).toEqual({ soma: 10, itens: ["a"] });
+            .as({ user: { id: 1, teamId: 7 } })
+            .channel(Page, "teamExpenses");
+        expect(await sub.next({ timeoutMs: 1000 })).toEqual({ teamTotal: 10, items: ["a"] });
         calls.n = 0;
 
-        store[7] = { soma: 2, itens: ["a"] };
-        await emit("gastosFamilia", { familiaId: 7 });
-        store[7] = { soma: 3, itens: ["a"] };
-        await emit("gastosFamilia", { familiaId: 7 });
-        store[7] = { soma: 4, itens: ["a"] };
-        await emit("gastosFamilia", { familiaId: 7 });
+        store[7] = { teamTotal: 2, items: ["a"] };
+        await emit("teamExpenses", { teamId: 7 });
+        store[7] = { teamTotal: 3, items: ["a"] };
+        await emit("teamExpenses", { teamId: 7 });
+        store[7] = { teamTotal: 4, items: ["a"] };
+        await emit("teamExpenses", { teamId: 7 });
 
         // Inside the window nothing ran: three gestures, zero rounds.
         expect(calls.n).toBe(0);
@@ -318,15 +318,15 @@ describe("live loader — coalescing (CA7)", () => {
         // The window closes: one round, carrying the effect of the three.
         await vi.advanceTimersByTimeAsync(20);
         expect(calls.n).toBe(1);
-        expect(await sub.next({ timeoutMs: 1000 })).toEqual({ soma: 4, itens: ["a"] });
+        expect(await sub.next({ timeoutMs: 1000 })).toEqual({ teamTotal: 4, items: ["a"] });
 
         // An emit after the close opens a new window.
-        store[7] = { soma: 5, itens: ["a"] };
-        await emit("gastosFamilia", { familiaId: 7 });
+        store[7] = { teamTotal: 5, items: ["a"] };
+        await emit("teamExpenses", { teamId: 7 });
         expect(calls.n).toBe(1);
         await vi.advanceTimersByTimeAsync(20);
         expect(calls.n).toBe(2);
-        expect(await sub.next({ timeoutMs: 1000 })).toEqual({ soma: 5, itens: ["a"] });
+        expect(await sub.next({ timeoutMs: 1000 })).toEqual({ teamTotal: 5, items: ["a"] });
 
         await sub.close();
         await app.close();
@@ -335,18 +335,18 @@ describe("live loader — coalescing (CA7)", () => {
     it("coalesces per (channel, partition) — another partition still gets its own round", async () => {
         vi.useFakeTimers();
         const calls = { n: 0 };
-        const Page = gastosModule({ moduleId: "gastos/Gastos", calls });
+        const Page = expensesModule({ moduleId: "expenses/Expenses", calls });
         const app = await appWith(routesFor(Page), { coalesceMs: 20 });
 
-        const a = await app.as({ user: { id: 1, familiaId: 7 } }).channel(Page, "gastosFamilia");
-        const b = await app.as({ user: { id: 2, familiaId: 8 } }).channel(Page, "gastosFamilia");
+        const a = await app.as({ user: { id: 1, teamId: 7 } }).channel(Page, "teamExpenses");
+        const b = await app.as({ user: { id: 2, teamId: 8 } }).channel(Page, "teamExpenses");
         await a.next({ timeoutMs: 1000 });
         await b.next({ timeoutMs: 1000 });
         calls.n = 0;
 
-        await emit("gastosFamilia", { familiaId: 7 });
-        await emit("gastosFamilia", { familiaId: 8 });
-        await emit("gastosFamilia", { familiaId: 7 });
+        await emit("teamExpenses", { teamId: 7 });
+        await emit("teamExpenses", { teamId: 8 });
+        await emit("teamExpenses", { teamId: 7 });
 
         await vi.advanceTimersByTimeAsync(20);
         // One round per connection: two connections, two loader executions.
@@ -359,20 +359,20 @@ describe("live loader — coalescing (CA7)", () => {
 
     it("window 0 (the toolkit default) keeps the immediate behavior", async () => {
         const calls = { n: 0 };
-        const Page = gastosModule({ moduleId: "gastos/Gastos", calls });
+        const Page = expensesModule({ moduleId: "expenses/Expenses", calls });
         const app = await appWith(routesFor(Page)); // no channelOptions → 0
 
         const sub = await app
-            .as({ user: { id: 1, familiaId: 7 } })
-            .channel(Page, "gastosFamilia");
+            .as({ user: { id: 1, teamId: 7 } })
+            .channel(Page, "teamExpenses");
         await sub.next({ timeoutMs: 1000 });
         calls.n = 0;
 
-        store[7] = { soma: 11, itens: ["a"] };
-        await emit("gastosFamilia", { familiaId: 7 });
+        store[7] = { teamTotal: 11, items: ["a"] };
+        await emit("teamExpenses", { teamId: 7 });
         // The round already happened when `emit` resolved — no timer to wait for.
         expect(calls.n).toBe(1);
-        expect(await sub.next({ timeoutMs: 1000 })).toEqual({ soma: 11, itens: ["a"] });
+        expect(await sub.next({ timeoutMs: 1000 })).toEqual({ teamTotal: 11, items: ["a"] });
 
         await sub.close();
         await app.close();
@@ -381,21 +381,21 @@ describe("live loader — coalescing (CA7)", () => {
     it("registerChannels without options uses the 50ms default", async () => {
         vi.useFakeTimers();
         const calls = { n: 0 };
-        const Page = gastosModule({ moduleId: "gastos/Gastos", calls });
+        const Page = expensesModule({ moduleId: "expenses/Expenses", calls });
         const app = await appWith(routesFor(Page), { coalesceMs: 0 });
 
         // Re-register the map without options: the default window applies.
         registerChannels(CHANNELS);
 
         const sub = await app
-            .as({ user: { id: 1, familiaId: 7 } })
-            .channel(Page, "gastosFamilia");
+            .as({ user: { id: 1, teamId: 7 } })
+            .channel(Page, "teamExpenses");
         await sub.next({ timeoutMs: 1000 });
         calls.n = 0;
 
-        store[7] = { soma: 12, itens: ["a"] };
-        await emit("gastosFamilia", { familiaId: 7 });
-        await emit("gastosFamilia", { familiaId: 7 });
+        store[7] = { teamTotal: 12, items: ["a"] };
+        await emit("teamExpenses", { teamId: 7 });
+        await emit("teamExpenses", { teamId: 7 });
         expect(calls.n).toBe(0);
 
         await vi.advanceTimersByTimeAsync(49);
@@ -410,18 +410,18 @@ describe("live loader — coalescing (CA7)", () => {
     it("a slice does not wait for the window — it is pushed directly", async () => {
         vi.useFakeTimers();
         const calls = { n: 0 };
-        const Page = gastosModule({ moduleId: "gastos/Gastos", calls });
+        const Page = expensesModule({ moduleId: "expenses/Expenses", calls });
         const app = await appWith(routesFor(Page), { coalesceMs: 10_000 });
 
         const sub = await app
-            .as({ user: { id: 1, familiaId: 7 } })
-            .channel(Page, "gastosFamilia");
+            .as({ user: { id: 1, teamId: 7 } })
+            .channel(Page, "teamExpenses");
         await sub.next({ timeoutMs: 1000 });
         calls.n = 0;
 
         // Nowhere near the window closing (10s away): the slice travels now.
-        await emit(Page, "gastosFamilia", { familiaId: 7 }, { soma: 42 });
-        expect(await sub.next({ timeoutMs: 1000 })).toEqual({ soma: 42 });
+        await emit(Page, "teamExpenses", { teamId: 7 }, { teamTotal: 42 });
+        expect(await sub.next({ timeoutMs: 1000 })).toEqual({ teamTotal: 42 });
         expect(calls.n).toBe(0);
 
         await sub.close();
@@ -443,22 +443,22 @@ describe("live loader — emit log (CA8)", () => {
     it("logs one line per gesture with channel, partition, kind, connections and timestamp", async () => {
         const log = vi.spyOn(console, "log").mockImplementation(() => {});
         try {
-            const Page = gastosModule({ moduleId: "gastos/Gastos" });
+            const Page = expensesModule({ moduleId: "expenses/Expenses" });
             const app = await appWith(routesFor(Page));
 
             const sub = await app
-                .as({ user: { id: 1, familiaId: 7 } })
-                .channel(Page, "gastosFamilia");
+                .as({ user: { id: 1, teamId: 7 } })
+                .channel(Page, "teamExpenses");
             await sub.next({ timeoutMs: 1000 });
 
-            await emit("gastosFamilia", { familiaId: 7 });
-            await emit(Page, "gastosFamilia", { familiaId: 7 }, { soma: 1 });
+            await emit("teamExpenses", { teamId: 7 });
+            await emit(Page, "teamExpenses", { teamId: 7 }, { teamTotal: 1 });
 
             const lines = emitLines(log);
             expect(lines).toHaveLength(2);
 
-            expect(lines[0]).toContain('channel="gastosFamilia"');
-            expect(lines[0]).toContain('partition="familia:7"');
+            expect(lines[0]).toContain('channel="teamExpenses"');
+            expect(lines[0]).toContain('partition="team:7"');
             expect(lines[0]).toContain("kind=invalidate");
             expect(lines[0]).toContain("connections=1");
             expect(lines[0]).toMatch(/at=\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/);
@@ -477,17 +477,17 @@ describe("live loader — emit log (CA8)", () => {
         vi.useFakeTimers();
         const log = vi.spyOn(console, "log").mockImplementation(() => {});
         try {
-            const Page = gastosModule({ moduleId: "gastos/Gastos" });
+            const Page = expensesModule({ moduleId: "expenses/Expenses" });
             const app = await appWith(routesFor(Page), { coalesceMs: 20 });
 
-            const a = await app.as({ user: { id: 1, familiaId: 7 } }).channel(Page, "gastosFamilia");
-            const b = await app.as({ user: { id: 2, familiaId: 7 } }).channel(Page, "gastosFamilia");
+            const a = await app.as({ user: { id: 1, teamId: 7 } }).channel(Page, "teamExpenses");
+            const b = await app.as({ user: { id: 2, teamId: 7 } }).channel(Page, "teamExpenses");
             await a.next({ timeoutMs: 1000 });
             await b.next({ timeoutMs: 1000 });
 
-            await emit("gastosFamilia", { familiaId: 7 });
-            await emit("gastosFamilia", { familiaId: 7 });
-            await emit("gastosFamilia", { familiaId: 7 });
+            await emit("teamExpenses", { teamId: 7 });
+            await emit("teamExpenses", { teamId: 7 });
+            await emit("teamExpenses", { teamId: 7 });
             expect(emitLines(log)).toHaveLength(3);
             expect(emitLines(log)[0]).toContain("connections=2");
 
@@ -507,15 +507,15 @@ describe("live loader — emit log (CA8)", () => {
     it("logs an emit whose scope resolves to nothing — reaching nobody is what the log is for", async () => {
         const log = vi.spyOn(console, "log").mockImplementation(() => {});
         try {
-            const Page = gastosModule({ moduleId: "gastos/Gastos" });
+            const Page = expensesModule({ moduleId: "expenses/Expenses" });
             const app = await createTestApp({
                 routes: routesFor(Page),
-                channels: { gastosFamilia: { scope: () => null } },
+                channels: { teamExpenses: { scope: () => null } },
                 getSessionCookie,
             });
 
-            await emit("gastosFamilia", { familiaId: 7 });
-            await emit(Page, "gastosFamilia", { familiaId: 7 }, { soma: 1 });
+            await emit("teamExpenses", { teamId: 7 });
+            await emit(Page, "teamExpenses", { teamId: 7 }, { teamTotal: 1 });
 
             const lines = emitLines(log);
             expect(lines).toHaveLength(2);
@@ -532,18 +532,18 @@ describe("live loader — emit log (CA8)", () => {
     it("logs nothing when logEmits is false", async () => {
         const log = vi.spyOn(console, "log").mockImplementation(() => {});
         try {
-            const Page = gastosModule({ moduleId: "gastos/Gastos" });
+            const Page = expensesModule({ moduleId: "expenses/Expenses" });
             const app = await appWith(routesFor(Page), { logEmits: false });
 
             const sub = await app
-                .as({ user: { id: 1, familiaId: 7 } })
-                .channel(Page, "gastosFamilia");
+                .as({ user: { id: 1, teamId: 7 } })
+                .channel(Page, "teamExpenses");
             await sub.next({ timeoutMs: 1000 });
 
-            await emit("gastosFamilia", { familiaId: 7 });
-            await emit(Page, "gastosFamilia", { familiaId: 7 }, { soma: 1 });
-            expect(await sub.next({ timeoutMs: 1000 })).toEqual({ soma: 10, itens: ["a"] });
-            expect(await sub.next({ timeoutMs: 1000 })).toEqual({ soma: 1 });
+            await emit("teamExpenses", { teamId: 7 });
+            await emit(Page, "teamExpenses", { teamId: 7 }, { teamTotal: 1 });
+            expect(await sub.next({ timeoutMs: 1000 })).toEqual({ teamTotal: 10, items: ["a"] });
+            expect(await sub.next({ timeoutMs: 1000 })).toEqual({ teamTotal: 1 });
 
             expect(emitLines(log)).toHaveLength(0);
 
@@ -563,8 +563,8 @@ describe("live loader — partition revalidation (CA9)", () => {
     /** The principal's current membership — the answer can move between subscribe and emit. */
     const membership = new Map<number, string | null>();
 
-    const membroChannels = {
-        gastosFamilia: {
+    const memberChannels = {
+        teamExpenses: {
             // A producer that already knows the affected partition names it; a
             // connection resolves its own from the principal's membership.
             scope: (ctx: any) =>
@@ -572,31 +572,31 @@ describe("live loader — partition revalidation (CA9)", () => {
         },
     };
 
-    async function membroApp(routes: AppRoutes) {
-        return await createTestApp({ routes, channels: membroChannels, getSessionCookie });
+    async function memberApp(routes: AppRoutes) {
+        return await createTestApp({ routes, channels: memberChannels, getSessionCookie });
     }
 
     beforeEach(() => {
-        membership.set(1, "familia:7");
-        membership.set(2, "familia:7");
+        membership.set(1, "team:7");
+        membership.set(2, "team:7");
     });
 
     it("drops and closes a connection whose partition moved — it receives nothing", async () => {
-        const Page = gastosModule({ moduleId: "gastos/Gastos" });
-        const app = await membroApp([
-            { path: "/gastos", module: Page as RouteModule, middlewares: [requireUser] },
+        const Page = expensesModule({ moduleId: "expenses/Expenses" });
+        const app = await memberApp([
+            { path: "/expenses", module: Page as RouteModule, middlewares: [requireUser] },
         ]);
 
-        const a = await app.as({ user: { userId: 1, familiaId: 7 } }).channel(Page, "gastosFamilia");
-        const b = await app.as({ user: { userId: 2, familiaId: 7 } }).channel(Page, "gastosFamilia");
-        expect(await a.next({ timeoutMs: 1000 })).toEqual({ soma: 10, itens: ["a"] });
-        expect(await b.next({ timeoutMs: 1000 })).toEqual({ soma: 10, itens: ["a"] });
+        const a = await app.as({ user: { userId: 1, teamId: 7 } }).channel(Page, "teamExpenses");
+        const b = await app.as({ user: { userId: 2, teamId: 7 } }).channel(Page, "teamExpenses");
+        expect(await a.next({ timeoutMs: 1000 })).toEqual({ teamTotal: 10, items: ["a"] });
+        expect(await b.next({ timeoutMs: 1000 })).toEqual({ teamTotal: 10, items: ["a"] });
 
         // The principal's membership moved between the subscription and the emit.
-        membership.set(1, "familia:9");
-        store[7] = { soma: 30, itens: ["a"] };
+        membership.set(1, "team:9");
+        store[7] = { teamTotal: 30, items: ["a"] };
 
-        await emit("gastosFamilia", { producerPartition: "familia:7" });
+        await emit("teamExpenses", { producerPartition: "team:7" });
 
         // A was re-derived to another partition: closed, and no snapshot of the
         // group it no longer belongs to.
@@ -604,7 +604,7 @@ describe("live loader — partition revalidation (CA9)", () => {
         expect(a.events).toHaveLength(1);
 
         // B still belongs: it receives the snapshot.
-        expect(await b.next({ timeoutMs: 1000 })).toEqual({ soma: 30, itens: ["a"] });
+        expect(await b.next({ timeoutMs: 1000 })).toEqual({ teamTotal: 30, items: ["a"] });
         expect(b.events).toHaveLength(2);
 
         await b.close();
@@ -612,23 +612,23 @@ describe("live loader — partition revalidation (CA9)", () => {
     });
 
     it("drops and closes a connection whose scope now returns null", async () => {
-        const Page = gastosModule({ moduleId: "gastos/Gastos" });
-        const app = await membroApp([
-            { path: "/gastos", module: Page as RouteModule, middlewares: [requireUser] },
+        const Page = expensesModule({ moduleId: "expenses/Expenses" });
+        const app = await memberApp([
+            { path: "/expenses", module: Page as RouteModule, middlewares: [requireUser] },
         ]);
 
-        const a = await app.as({ user: { userId: 1, familiaId: 7 } }).channel(Page, "gastosFamilia");
-        const b = await app.as({ user: { userId: 2, familiaId: 7 } }).channel(Page, "gastosFamilia");
+        const a = await app.as({ user: { userId: 1, teamId: 7 } }).channel(Page, "teamExpenses");
+        const b = await app.as({ user: { userId: 2, teamId: 7 } }).channel(Page, "teamExpenses");
         await a.next({ timeoutMs: 1000 });
         await b.next({ timeoutMs: 1000 });
 
         membership.set(1, null);
 
-        await emit("gastosFamilia", { producerPartition: "familia:7" });
+        await emit("teamExpenses", { producerPartition: "team:7" });
 
         await expect(a.next({ timeoutMs: 1000 })).rejects.toThrow(/closed/);
         expect(a.events).toHaveLength(1);
-        expect(await b.next({ timeoutMs: 1000 })).toEqual({ soma: 10, itens: ["a"] });
+        expect(await b.next({ timeoutMs: 1000 })).toEqual({ teamTotal: 10, items: ["a"] });
 
         await b.close();
         await app.close();
@@ -636,22 +636,22 @@ describe("live loader — partition revalidation (CA9)", () => {
 
     it("revalidates before a slice too — the dropped connection gets no slice", async () => {
         const calls = { n: 0 };
-        const Page = gastosModule({ moduleId: "gastos/Gastos", calls });
-        const app = await membroApp([
-            { path: "/gastos", module: Page as RouteModule, middlewares: [requireUser] },
+        const Page = expensesModule({ moduleId: "expenses/Expenses", calls });
+        const app = await memberApp([
+            { path: "/expenses", module: Page as RouteModule, middlewares: [requireUser] },
         ]);
 
-        const a = await app.as({ user: { userId: 1, familiaId: 7 } }).channel(Page, "gastosFamilia");
-        const b = await app.as({ user: { userId: 2, familiaId: 7 } }).channel(Page, "gastosFamilia");
+        const a = await app.as({ user: { userId: 1, teamId: 7 } }).channel(Page, "teamExpenses");
+        const b = await app.as({ user: { userId: 2, teamId: 7 } }).channel(Page, "teamExpenses");
         await a.next({ timeoutMs: 1000 });
         await b.next({ timeoutMs: 1000 });
 
-        membership.set(1, "familia:9");
-        await emit(Page, "gastosFamilia", { producerPartition: "familia:7" }, { soma: 77 });
+        membership.set(1, "team:9");
+        await emit(Page, "teamExpenses", { producerPartition: "team:7" }, { teamTotal: 77 });
 
         await expect(a.next({ timeoutMs: 1000 })).rejects.toThrow(/closed/);
         expect(a.events).toHaveLength(1);
-        expect(await b.next({ timeoutMs: 1000 })).toEqual({ soma: 77 });
+        expect(await b.next({ timeoutMs: 1000 })).toEqual({ teamTotal: 77 });
 
         await b.close();
         await app.close();
@@ -664,45 +664,45 @@ describe("live loader — partition revalidation (CA9)", () => {
 
 describe("live loader — toolkit contract (CA11)", () => {
     it("next() keeps returning the raw data (snapshot or slice) as it travels", async () => {
-        const Page = gastosModule({ moduleId: "gastos/Gastos" });
+        const Page = expensesModule({ moduleId: "expenses/Expenses" });
         const app = await appWith(routesFor(Page));
 
         const sub = await app
-            .as({ user: { id: 1, familiaId: 7 } })
-            .channel(Page, "gastosFamilia");
-        expect(await sub.next({ timeoutMs: 1000 })).toEqual({ soma: 10, itens: ["a"] });
+            .as({ user: { id: 1, teamId: 7 } })
+            .channel(Page, "teamExpenses");
+        expect(await sub.next({ timeoutMs: 1000 })).toEqual({ teamTotal: 10, items: ["a"] });
 
-        await emit(Page, "gastosFamilia", { familiaId: 7 }, { soma: 99 });
-        expect(await sub.next({ timeoutMs: 1000 })).toEqual({ soma: 99 }); // raw, unmerged
+        await emit(Page, "teamExpenses", { teamId: 7 }, { teamTotal: 99 });
+        expect(await sub.next({ timeoutMs: 1000 })).toEqual({ teamTotal: 99 }); // raw, unmerged
 
         await sub.close();
         await app.close();
     });
 
     it("nextEvent() discriminates the mode that delivered the update", async () => {
-        const Page = gastosModule({ moduleId: "gastos/Gastos" });
+        const Page = expensesModule({ moduleId: "expenses/Expenses" });
         const app = await appWith(routesFor(Page));
 
         const sub = await app
-            .as({ user: { id: 1, familiaId: 7 } })
-            .channel(Page, "gastosFamilia");
+            .as({ user: { id: 1, teamId: 7 } })
+            .channel(Page, "teamExpenses");
 
         expect(await sub.nextEvent({ timeoutMs: 1000 })).toEqual({
             type: "snapshot",
-            data: { soma: 10, itens: ["a"] },
+            data: { teamTotal: 10, items: ["a"] },
         });
 
-        store[7] = { soma: 25, itens: ["a"] };
-        await emit("gastosFamilia", { familiaId: 7 });
+        store[7] = { teamTotal: 25, items: ["a"] };
+        await emit("teamExpenses", { teamId: 7 });
         expect(await sub.nextEvent({ timeoutMs: 1000 })).toEqual({
             type: "snapshot",
-            data: { soma: 25, itens: ["a"] },
+            data: { teamTotal: 25, items: ["a"] },
         });
 
-        await emit(Page, "gastosFamilia", { familiaId: 7 }, { itens: ["x", "y"] });
+        await emit(Page, "teamExpenses", { teamId: 7 }, { items: ["x", "y"] });
         expect(await sub.nextEvent({ timeoutMs: 1000 })).toEqual({
             type: "slice",
-            data: { itens: ["x", "y"] },
+            data: { items: ["x", "y"] },
         });
 
         await sub.close();

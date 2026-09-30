@@ -69,20 +69,20 @@ An entry refreshes on navigation when the params **its own route declares** chan
 The loader has two faces. The common one fetches once per request (SSR) and
 re-fetches on SPA navigation — that is all a page needs when its data changes
 because of the user themselves or not at all. When a value must **track server
-state over time** (a family's total updated by another person's request, a
+state over time** (a team's total updated by another person's request, a
 background scheduler mutating data), declare channels next to the loader:
 
 ```tsx
-// app/gastos/Gastos.tsx
+// app/expenses/Expenses.tsx
 export const loader = async ({ c }: LoaderArgs) => {
     const user = c.get("user");
-    return { somaFamilia: await gastosService.somaFamilia(user.familiaId) };
+    return { teamTotal: await expensesService.teamTotal(user.teamId) };
 };
-export const channels = ["gastosFamilia"];
+export const channels = ["teamExpenses"];
 
 export const Component = () => {
     const { data, freshness } = useLoader();
-    return <h2 class={freshness.value}>Família: R$ {data.value?.somaFamilia}</h2>;
+    return <h2 class={freshness.value}>Team: ${data.value?.teamTotal}</h2>;
 };
 ```
 
@@ -91,10 +91,10 @@ And declare the partition of each channel once, in `app/channels.ts`:
 ```ts
 // app/channels.ts — the app's channel map: name → partition resolver
 export const channels = {
-    gastosFamilia: {
+    teamExpenses: {
         // ctx: on subscribe, the principal materialized in c.get("user");
         // on emit, the object the emitter passed. Returns the partition key.
-        scope: (ctx) => `familia:${ctx.familiaId}`,
+        scope: (ctx) => `team:${ctx.teamId}`,
     },
 };
 ```
@@ -103,14 +103,14 @@ Any server-side code signals that the partition changed:
 
 ```ts
 import { emit } from "@mauroandre/velojs/server";
-await emit("gastosFamilia", { familiaId: 7 });
+await emit("teamExpenses", { teamId: 7 });
 ```
 
 Or, when the producer already holds the new value, it pushes it as a typed slice:
 
 ```ts
-import * as Gastos from "../app/gastos/Gastos.js";
-await emit(Gastos, "gastosFamilia", { familiaId: 7 }, { somaFamilia: 880 });
+import * as Expenses from "../app/expenses/Expenses.js";
+await emit(Expenses, "teamExpenses", { teamId: 7 }, { teamTotal: 880 });
 ```
 
 The framework derives `GET /_channel/{moduleId}/{channel}` (same family as

@@ -469,29 +469,29 @@ channels that keep it fresh. No extra component, no manual subscription: the
 module exports `channels` next to its `loader`.
 
 ```tsx
-// app/gastos/Gastos.tsx
+// app/expenses/Expenses.tsx
 export const loader = async ({ c }: LoaderArgs) => {
     const user = c.get("user");
     return {
-        somaFamilia: await gastosService.somaFamilia(user.familiaId),
-        gastos: await gastosService.daFamilia(user.familiaId),
+        teamTotal: await expensesService.teamTotal(user.teamId),
+        expenses: await expensesService.byTeam(user.teamId),
     };
 };
-export const channels = ["gastosFamilia"];
+export const channels = ["teamExpenses"];
 
 export const Component = () => {
     const { data, freshness } = useLoader();
-    return <h2 class={freshness.value}>Família: R$ {data.value?.somaFamilia}</h2>;
+    return <h2 class={freshness.value}>Team: ${data.value?.teamTotal}</h2>;
 };
 ```
 
 ```ts
 // app/channels.ts — the app's channel map: name → partition resolver
 export const channels = {
-    gastosFamilia: {
+    teamExpenses: {
         // ctx: on subscribe, the principal materialized in c.get("user");
         // on emit, the object the emitter passed. Returns the partition key.
-        scope: (ctx) => `familia:${ctx.familiaId}`,
+        scope: (ctx) => `team:${ctx.teamId}`,
     },
 };
 ```
@@ -500,7 +500,7 @@ export const channels = {
 // anywhere server-side: an action, server.tsx, a scheduler, a webhook
 import { emit } from "@mauroandre/velojs/server";
 
-await emit("gastosFamilia", { familiaId: 7 });
+await emit("teamExpenses", { teamId: 7 });
 ```
 
 ### What happens
@@ -541,13 +541,13 @@ unknown key or a wrong value type.
 
 ```ts
 import { emit } from "@mauroandre/velojs/server";
-import * as Gastos from "../app/gastos/Gastos.js";
+import * as Expenses from "../app/expenses/Expenses.js";
 
-// invalidation: the runtime re-executes Gastos.loader per connection
-await emit("gastosFamilia", { familiaId: 7 });
+// invalidation: the runtime re-executes Expenses.loader per connection
+await emit("teamExpenses", { teamId: 7 });
 
 // slice: the value is already in hand — delivered as-is, no re-execution
-await emit(Gastos, "gastosFamilia", { familiaId: 7 }, { somaFamilia: 880 });
+await emit(Expenses, "teamExpenses", { teamId: 7 }, { teamTotal: 880 });
 ```
 
 Why the module, and not just the channel name? Because the same channel can be
@@ -591,7 +591,7 @@ key on top of the current value.
   the moment of the gesture:
 
   ```
-  [velojs] emit kind=invalidate channel="gastosFamilia" partition="familia:7" connections=2 at=2026-09-30T12:00:00.000Z
+  [velojs] emit kind=invalidate channel="teamExpenses" partition="team:7" connections=2 at=2026-09-30T12:00:00.000Z
   ```
 
   `connections` is the size of the group at that instant — before coalescing and
@@ -662,11 +662,11 @@ import { inspectChannels } from "@mauroandre/velojs/server";
 const report = inspectChannels();
 // {
 //   channels: [{
-//     channel: "gastosFamilia",
+//     channel: "teamExpenses",
 //     groups: [
-//       { moduleId: "gastos/Layout", partition: "familia:7",
+//       { moduleId: "expenses/Layout", partition: "team:7",
 //         connections: 1, lastDeliveryAt: "2026-09-30T12:00:00.000Z" },
-//       { moduleId: "gastos/Gastos", partition: "familia:7",
+//       { moduleId: "expenses/Expenses", partition: "team:7",
 //         connections: 1, lastDeliveryAt: "2026-09-30T12:00:01.104Z" },
 //     ],
 //     connections: 2,
@@ -729,7 +729,7 @@ Two questions decide, every time:
 import { createTestApp } from "@mauroandre/velojs/testing";
 import { emit } from "@mauroandre/velojs/server";
 import { channels } from "../app/channels.js";
-import * as Gastos from "../app/gastos/Gastos.js";
+import * as Expenses from "../app/expenses/Expenses.js";
 
 const app = await createTestApp({
     routes,
@@ -737,11 +737,11 @@ const app = await createTestApp({
     getSessionCookie: async ({ user }) => ({ session: await sign(user) }),
 });
 
-const sub = await app.as({ user: { familiaId: 7 } }).channel(Gastos, "gastosFamilia");
+const sub = await app.as({ user: { teamId: 7 } }).channel(Expenses, "teamExpenses");
 await sub.next({ timeoutMs: 1000 });     // snapshot on connect
-await emit("gastosFamilia", { familiaId: 7 });
+await emit("teamExpenses", { teamId: 7 });
 const snapshot = await sub.next({ timeoutMs: 1000 });
-await emit(Gastos, "gastosFamilia", { familiaId: 7 }, { somaFamilia: 880 });
+await emit(Expenses, "teamExpenses", { teamId: 7 }, { teamTotal: 880 });
 const slice = await sub.next({ timeoutMs: 1000 });
 ```
 
@@ -1687,9 +1687,9 @@ const asAlice = app.as({ user: alice });
 await asAlice.subscribe(stream_progress, { channel: appId });
 
 // Live loader — open a channel with a principal, emit, await the next snapshot
-const live = await app.as({ user: { familiaId: 7 } }).channel(Gastos, "gastosFamilia");
+const live = await app.as({ user: { teamId: 7 } }).channel(Expenses, "teamExpenses");
 await live.next({ timeoutMs: 1000 });            // snapshot on connect
-await emit("gastosFamilia", { familiaId: 7 });
+await emit("teamExpenses", { teamId: 7 });
 const snapshot = await live.next({ timeoutMs: 1000 });
 
 await app.close();
