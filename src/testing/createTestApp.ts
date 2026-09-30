@@ -9,7 +9,7 @@
 import type { EventStream } from "../events.js";
 import { getRegisteredStreams } from "../events.js";
 import { abortAllSocketSessions, injectWebSocketServer } from "../sockets.js";
-import { __resetChannels, registerChannels } from "../channels.js";
+import { __resetChannels, getChannelMap, registerChannels } from "../channels.js";
 import {
     createIsolatedContext,
     withAppContext,
@@ -83,7 +83,20 @@ export async function createTestApp(opts: CreateTestAppOptions): Promise<TestApp
         // the channel routes validate every declared name against it. Without
         // the option the map registered by `bootstrap` (or a previous app) is
         // kept — never wiped.
-        if (opts.channels) registerChannels(opts.channels);
+        //
+        // The toolkit registers with the coalescing window off (immediate,
+        // deterministic: `await emit(…)` is the delivery) unless the test asks
+        // for a window explicitly. `logEmits` keeps the production default and
+        // is configurable the same way.
+        const channelOptions = {
+            ...opts.channelOptions,
+            coalesceMs: opts.channelOptions?.coalesceMs ?? 0,
+        };
+        if (opts.channels) {
+            registerChannels(opts.channels, channelOptions);
+        } else {
+            registerChannels(getChannelMap(), channelOptions);
+        }
 
         // Build the actual Hono app
         const { createApp } = await import("../server.js");
@@ -351,9 +364,15 @@ function buildTestAppApi(
                 `/_channel/${moduleId}/${name}`,
                 o
             );
-            // Snapshots travel as `snapshot` events and are surfaced as events:
-            // the channel has no `message` events at all.
-            return await buildSubscription<T, T>({ response, snapshotEvents: true });
+            // Snapshots and slices travel as their own SSE events and are
+            // surfaced as events: the channel has no `message` events at all.
+            // `next()` returns the raw `data` (slice-1 contract); `nextEvent()`
+            // discriminates the mode that delivered it.
+            return await buildSubscription<T, T>({
+                response,
+                snapshotEvents: true,
+                channelEvents: true,
+            });
         },
 
         async socket(

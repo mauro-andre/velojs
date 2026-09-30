@@ -106,6 +106,13 @@ import { emit } from "@mauroandre/velojs/server";
 await emit("gastosFamilia", { familiaId: 7 });
 ```
 
+Or, when the producer already holds the new value, it pushes it as a typed slice:
+
+```ts
+import * as Gastos from "../app/gastos/Gastos.js";
+await emit(Gastos, "gastosFamilia", { familiaId: 7 }, { somaFamilia: 880 });
+```
+
 The framework derives `GET /_channel/{moduleId}/{channel}` (same family as
 `/_action` and `/_event`), inheriting the route node's `middlewares`; after
 hydration the client opens one connection per (module, channel) of the rendered
@@ -114,6 +121,39 @@ state** (the loader re-executed with that connection's own principal), and every
 `emit` re-executes the loader per connection in the emitting partition, pushing
 a snapshot that replaces the module's data. The component re-renders on its own —
 the page has no code for any of it.
+
+### Two ways to emit — invalidation or the value itself
+
+| Mode | Call | What the runtime does |
+|---|---|---|
+| Invalidation | `emit(channel, ctx)` | Re-executes the loader **per connection** of the partition and pushes a snapshot. The producer does not know the shape of the data |
+| Slice | `emit(module, channel, ctx, slice)` | Pushes the payload as-is to the connections of that (module, channel) pair in the partition — **no loader runs** |
+
+Use invalidation when only the server knows the new value (a background job, a
+request from another user). Use the slice when the producer already has it — a
+webhook that arrived with the payload, a job that just computed the total.
+
+The slice is typed `Partial<Awaited<ReturnType<typeof Module.loader>>>`: an
+unknown key or a wrong value type is a `tsc` error, never `any`. The module is
+part of the address because one channel can be declared by modules with
+different `Data` (a layout and a page): a slice is the shape of exactly **one**
+of them, and it reaches only that module's connections. The invalidation mode by
+name keeps reaching every module of the channel.
+
+### The merge contract — snapshot replaces, slice merges
+
+- A snapshot (connect or invalidation) is the whole value: it **replaces** the module's data, gone keys included.
+- A slice applies a **shallow** merge by key: the key sent is replaced by the **whole** value sent (a list travels whole inside its key); keys not sent stay intact.
+- **Removal is explicit**: removing an item is re-sending the key with the new whole list (without the item). An absent key never means "remove".
+- The merge happens **on arrival**, never at render: slices that land in the same frame are applied together before the next render — none is lost — and for the same key the last one in arrival order wins. A malformed payload keeps the previous value.
+- No deep patch and no list diff: the semantics stop at one level, by design. The runtime merges blindly (it is JavaScript) — shape safety comes from the emit typing. A key that does not exist in the `Data` only gets in through a cast: a usage error, documented, not a silent failure.
+
+### Bursts, log and revalidation
+
+- **Coalescing.** Invalidation emits fold per (channel, partition): the first opens a window, the emits inside it join it (the deadline does not move), and closing the window fires **one** re-execution round per connection — no invalidation is lost. Default `50ms` in any registration without options; `registerChannels(map, { coalesceMs: 0 })` disables it (immediate). A slice never waits for a window: it is pushed directly.
+  **The window changes what `await emit(…)` means.** With the window off (`0`, and the test toolkit's default) the await resolves after the round was delivered; with a window open it resolves as soon as the gesture is registered — the log line is already out, the delivery comes later. Never assert a screen update right after `await emit(…)` under the default window: assert the arrival (`next()`/`nextEvent()`) or wait for the effect.
+- **Emit log.** Every `emit`, in either mode, writes one `console.log` line at the moment of the gesture: `channel`, `partition`, `kind` (`invalidate`/`slice`), `connections` (the size of the group at that instant — before coalescing and before revalidation) and a timestamp. The consolidated delivery writes no second line; an emit whose `scope` resolves to nothing logs `partition=null connections=0`. `registerChannels(map, { logEmits: false })` silences it; `createTestApp` registers with window `0` and takes the same options in `channelOptions` — the map itself stays in `channels`, the options are a sibling key.
+- **Partition revalidation.** Before delivering anything, the runtime re-derives each connection's partition by running the `scope` again with the principal captured at subscribe. A connection whose partition moved — or whose scope now returns `null` — is removed from the group and closed: the client sees the connection closed (`freshness` goes `"stale"`) and receives none of that emit's data. A `scope` that **throws** on re-derivation is treated the same way (fail-closed: a resolver that failed cannot vouch for the partition) and the failure is logged naming the channel — a scope that does I/O must handle its own failures. Only the partition is revalidated; session/cookie expiry stays with the normal request pipeline.
 
 **The partition contract is fixed.** On subscribe the scope receives
 `c.get("user")` — the house key, the same one used by stream/socket resolvers. If
@@ -134,7 +174,10 @@ renders no JSX for it. Without `channels` it exists and stays `"live"`.
 Guards are explicit, never silent: `channels` in a module without a `loader`
 ("nothing to synchronize") and a channel with no entry in `app/channels.ts` both
 fail the dev server and the build; `emit()` on an unknown channel throws
-immediately naming it (`emit` on a valid channel with no subscribers is a no-op).
+immediately naming it (`emit` on a valid channel with no subscribers is a no-op);
+and `emit(module, channel, …)` on a module that does not declare that channel, or
+that has no `loader`, throws immediately naming both (a slice that is not an
+object throws too).
 In `velojs build --static` the channels are **inert** — no server, so the client
 opens no connection and freshness stays `"live"` — and the build warns, naming
 the module.

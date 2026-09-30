@@ -524,6 +524,91 @@ await emit("gastosFamilia", { familiaId: 7 });
   `"stale"` (connection closed/reconnecting), `"error"` (the last re-execution
   failed), aggregated per page. It is data for CSS to react to.
 
+### Two ways to emit
+
+**Invalidation** — `emit(channel, ctx)` says *this partition changed*, without
+knowing the shape of the data: the runtime re-executes the loader per connection
+and pushes the snapshot. Use it when only the server knows the new value (a
+background job, another request).
+
+**Slice** — `emit(module, channel, ctx, slice)` says *here is the new value*: the
+producer already holds it, so it travels as-is to the connections of that
+(module, channel) pair in the partition, and **no loader runs**. The slice is
+typed as a `Partial` of what that module's loader returns, so `tsc` rejects an
+unknown key or a wrong value type.
+
+```ts
+import { emit } from "@mauroandre/velojs/server";
+import * as Gastos from "../app/gastos/Gastos.js";
+
+// invalidation: the runtime re-executes Gastos.loader per connection
+await emit("gastosFamilia", { familiaId: 7 });
+
+// slice: the value is already in hand — delivered as-is, no re-execution
+await emit(Gastos, "gastosFamilia", { familiaId: 7 }, { somaFamilia: 880 });
+```
+
+Why the module, and not just the channel name? Because the same channel can be
+declared by a layout **and** by a page, each with its own loader and its own
+`Data` — a slice is the shape of exactly one of them, and it reaches only that
+module's connections. `emit(channel, ctx)` keeps reaching every module of the
+channel.
+
+### The merge contract
+
+- **Snapshot replaces; slice merges.** A snapshot (connect or invalidation) is
+the whole value of the module's data; a slice applies a **shallow** merge by
+key on top of the current value.
+- The key sent is replaced by the **whole value** sent — lists travel whole
+  inside their key; there is no list diff. Keys not sent stay intact.
+- **Removal is explicit**: removing an item is re-sending the key with the new
+  whole list (without the item). An absent key never means "remove".
+- The merge happens **on arrival**, never at render: slices that land in the
+  same frame are applied together before the next render — none is lost — and
+  for the same key the last one in arrival order wins. A malformed payload keeps
+  the previous value.
+- The runtime merges blindly (it is JavaScript); shape safety comes from the
+  emit typing. A key that does not exist in the loader's `Data` only gets in
+  through a cast, and that is a usage error.
+
+### Bursts, log and revalidation
+
+- **Coalescing.** Invalidation emits are folded per (channel, partition): the
+  first opens a window, the emits inside it join, and closing the window fires
+  **one** re-execution round per connection — no invalidation is lost. The
+  default window is `50ms`; `registerChannels(map, { coalesceMs: 0 })` turns it
+  off (immediate), and a slice never waits for it (a slice is pushed directly).
+
+  The window decides what `await emit(…)` waits for: with it off (`0`, and the
+  test toolkit's default) the await resolves after the round was delivered;
+  with it open it resolves as soon as the gesture is registered — the log line
+  is out, the delivery comes later. Never assert a screen update right after
+  `await emit(…)` under the default window: await the arrival (`next()` /
+  `nextEvent()`) or wait for the effect.
+- **Emit log.** Every `emit`, in either mode, writes one `console.log` line at
+  the moment of the gesture:
+
+  ```
+  [velojs] emit kind=invalidate channel="gastosFamilia" partition="familia:7" connections=2 at=2026-09-30T12:00:00.000Z
+  ```
+
+  `connections` is the size of the group at that instant — before coalescing and
+  before revalidation — and the consolidated delivery writes no second line. An
+  emit whose `scope` resolves to nothing logs `partition=null connections=0`:
+  reaching nobody is exactly what the log is for.
+  `registerChannels(map, { logEmits: false })` silences it. In tests,
+  `createTestApp` registers with the window off and takes the same options in
+  `channelOptions`.
+- **Partition revalidation.** Before delivering anything, the runtime re-derives
+  each connection's partition by running the `scope` again with the principal
+  captured at subscribe. A connection whose partition moved — or whose scope now
+  returns `null` — is removed from the group and closed: the client sees the
+  connection closed (`freshness` goes `"stale"`) and receives none of that
+  emit's data. A `scope` that **throws** on re-derivation is treated the same
+  way — fail-closed, with the failure logged naming the channel — so a scope
+  that does I/O must handle its own failures. Only the partition is revalidated;
+  session expiry stays with the normal request pipeline.
+
 ### The partition contract
 
 On subscribe the `scope` receives `c.get("user")` — the house key, the same one
@@ -552,6 +637,9 @@ Two questions decide, every time:
   server and in the build, naming the channel.
 - `emit()` on a channel with no entry in the map: throws immediately, naming
   the channel. `emit()` on a valid channel with no subscribers is a no-op.
+- `emit(module, channel, …)` on a module that does not declare that channel, or
+  that has no `loader`: throws immediately, naming both. A slice that is not an
+  object throws too.
 - `velojs build --static` with a module declaring `channels`: the channels are
   **inert** (no server for SSE) — the client opens no connection, `freshness`
   stays `"live"` and the build warns, naming the module.
@@ -576,6 +664,24 @@ const sub = await app.as({ user: { familiaId: 7 } }).channel(Gastos, "gastosFami
 await sub.next({ timeoutMs: 1000 });     // snapshot on connect
 await emit("gastosFamilia", { familiaId: 7 });
 const snapshot = await sub.next({ timeoutMs: 1000 });
+await emit(Gastos, "gastosFamilia", { familiaId: 7 }, { somaFamilia: 880 });
+const slice = await sub.next({ timeoutMs: 1000 });
+```
+
+`next()` returns the payload exactly as it travelled (a whole snapshot or a raw
+slice); `nextEvent()` returns the same arrivals discriminated —
+`{ type: "snapshot" | "slice", data }`. The toolkit registers the channels with
+the coalescing window off, so `await emit(…)` is the delivery; a test that
+exercises the window passes it in `channelOptions` — a sibling of `channels`,
+which stays the map — and drives it with fake timers:
+
+```ts
+const app = await createTestApp({
+    routes,
+    channels,                                    // the map
+    channelOptions: { coalesceMs: 20 },          // the registration options
+    getSessionCookie,
+});
 ```
 
 ---
@@ -1513,7 +1619,7 @@ await app.close();
 | `app.action(fn, opts)` | Invoke `action_*` by function reference |
 | `app.loader(fn, opts)` | Invoke `loader` and unwrap response data |
 | `app.subscribe(stream, opts)` | Subscribe to a stream; returns `TestSubscription` with `next/nextN/snapshot/close/closed` |
-| `app.channel(module, name, opts)` | Open a live-loader channel connection; snapshots arrive through `next()` |
+| `app.channel(module, name, opts)` | Open a live-loader channel connection; snapshots and slices arrive through `next()` (raw) or `nextEvent()` (`{ type, data }`) |
 | `app.as({ user })` | Sub-client with cookies bound to a user |
 | `app.sessionCookies({ user })` | Build cookies via `getSessionCookie` |
 | `app.mockContext(opts)` | Escape hatch — partial Hono Context for direct invocation |
@@ -1549,11 +1655,11 @@ See [Testing docs](https://github.com/mauro-andre/velojs/blob/dev/site/docs/17-t
 | Import | Contents |
 |--------|----------|
 | `@mauroandre/velojs` | Types (`AppRoutes`, `ActionArgs`, `LoaderArgs`, `Metadata`, `EventStream`, `EventStreamConfig`, `EmitFn`, `EmitOptions`, `SourceFn`, `PerChannelSourceFn`, `ChannelResolver`), `Scripts`, `Link`, `createEventStream`, `poll`, `defineConfig` |
-| `@mauroandre/velojs/server` | `startServer`, `createApp`, `addRoutes`, `onServer`, `serverDataStorage`, `emit`, `registerChannels`, `ChannelDefinition`, `ChannelMap` |
+| `@mauroandre/velojs/server` | `startServer`, `createApp`, `addRoutes`, `onServer`, `serverDataStorage`, `emit`, `registerChannels`, `ChannelDefinition`, `ChannelMap`, `ChannelRegistryOptions` |
 | `@mauroandre/velojs/client` | `startClient` |
 | `@mauroandre/velojs/hooks` | `Loader`, `useLoader`, `useEventStream`, `useParams`, `useQuery`, `useNavigate`, `usePathname`, `touch`, `Freshness` |
 | `@mauroandre/velojs/events` | `createEventStream`, `poll`, `EventStream`, `EventStreamConfig`, `EmitFn`, `EmitOptions`, `SourceFn`, `PerChannelSourceFn`, `ChannelResolver` (also re-exported from root) |
-| `@mauroandre/velojs/testing` | `createTestApp`, `TestApp`, `TestResponse`, `TestSubscription`, `TestChannelSubscription`, `CreateTestAppOptions`, `MockContextOptions` |
+| `@mauroandre/velojs/testing` | `createTestApp`, `TestApp`, `TestResponse`, `TestSubscription`, `TestChannelSubscription`, `ChannelEvent`, `CreateTestAppOptions`, `MockContextOptions` |
 | `@mauroandre/velojs/cookie` | `getCookie`, `setCookie`, `deleteCookie`, `getSignedCookie`, `setSignedCookie` |
 | `@mauroandre/velojs/factory` | `createMiddleware`, `createFactory` |
 | `@mauroandre/velojs/vite` | `veloPlugin` |

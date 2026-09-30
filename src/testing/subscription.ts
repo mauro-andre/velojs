@@ -3,7 +3,7 @@
  * and exposes assertion-friendly methods for tests.
  */
 
-import type { TestSubscription, NextOptions } from "./types.js";
+import type { TestSubscription, NextOptions, ChannelEvent } from "./types.js";
 
 interface SseEvent {
     event: string; // default "message"
@@ -69,21 +69,39 @@ interface BuildSubscriptionOptions {
      * update is a snapshot — so its subscription reads them as plain events.
      */
     snapshotEvents?: boolean;
+    /**
+     * Live-loader mode: `slice` events travel through `events`/`next()` like the
+     * snapshots (the payload exactly as it went on the wire), and every arrival
+     * is recorded discriminated in `nextEvent()` — `{ type: "snapshot" |
+     * "slice", data }`. `next()` keeps the slice-1 contract: the raw `data`.
+     */
+    channelEvents?: boolean;
 }
 
 export async function buildSubscription<TEvent, TSnapshot>(
     opts: BuildSubscriptionOptions
-): Promise<TestSubscription<TEvent, TSnapshot>> {
-    const { response, snapshotEvents = false } = opts;
+): Promise<TestSubscription<TEvent, TSnapshot> & {
+    /** Next arrival discriminated by the mode that delivered it. */
+    nextEvent(opts: NextOptions): Promise<ChannelEvent<TEvent>>;
+}> {
+    const { response, snapshotEvents = false, channelEvents = false } = opts;
     const status = response.status;
     const events: TEvent[] = [];
+    const typed: ChannelEvent<TEvent>[] = [];
     let snapshot: TSnapshot | null = null;
     let closed = false;
     let parseError: Error | null = null;
+    let waitedCount = 0;
+    let typedCount = 0;
 
     // Pending "next" waiters, FIFO
     const waiters: Array<{
         resolve: (e: TEvent) => void;
+        reject: (err: Error) => void;
+    }> = [];
+    // Pending "nextEvent" waiters, FIFO — one arrival feeds both cursors
+    const eventWaiters: Array<{
+        resolve: (e: ChannelEvent<TEvent>) => void;
         reject: (err: Error) => void;
     }> = [];
 
@@ -93,6 +111,11 @@ export async function buildSubscription<TEvent, TSnapshot>(
     const settleAll = (err?: Error) => {
         while (waiters.length > 0) {
             const w = waiters.shift()!;
+            if (err) w.reject(err);
+            else w.reject(new Error("[velojs/testing] subscription closed before next event"));
+        }
+        while (eventWaiters.length > 0) {
+            const w = eventWaiters.shift()!;
             if (err) w.reject(err);
             else w.reject(new Error("[velojs/testing] subscription closed before next event"));
         }
@@ -118,7 +141,8 @@ export async function buildSubscription<TEvent, TSnapshot>(
                     const chunk = decoder.decode(value, { stream: true });
                     const sseEvents = parser.push(chunk);
                     for (const sse of sseEvents) {
-                        if (sse.event === "snapshot") {
+                        const isSlice = sse.event === "slice";
+                        if (sse.event === "snapshot" || (channelEvents && isSlice)) {
                             let parsed: TSnapshot | undefined;
                             try {
                                 parsed = JSON.parse(sse.data) as TSnapshot;
@@ -126,12 +150,21 @@ export async function buildSubscription<TEvent, TSnapshot>(
                                 parseError = e as Error;
                             }
                             if (parsed !== undefined) {
-                                snapshot = parsed;
-                                if (snapshotEvents) {
+                                if (!isSlice) snapshot = parsed;
+                                if (snapshotEvents || (channelEvents && isSlice)) {
                                     const value = parsed as unknown as TEvent;
                                     events.push(value);
                                     const w = waiters.shift();
                                     if (w) w.resolve(value);
+                                }
+                                if (channelEvents) {
+                                    const event: ChannelEvent<TEvent> = {
+                                        type: isSlice ? "slice" : "snapshot",
+                                        data: parsed as unknown as TEvent,
+                                    };
+                                    typed.push(event);
+                                    const w = eventWaiters.shift();
+                                    if (w) w.resolve(event);
                                 }
                             }
                             continue;
@@ -169,7 +202,9 @@ export async function buildSubscription<TEvent, TSnapshot>(
         closed = true;
     }
 
-    const sub: TestSubscription<TEvent, TSnapshot> = {
+    const sub: TestSubscription<TEvent, TSnapshot> & {
+        nextEvent(opts: NextOptions): Promise<ChannelEvent<TEvent>>;
+    } = {
         get status() { return status; },
         get events() { return events as ReadonlyArray<TEvent>; },
         get snapshot() { return snapshot; },
@@ -206,6 +241,37 @@ export async function buildSubscription<TEvent, TSnapshot>(
             });
         },
 
+        async nextEvent({ timeoutMs }: NextOptions): Promise<ChannelEvent<TEvent>> {
+            if (parseError) throw parseError;
+            if (typed.length > typedCount) {
+                const event = typed[typedCount]!;
+                typedCount++;
+                return event;
+            }
+            if (closed) {
+                throw new Error("[velojs/testing] subscription is closed");
+            }
+            return new Promise<ChannelEvent<TEvent>>((resolve, reject) => {
+                const timer = setTimeout(() => {
+                    const idx = eventWaiters.findIndex((w) => w.resolve === wrapResolve);
+                    if (idx !== -1) eventWaiters.splice(idx, 1);
+                    reject(new Error(
+                        `[velojs/testing] timed out after ${timeoutMs}ms waiting for next event`
+                    ));
+                }, timeoutMs);
+                const wrapResolve = (e: ChannelEvent<TEvent>) => {
+                    clearTimeout(timer);
+                    typedCount++;
+                    resolve(e);
+                };
+                const wrapReject = (err: Error) => {
+                    clearTimeout(timer);
+                    reject(err);
+                };
+                eventWaiters.push({ resolve: wrapResolve, reject: wrapReject });
+            });
+        },
+
         async nextN(n: number, { timeoutMs }: NextOptions): Promise<TEvent[]> {
             const start = Date.now();
             const out: TEvent[] = [];
@@ -232,9 +298,6 @@ export async function buildSubscription<TEvent, TSnapshot>(
             await pumpDone.catch(() => {});
         },
     };
-
-    // Track how many events the consumer has already taken
-    let waitedCount = 0;
 
     return sub;
 }

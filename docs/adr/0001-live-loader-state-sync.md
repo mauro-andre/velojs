@@ -62,7 +62,7 @@ State synchronization is a first-class part of the loader contract, opt-in per m
 
 **Context.** A producer (a mutation, a background job, a request handler) must be able to signal that a partition's data changed. The state lives in the loader; the producer usually does not know its shape, and duplicating the shape outside the loader would drift.
 
-**Decision.** `emit(channel, partition-context)` with no payload makes the runtime re-execute the partition's loader on the server and push the snapshot through the channel. `emit(channel, partition-context, slice)` pushes only the named keys.
+**Decision.** `emit(channel, partition-context)` with no payload makes the runtime re-execute the partition's loader on the server and push the snapshot through the channel. `emit(module, channel, partition-context, slice)` pushes only the named keys, addressed to the (module, channel) pair (the address was amended from D4's literal — see Amendments).
 
 **Alternatives considered and rejected.** Invalidation with a client-side refetch. Rejected: the data must travel through the channel, not be pulled again by the client. Always emitting with a payload. Rejected: it would duplicate the computation of the data's shape outside the loader.
 
@@ -138,7 +138,7 @@ The `loader` + `channels` convention with guards (channels without a loader in t
 
 ### Slice 2 — Named slices and rich emission
 
-Emit with a typed `Partial`; shallow merge on arrival with an accumulator; explicit removal and whole lists; server-side coalescing per partition; emit logging (channel, partition, timestamp); partition revalidation on every emit.
+Emit with a typed `Partial`, addressed to the (module, channel) pair (see Amendment 3); shallow merge on arrival with an accumulator; explicit removal and whole lists; server-side coalescing per partition; emit logging (channel, partition, timestamp); partition revalidation on every emit.
 
 ### Slice 3 — Operations and observability
 
@@ -157,6 +157,14 @@ The path was therefore amended to `/_channel/{moduleId}/{channel}`. This is a de
 The three freshness states (`live`/`stale`/`error`) are delivered by **Slice 1**, aggregated per page and exposed on the `useLoader()`/`Loader()` handle — without them a live page has no way to say it lost the wire, and the slice would ship a stream nobody can observe.
 
 Slice 3 keeps the refinements: stagnation by inactivity timeout (an open connection that has said nothing for N) and per-channel granularity (freshness per connection rather than aggregated per page). This document is the anchor of the following slices and must not contradict what Slice 1 delivers.
+
+### Amendment 3 — Slice mode is addressed to the (module, channel) pair (supersedes D4's `emit(channel, partition-context, slice)` literal)
+
+D4 recorded the second mode as `emit(channel, partition-context, slice)` — addressed by channel name, exactly as the invalidation mode is. That literal does not survive the data: one channel can be declared by more than one module (a layout and a page of the same subtree both hold a live value from it), and each module has its **own** `loader` and therefore its own `Data`. A slice typed as a `Partial` of "the loader's return" has no referent when the channel names two loaders, and a slice pushed by name would reach connections whose `Data` has a different shape.
+
+The slice mode is therefore addressed to the **(module, channel) pair**: `emit(module, channel, partition-context, slice)`. The module is the imported route module — its `metadata.moduleId` is what identifies the connections — the slice is typed `Partial<Awaited<ReturnType<typeof Module.loader>>>`, and the runtime delivers it **only** to the connections of that pair in the resolved partition. The invalidation mode stays exactly as D4 wrote it: `emit(channel, partition-context)`, by name, reaching every module that declares the channel, each connection re-executed with its own principal.
+
+This is a deviation of the **address**, not of the decision: the payload's nature (a `Partial` of the loader's return), the shallow merge on arrival (D6) and the delivery without re-execution are D4's. D4's rejected alternative — always emitting with a payload — stays rejected, and the invalidation mode remains the one that needs no knowledge of the loader's shape.
 
 ## Non-goals (future)
 

@@ -11,14 +11,20 @@ import { flushPendingStreamRoutes, registerStreamHandler } from "./events.js";
 import { registerSocketRoutes, injectWebSocketServer, abortAllSocketSessions } from "./sockets.js";
 import { registerChannelRoute } from "./channels.js";
 
-// The live loader's server API: `emit` signals a channel's partition changed;
-// with no entry in `app/channels.ts` it throws immediately (never a silent
-// no-op).
+// The live loader's server API: `emit` signals a channel's partition changed —
+// by name (the runtime re-executes the loader) or by module with a typed slice
+// (the value travels as-is) — and both modes throw immediately on a channel with
+// no entry in `app/channels.ts` (never a silent no-op). `registerChannels`
+// takes the coalescing window and the emit log.
 export { emit, registerChannels } from "./channels.js";
 export type {
     ChannelDefinition,
     ChannelMap,
     ChannelScopeResult,
+    ChannelRegistryOptions,
+    ChannelEmitModule,
+    ChannelEmitKind,
+    ChannelSlice,
 } from "./channels.js";
 
 // ============================================

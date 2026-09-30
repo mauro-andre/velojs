@@ -27,6 +27,7 @@ export type {
     TestResponse,
     TestSubscription,
     TestChannelSubscription,
+    ChannelEvent,
     ChannelModuleRef,
     CreateTestAppOptions,
     RequestOptions,

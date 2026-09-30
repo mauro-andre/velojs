@@ -1,5 +1,5 @@
 /**
- * Live loader — client runtime (slice 1).
+ * Live loader — client runtime.
  *
  * After hydration, every rendered module that declares `channels` opens one SSE
  * connection per (module, channel) at `/_channel/{moduleId}/{channel}`. The
@@ -8,6 +8,16 @@
  * stays faithful to server state without a line of code from the developer:
  * `useLoader()`/`Loader()` handles keep the same signal instance and the
  * reading component re-renders on its own.
+ *
+ * A `slice` event is the other delivery mode: the producer already holds the
+ * value, so the payload carries only the changed keys. A slice is merged
+ * shallowly by key onto the module's current value — the key sent is replaced
+ * by the whole value sent, keys not sent stay intact, and an absent key never
+ * means "removed" (removal is re-sending the key with the new whole value).
+ * The merge happens on arrival, never at render: slices that land in the same
+ * frame are accumulated and applied together before the next render, so none is
+ * lost, and for the same key the last one in arrival order wins. A malformed
+ * payload keeps the previous value, exactly like a malformed snapshot.
  *
  * A channel declared by a layout AND by a page produces one connection per
  * module (each feeding its own module's signal); a single `emit` by channel
@@ -31,6 +41,11 @@ declare const __VELO_STATIC__: boolean;
 /** Freshness of the page's live data, as data for CSS to react to. */
 export type Freshness = "live" | "stale" | "error";
 
+/** SSE event name of a value that replaces the module's data. */
+const SNAPSHOT_EVENT = "snapshot";
+/** SSE event name of a slice to be merged into the module's current value. */
+const SLICE_EVENT = "slice";
+
 interface ConnectionState {
     /** `"open"` while the connection is usable; `"closed"` after a server close. */
     state: "open" | "reconnecting" | "closed";
@@ -44,6 +59,67 @@ const freshness = signal<Freshness>("live");
 /** The page-level freshness signal shared by every loader handle. */
 export function loaderFreshness(): Signal<Freshness> {
     return freshness;
+}
+
+/**
+ * Slices waiting to be applied, per module — the accumulator of the arrival
+ * merge. Slices that land in the same frame are flushed together on a
+ * microtask, before the next render, so none is lost between renders.
+ */
+const pendingSlices = new Map<string, Record<string, unknown>[]>();
+let flushScheduled = false;
+
+function queueSlice(moduleId: string, slice: Record<string, unknown>): void {
+    let list = pendingSlices.get(moduleId);
+    if (!list) {
+        list = [];
+        pendingSlices.set(moduleId, list);
+    }
+    list.push(slice);
+
+    if (flushScheduled) return;
+    flushScheduled = true;
+    queueMicrotask(applyPendingSlices);
+}
+
+/**
+ * Applies every accumulated slice, in arrival order, onto each module's current
+ * value. Merging onto the value read at flush time (not at arrival time) keeps
+ * the result the same as a synchronous apply, and the last slice of a key wins.
+ */
+function applyPendingSlices(): void {
+    flushScheduled = false;
+    if (pendingSlices.size === 0) return;
+
+    const batches = [...pendingSlices];
+    pendingSlices.clear();
+
+    for (const [moduleId, slices] of batches) {
+        const entry = loaderEntry<Record<string, unknown>>(moduleId);
+        let value: unknown = entry.value;
+        for (const slice of slices) {
+            const base =
+                value !== null && typeof value === "object" && !Array.isArray(value)
+                    ? (value as Record<string, unknown>)
+                    : {};
+            value = { ...base, ...slice };
+        }
+        entry.value = value as Record<string, unknown>;
+    }
+}
+
+/** A slice is malformed unless it is a plain object — never a list, never a scalar. */
+function parseSlice(data: unknown): Record<string, unknown> | null {
+    if (typeof data !== "string" || data.length === 0) return null;
+    try {
+        const parsed = JSON.parse(data);
+        if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+            return null;
+        }
+        return parsed as Record<string, unknown>;
+    } catch {
+        return null;
+    }
 }
 
 function recompute(): void {
@@ -64,8 +140,9 @@ function recompute(): void {
 
 /**
  * Opens the SSE connection of one (module, channel) pair and feeds the module's
- * loader-store entry with every snapshot it receives. Returns the closer — the
- * channel lives exactly as long as the module that declares it is mounted.
+ * loader-store entry with every snapshot and slice it receives. Returns the
+ * closer — the channel lives exactly as long as the module that declares it is
+ * mounted.
  *
  * Inert (no connection, no freshness change) in a static build: there is no
  * server to speak SSE.
@@ -80,12 +157,18 @@ export function connectChannel(moduleId: string, channel: string): () => void {
     connections.add(record);
     recompute();
 
+    // Slices are accumulated per module and flushed together, so a second
+    // slice that lands while an earlier one is pending joins the same flush,
+    // in arrival order.
     const es = new EventSource(
         `/_channel/${encodeURI(moduleId)}/${encodeURIComponent(channel)}`,
     );
 
-    es.addEventListener("snapshot", (e) => {
+    es.addEventListener(SNAPSHOT_EVENT, (e) => {
         try {
+            // A snapshot stands for the whole value: anything still pending for
+            // this module would be clobbered by it, so it is applied first.
+            applyPendingSlices();
             loaderEntry(moduleId).value = JSON.parse((e as MessageEvent).data);
             record.state = "open";
             record.failed = false;
@@ -94,6 +177,15 @@ export function connectChannel(moduleId: string, channel: string): () => void {
             // Malformed payload: keep the previous value (a failed push must
             // never blank the screen).
         }
+    });
+
+    es.addEventListener(SLICE_EVENT, (e) => {
+        const slice = parseSlice((e as MessageEvent).data);
+        if (!slice) return; // malformed: keep the previous value
+        record.state = "open";
+        record.failed = false;
+        recompute();
+        queueSlice(moduleId, slice);
     });
 
     es.addEventListener("error", (e) => {
@@ -159,5 +251,7 @@ export function ChannelBoundary({
 /** Test-only. Drops every connection and resets the aggregate freshness. */
 export function __resetLiveLoader(): void {
     connections.clear();
+    pendingSlices.clear();
+    flushScheduled = false;
     freshness.value = "live";
 }

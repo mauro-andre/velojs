@@ -137,6 +137,138 @@ describe("live loader — the last mile", () => {
 });
 
 // ============================================
+// Slices — the arrival merge (CA4/CA5/CA6)
+// ============================================
+
+/**
+ * The merge happens on arrival, accumulated and applied on a microtask — this
+ * drains that accumulator. Never a timer, never a render.
+ */
+async function flushSlices(): Promise<void> {
+    await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+    });
+}
+
+interface GastosView {
+    soma: number;
+    lista: string[];
+}
+
+describe("live loader — slices", () => {
+    function mounted() {
+        let handle: any;
+        function Page() {
+            handle = useLoader<GastosView>("gastos/Gastos");
+            return (
+                <div>
+                    {handle.data.value?.soma ?? "-"}|{handle.data.value?.lista?.join(",") ?? ""}
+                </div>
+            );
+        }
+        const rendered = render(
+            <ChannelBoundary moduleId="gastos/Gastos" channels={["gastosFamilia"]}>
+                <Page />
+            </ChannelBoundary>,
+        );
+        return { ...rendered, es: FakeEventSource.instances[0]!, handle: () => handle };
+    }
+
+    const value = () => loaderEntry<GastosView>("gastos/Gastos").value;
+
+    it("merges shallowly by key: the key sent is replaced, the others stay intact (CA4)", async () => {
+        const { es, container } = mounted();
+        act(() => es.emit("snapshot", JSON.stringify({ soma: 5, lista: ["a", "b"] })));
+        expect(container.textContent).toBe("5|a,b");
+
+        act(() => es.emit("slice", JSON.stringify({ soma: 10 })));
+        await flushSlices();
+
+        expect(value()).toEqual({ soma: 10, lista: ["a", "b"] });
+        expect(container.textContent).toBe("10|a,b");
+    });
+
+    it("applies every slice of the same frame — none is lost, the last of a key wins (CA4)", async () => {
+        const { es } = mounted();
+        act(() => es.emit("snapshot", JSON.stringify({ soma: 5, lista: ["a"] })));
+
+        // Three slices inside one frame: two distinct keys and a repeat.
+        act(() => {
+            es.emit("slice", JSON.stringify({ soma: 1 }));
+            es.emit("slice", JSON.stringify({ lista: ["z"] }));
+            es.emit("slice", JSON.stringify({ soma: 2 }));
+        });
+        await flushSlices();
+
+        expect(value()).toEqual({ soma: 2, lista: ["z"] });
+    });
+
+    it("a malformed slice keeps the previous value (CA4)", async () => {
+        const { es } = mounted();
+        act(() => es.emit("snapshot", JSON.stringify({ soma: 5, lista: ["a"] })));
+
+        act(() => es.emit("slice", "{not json"));
+        act(() => es.emit("slice", JSON.stringify([1, 2])));
+        act(() => es.emit("slice", JSON.stringify("text")));
+        act(() => es.emit("slice"));
+        await flushSlices();
+
+        expect(value()).toEqual({ soma: 5, lista: ["a"] });
+    });
+
+    it("a snapshot keeps replacing the whole value, in either order with a slice (CA5)", async () => {
+        const { es } = mounted();
+        act(() => es.emit("snapshot", JSON.stringify({ soma: 1, lista: ["a", "b"] })));
+
+        // Snapshot replaces: the key it does not carry is gone.
+        act(() => es.emit("snapshot", JSON.stringify({ soma: 9 })));
+        expect(value()).toEqual({ soma: 9 });
+
+        // Snapshot → slice: the merge builds on the snapshot's value.
+        act(() => es.emit("slice", JSON.stringify({ lista: ["c"] })));
+        await flushSlices();
+        expect(value()).toEqual({ soma: 9, lista: ["c"] });
+
+        // Arrival order: a slice then a snapshot — the snapshot replaces.
+        act(() => {
+            es.emit("slice", JSON.stringify({ soma: 100 }));
+            es.emit("snapshot", JSON.stringify({ soma: 7 }));
+        });
+        await flushSlices();
+        expect(value()).toEqual({ soma: 7 });
+    });
+
+    it("removal is explicit: an absent key never removes, the whole new list does (CA6)", async () => {
+        const { es, container } = mounted();
+        act(() => es.emit("snapshot", JSON.stringify({ soma: 5, lista: ["a", "b"] })));
+        expect(container.textContent).toBe("5|a,b");
+
+        // A slice that does not mention the list leaves it alone.
+        act(() => es.emit("slice", JSON.stringify({ soma: 6 })));
+        await flushSlices();
+        expect(value()!.lista).toEqual(["a", "b"]);
+
+        // Removing an item is re-sending the key with the new whole list.
+        act(() => es.emit("slice", JSON.stringify({ lista: ["a"] })));
+        await flushSlices();
+        expect(value()).toEqual({ soma: 6, lista: ["a"] });
+        expect(container.textContent).toBe("6|a");
+    });
+
+    it("a slice marks the connection live again, like a snapshot (CA4)", async () => {
+        const { es } = mounted();
+        es.readyState = FakeEventSource.CONNECTING;
+        act(() => es.emit("error"));
+        expect(Loader("gastos/Gastos").freshness.value).toBe("stale");
+
+        act(() => es.emit("slice", JSON.stringify({ soma: 3 })));
+        await flushSlices();
+        expect(Loader("gastos/Gastos").freshness.value).toBe("live");
+    });
+});
+
+// ============================================
 // Connections in the rendered hierarchy
 // ============================================
 

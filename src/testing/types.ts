@@ -6,7 +6,7 @@ import type { Hono, Context } from "hono";
 import type { AppRoutes, RouteModule } from "../types.js";
 import type { EventStream } from "../events.js";
 import type { SocketHandler, SocketStub } from "../sockets.js";
-import type { ChannelMap } from "../channels.js";
+import type { ChannelMap, ChannelRegistryOptions } from "../channels.js";
 
 export type Cookies = Record<string, string>;
 export type Headers = Record<string, string>;
@@ -37,6 +37,13 @@ export interface CreateTestAppOptions {
      * via `registerChannels()`.
      */
     channels?: ChannelMap;
+    /**
+     * Options of the channel registration: the coalescing window of the
+     * invalidation mode and the emit log. `createTestApp` registers with
+     * `coalesceMs: 0` (immediate, deterministic) unless this option says
+     * otherwise; `logEmits` defaults to on, as in production.
+     */
+    channelOptions?: ChannelRegistryOptions;
     /**
      * Serve the app over real TCP on this port, in addition to the in-memory
      * API. Needed when an actor outside this process must reach the app over
@@ -145,15 +152,29 @@ export interface TestSubscription<TEvent = any, TSnapshot = any> {
 }
 
 /**
- * A live-loader channel subscription. Every update — the snapshot on connect
- * and each emit's snapshot — arrives as an SSE `snapshot` event and is
- * delivered here as an event, so a test awaits the next state with
- * `next({ timeoutMs })`: no sleep, no retry, no timing assertion.
+ * A live-loader channel subscription. Every update — the snapshot on connect,
+ * each emit's snapshot and each slice — arrives through `next()` as the `data`
+ * exactly as it went on the wire (a whole snapshot or a raw slice), so `await
+ * next({ timeoutMs })` is the clock: no sleep, no retry, no timing assertion.
+ *
+ * `nextEvent()` is the same arrival stream discriminated as
+ * `{ type: "snapshot" | "slice", data }` — use it when the test cares which
+ * mode delivered the update. `next()` and `nextEvent()` each advance their own
+ * cursor over the same arrivals, so use one or the other within a test.
  *
  * The connection only exists after the connect snapshot: await the first
  * `next()` before emitting, and the server is guaranteed to have registered it.
  */
-export type TestChannelSubscription<T = any> = TestSubscription<T, T>;
+export interface TestChannelSubscription<T = any> extends TestSubscription<T, T> {
+    /** Next arrival, discriminated by the mode that delivered it. */
+    nextEvent(opts: NextOptions): Promise<ChannelEvent<T>>;
+}
+
+/** One channel arrival: a whole snapshot or a slice to be merged. */
+export interface ChannelEvent<T = any> {
+    type: "snapshot" | "slice";
+    data: T;
+}
 
 /** The module (or moduleId) a channel belongs to, as `app.channel()` accepts it. */
 export type ChannelModuleRef =
@@ -232,6 +253,13 @@ export interface TestApp {
      * await sub.next({ timeoutMs: 1000 });        // snapshot on connect
      * await emit("gastosFamilia", { familiaId: 7 });
      * expect(await sub.next({ timeoutMs: 1000 })).toEqual({ somaFamilia: 2 });
+     *
+     * // The same arrivals discriminated: nextEvent() tells a snapshot from a slice.
+     * await emit(Gastos, "gastosFamilia", { familiaId: 7 }, { somaFamilia: 880 });
+     * expect(await sub.nextEvent({ timeoutMs: 1000 })).toEqual({
+     *     type: "slice",
+     *     data: { somaFamilia: 880 },
+     * });
      * ```
      */
     channel<T = any>(
