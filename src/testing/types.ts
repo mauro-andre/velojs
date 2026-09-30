@@ -3,9 +3,10 @@
  */
 
 import type { Hono, Context } from "hono";
-import type { AppRoutes } from "../types.js";
+import type { AppRoutes, RouteModule } from "../types.js";
 import type { EventStream } from "../events.js";
 import type { SocketHandler, SocketStub } from "../sockets.js";
+import type { ChannelMap } from "../channels.js";
 
 export type Cookies = Record<string, string>;
 export type Headers = Record<string, string>;
@@ -29,6 +30,13 @@ export interface CreateTestAppOptions {
      * `app.sessionCookies(user)`.
      */
     getSessionCookie?: (input: { user: any }) => Promise<Cookies> | Cookies;
+    /**
+     * The app's live-loader channel map — the same object `app/channels.ts`
+     * exports. Registered before the app is created, so the channel routes and
+     * `emit()` can resolve partitions. May also be registered from `bootstrap`
+     * via `registerChannels()`.
+     */
+    channels?: ChannelMap;
     /**
      * Serve the app over real TCP on this port, in addition to the in-memory
      * API. Needed when an actor outside this process must reach the app over
@@ -136,6 +144,22 @@ export interface TestSubscription<TEvent = any, TSnapshot = any> {
     close(): Promise<void>;
 }
 
+/**
+ * A live-loader channel subscription. Every update — the snapshot on connect
+ * and each emit's snapshot — arrives as an SSE `snapshot` event and is
+ * delivered here as an event, so a test awaits the next state with
+ * `next({ timeoutMs })`: no sleep, no retry, no timing assertion.
+ *
+ * The connection only exists after the connect snapshot: await the first
+ * `next()` before emitting, and the server is guaranteed to have registered it.
+ */
+export type TestChannelSubscription<T = any> = TestSubscription<T, T>;
+
+/** The module (or moduleId) a channel belongs to, as `app.channel()` accepts it. */
+export type ChannelModuleRef =
+    | string
+    | { metadata?: { moduleId?: string } | undefined };
+
 export interface MockContextOptions {
     user?: any;
     params?: Params;
@@ -192,6 +216,29 @@ export interface TestApp {
         stream: EventStream<TEvent, TSnapshot> | string,
         opts?: SubscribeOptions
     ): Promise<TestSubscription<TEvent, TSnapshot>>;
+
+    // Live loader
+    /**
+     * Open a live-loader channel connection for a module's declared channel.
+     *
+     * The module may be the imported route module (its `metadata.moduleId` is
+     * read) or a moduleId string. Cookies (and therefore the principal) come
+     * from the options or from `app.as(user)`; the route node's middlewares run
+     * for real, so an unauthenticated subscription is denied exactly as in
+     * production.
+     *
+     * ```ts
+     * const sub = await app.as({ id: 7 }).channel(Gastos, "gastosFamilia");
+     * await sub.next({ timeoutMs: 1000 });        // snapshot on connect
+     * await emit("gastosFamilia", { familiaId: 7 });
+     * expect(await sub.next({ timeoutMs: 1000 })).toEqual({ somaFamilia: 2 });
+     * ```
+     */
+    channel<T = any>(
+        module: ChannelModuleRef,
+        name: string,
+        opts?: SubscribeOptions
+    ): Promise<TestChannelSubscription<T>>;
 
     // Sockets
     /**

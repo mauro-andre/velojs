@@ -24,6 +24,15 @@ export interface Metadata {
 export interface RouteModule {
     Component: ComponentType<any>;
     loader?: (args: LoaderArgs) => Promise<any>;
+    /**
+     * Channel names whose state must keep this module's loader data faithful.
+     * The opt-in for the live loader: with `channels`, the framework derives an
+     * internal SSE route per channel (`/_channel/{moduleId}/{channel}`) and the
+     * client opens one connection per (module, channel) after hydration. A
+     * module that declares `channels` without a `loader` is an explicit
+     * dev/build error. Requires an entry per name in `app/channels.ts`.
+     */
+    channels?: readonly string[];
     staticPaths?: () => Promise<Record<string, string>[]>;
     metadata?: Metadata;
     [key: `action_${string}`]: (args: ActionArgs<any>) => Promise<any>;

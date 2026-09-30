@@ -63,12 +63,18 @@ class SseParser {
 interface BuildSubscriptionOptions {
     response: Response;
     parseJson?: boolean;
+    /**
+     * Deliver `snapshot` events through `events`/`next()` too, not only via the
+     * `snapshot` getter. The live loader has no `message` events at all — every
+     * update is a snapshot — so its subscription reads them as plain events.
+     */
+    snapshotEvents?: boolean;
 }
 
 export async function buildSubscription<TEvent, TSnapshot>(
     opts: BuildSubscriptionOptions
 ): Promise<TestSubscription<TEvent, TSnapshot>> {
-    const { response } = opts;
+    const { response, snapshotEvents = false } = opts;
     const status = response.status;
     const events: TEvent[] = [];
     let snapshot: TSnapshot | null = null;
@@ -113,10 +119,20 @@ export async function buildSubscription<TEvent, TSnapshot>(
                     const sseEvents = parser.push(chunk);
                     for (const sse of sseEvents) {
                         if (sse.event === "snapshot") {
+                            let parsed: TSnapshot | undefined;
                             try {
-                                snapshot = JSON.parse(sse.data) as TSnapshot;
+                                parsed = JSON.parse(sse.data) as TSnapshot;
                             } catch (e) {
                                 parseError = e as Error;
+                            }
+                            if (parsed !== undefined) {
+                                snapshot = parsed;
+                                if (snapshotEvents) {
+                                    const value = parsed as unknown as TEvent;
+                                    events.push(value);
+                                    const w = waiters.shift();
+                                    if (w) w.resolve(value);
+                                }
                             }
                             continue;
                         }

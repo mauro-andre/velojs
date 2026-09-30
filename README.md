@@ -461,6 +461,125 @@ SPA navigation:
 
 ---
 
+## Live Loader
+
+A page value that must **track server state over time** — a total another
+person's request changes, data a background scheduler mutates — declares the
+channels that keep it fresh. No extra component, no manual subscription: the
+module exports `channels` next to its `loader`.
+
+```tsx
+// app/gastos/Gastos.tsx
+export const loader = async ({ c }: LoaderArgs) => {
+    const user = c.get("user");
+    return {
+        somaFamilia: await gastosService.somaFamilia(user.familiaId),
+        gastos: await gastosService.daFamilia(user.familiaId),
+    };
+};
+export const channels = ["gastosFamilia"];
+
+export const Component = () => {
+    const { data, freshness } = useLoader();
+    return <h2 class={freshness.value}>Família: R$ {data.value?.somaFamilia}</h2>;
+};
+```
+
+```ts
+// app/channels.ts — the app's channel map: name → partition resolver
+export const channels = {
+    gastosFamilia: {
+        // ctx: on subscribe, the principal materialized in c.get("user");
+        // on emit, the object the emitter passed. Returns the partition key.
+        scope: (ctx) => `familia:${ctx.familiaId}`,
+    },
+};
+```
+
+```ts
+// anywhere server-side: an action, server.tsx, a scheduler, a webhook
+import { emit } from "@mauroandre/velojs/server";
+
+await emit("gastosFamilia", { familiaId: 7 });
+```
+
+### What happens
+
+- The framework derives one internal SSE route per declared channel —
+  `GET /_channel/{moduleId}/{channel}`, the same family as `/_action` and
+  `/_event` — inheriting the `middlewares` of the module's route node.
+- After hydration the client opens one connection per (module, channel) of the
+  rendered hierarchy (layout and page alike) and closes it on unmount. A
+  channel declared by both a layout and a page produces one connection per
+  module, each feeding its own module's data; a single `emit` reaches both.
+- Every new connection immediately receives the **current state**, computed by
+  re-executing the loader with that connection's own principal — so the pane
+  never shows the SSR value while the server has already moved on.
+- `emit(channel, ctx)` resolves the partition with the same `scope`, finds the
+  connections in that partition and pushes a fresh snapshot to each one — its
+  loader re-executed with its own principal. Connections of other partitions
+  receive nothing.
+- The snapshot **replaces** the module's loader data; the component re-renders
+  by itself. `useLoader()` and `Loader()` also expose `freshness` — `"live"`,
+  `"stale"` (connection closed/reconnecting), `"error"` (the last re-execution
+  failed), aggregated per page. It is data for CSS to react to.
+
+### The partition contract
+
+On subscribe the `scope` receives `c.get("user")` — the house key, the same one
+the stream/socket channel resolvers use (a middleware that materializes the
+principal elsewhere should set it in `"user"` too). Without an authenticated
+principal it receives `undefined`: a public channel ignores it (`() => "all"`),
+an authenticated one returns `null`, which denies the subscription with 403.
+The partition **never** derives from the query string or from any client input.
+
+### State or flow?
+
+Two questions decide, every time:
+
+| Question | Answer | Tool |
+|---|---|---|
+| Is this a **value** or a **sequence**? | value — "what is it now?", replacement | `loader` + `channels` |
+| | sequence — "what happened?", accumulation (chat, log, progress) | `stream_*` / `socket_*` |
+| Does the change come from **someone else** or from **me**? | someone else / a background job | `loader` + `channels` |
+| | me, through my own action | `refetch()` after the action |
+
+### Guards
+
+- `channels` in a module **without** a `loader`: explicit error in the dev
+  server and in the build ("nothing to synchronize").
+- A channel **without an entry** in `app/channels.ts`: explicit error in the dev
+  server and in the build, naming the channel.
+- `emit()` on a channel with no entry in the map: throws immediately, naming
+  the channel. `emit()` on a valid channel with no subscribers is a no-op.
+- `velojs build --static` with a module declaring `channels`: the channels are
+  **inert** (no server for SSE) — the client opens no connection, `freshness`
+  stays `"live"` and the build warns, naming the module.
+- A module outside the conventions (`.jsx`/`.js`, or outside `app/`) is the one
+  genuinely silent line: no transform, so the channel is simply inert.
+
+### Testing a live loader
+
+```ts
+import { createTestApp } from "@mauroandre/velojs/testing";
+import { emit } from "@mauroandre/velojs/server";
+import { channels } from "../app/channels.js";
+import * as Gastos from "../app/gastos/Gastos.js";
+
+const app = await createTestApp({
+    routes,
+    channels,
+    getSessionCookie: async ({ user }) => ({ session: await sign(user) }),
+});
+
+const sub = await app.as({ user: { familiaId: 7 } }).channel(Gastos, "gastosFamilia");
+await sub.next({ timeoutMs: 1000 });     // snapshot on connect
+await emit("gastosFamilia", { familiaId: 7 });
+const snapshot = await sub.next({ timeoutMs: 1000 });
+```
+
+---
+
 ## Actions
 
 Server-side functions callable from the client via RPC.
@@ -1375,6 +1494,12 @@ const event = await sub.next({ timeoutMs: 2000 });
 const asAlice = app.as({ user: alice });
 await asAlice.subscribe(stream_progress, { channel: appId });
 
+// Live loader — open a channel with a principal, emit, await the next snapshot
+const live = await app.as({ user: { familiaId: 7 } }).channel(Gastos, "gastosFamilia");
+await live.next({ timeoutMs: 1000 });            // snapshot on connect
+await emit("gastosFamilia", { familiaId: 7 });
+const snapshot = await live.next({ timeoutMs: 1000 });
+
 await app.close();
 ```
 
@@ -1388,6 +1513,7 @@ await app.close();
 | `app.action(fn, opts)` | Invoke `action_*` by function reference |
 | `app.loader(fn, opts)` | Invoke `loader` and unwrap response data |
 | `app.subscribe(stream, opts)` | Subscribe to a stream; returns `TestSubscription` with `next/nextN/snapshot/close/closed` |
+| `app.channel(module, name, opts)` | Open a live-loader channel connection; snapshots arrive through `next()` |
 | `app.as({ user })` | Sub-client with cookies bound to a user |
 | `app.sessionCookies({ user })` | Build cookies via `getSessionCookie` |
 | `app.mockContext(opts)` | Escape hatch — partial Hono Context for direct invocation |
@@ -1423,11 +1549,11 @@ See [Testing docs](https://github.com/mauro-andre/velojs/blob/dev/site/docs/17-t
 | Import | Contents |
 |--------|----------|
 | `@mauroandre/velojs` | Types (`AppRoutes`, `ActionArgs`, `LoaderArgs`, `Metadata`, `EventStream`, `EventStreamConfig`, `EmitFn`, `EmitOptions`, `SourceFn`, `PerChannelSourceFn`, `ChannelResolver`), `Scripts`, `Link`, `createEventStream`, `poll`, `defineConfig` |
-| `@mauroandre/velojs/server` | `startServer`, `createApp`, `addRoutes`, `onServer`, `serverDataStorage` |
+| `@mauroandre/velojs/server` | `startServer`, `createApp`, `addRoutes`, `onServer`, `serverDataStorage`, `emit`, `registerChannels`, `ChannelDefinition`, `ChannelMap` |
 | `@mauroandre/velojs/client` | `startClient` |
-| `@mauroandre/velojs/hooks` | `Loader`, `useLoader`, `useEventStream`, `useParams`, `useQuery`, `useNavigate`, `usePathname`, `touch` |
+| `@mauroandre/velojs/hooks` | `Loader`, `useLoader`, `useEventStream`, `useParams`, `useQuery`, `useNavigate`, `usePathname`, `touch`, `Freshness` |
 | `@mauroandre/velojs/events` | `createEventStream`, `poll`, `EventStream`, `EventStreamConfig`, `EmitFn`, `EmitOptions`, `SourceFn`, `PerChannelSourceFn`, `ChannelResolver` (also re-exported from root) |
-| `@mauroandre/velojs/testing` | `createTestApp`, `TestApp`, `TestResponse`, `TestSubscription`, `CreateTestAppOptions`, `MockContextOptions` |
+| `@mauroandre/velojs/testing` | `createTestApp`, `TestApp`, `TestResponse`, `TestSubscription`, `TestChannelSubscription`, `CreateTestAppOptions`, `MockContextOptions` |
 | `@mauroandre/velojs/cookie` | `getCookie`, `setCookie`, `deleteCookie`, `getSignedCookie`, `setSignedCookie` |
 | `@mauroandre/velojs/factory` | `createMiddleware`, `createFactory` |
 | `@mauroandre/velojs/vite` | `veloPlugin` |
@@ -1460,6 +1586,7 @@ interface Metadata {
 interface RouteModule {
     Component: ComponentType<any>;
     loader?: (args: LoaderArgs) => Promise<any>;
+    channels?: readonly string[];   // live loader: channel names kept fresh
     metadata?: Metadata;
     [key: `action_${string}`]: (args: ActionArgs) => Promise<any>;
 }
@@ -1534,6 +1661,10 @@ export const staticPaths = async () => {
 ```
 
 Routes without `staticPaths` are skipped with a warning.
+
+### Live loader in a static build
+
+A module that declares `channels` keeps rendering, but its channels are **inert** there: there is no server to speak SSE, so the client opens no connection, `freshness` stays `"live"` and the build warns, naming the module. Static output has no live data by construction.
 
 ### Deploying
 

@@ -4,6 +4,7 @@ import { useEffect } from "preact/hooks";
 import type { VNode, ComponentType } from "preact";
 import type { RouteNode, AppRoutes } from "./types.js";
 import { registerRoutePatterns, syncLocation } from "./loader-store.js";
+import { ChannelBoundary } from "./live-loader.js";
 
 // ============================================
 // CLIENT OPTIONS
@@ -126,12 +127,24 @@ const buildRoutes = (
 
         const Component = node.module.Component;
 
+        // The live channels live exactly as long as the module declaring them:
+        // the boundary is transparent (no DOM node) and only ties the SSE
+        // connection lifecycle to this module's mount/unmount.
+        const channelBoundary = (children: VNode) => (
+            <ChannelBoundary
+                moduleId={node.module?.metadata?.moduleId}
+                channels={node.module?.channels}
+            >
+                {children}
+            </ChannelBoundary>
+        );
+
         // Leaf — a concrete route at its absolute full path.
         if (!node.children) {
             const full = joinPath(basePath, node.path, true) || "/";
             vnodes.push(
                 <Route key={key} path={full}>
-                    <Component />
+                    {channelBoundary(<Component />)}
                 </Route>
             );
             continue;
@@ -165,14 +178,16 @@ const buildRoutes = (
             : subtreeRegex(node, basePath);
         vnodes.push(
             <Route key={key} path={layoutPath as any}>
-                <Component>
-                    <Switch>
-                        {withDefault(
-                            buildRoutes(node.children, prefix, NotFound, `${key}-`),
-                            NotFound
-                        )}
-                    </Switch>
-                </Component>
+                {channelBoundary(
+                    <Component>
+                        <Switch>
+                            {withDefault(
+                                buildRoutes(node.children, prefix, NotFound, `${key}-`),
+                                NotFound
+                            )}
+                        </Switch>
+                    </Component>
+                )}
             </Route>
         );
     }

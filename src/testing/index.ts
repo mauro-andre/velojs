@@ -15,6 +15,10 @@
  * expect(res.status).toBe(200);
  * await app.close();
  * ```
+ *
+ * The live loader is exercised deterministically with `app.channel(module,
+ * name)`: open a channel connection with a principal, emit and await the next
+ * snapshot — no sleep, no retry.
  */
 
 export { createTestApp } from "./createTestApp.js";
@@ -22,6 +26,8 @@ export type {
     TestApp,
     TestResponse,
     TestSubscription,
+    TestChannelSubscription,
+    ChannelModuleRef,
     CreateTestAppOptions,
     RequestOptions,
     BodyRequestOptions,

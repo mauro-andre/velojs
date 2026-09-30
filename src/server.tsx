@@ -9,6 +9,17 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { getAppContext } from "./app-context.js";
 import { flushPendingStreamRoutes, registerStreamHandler } from "./events.js";
 import { registerSocketRoutes, injectWebSocketServer, abortAllSocketSessions } from "./sockets.js";
+import { registerChannelRoute } from "./channels.js";
+
+// The live loader's server API: `emit` signals a channel's partition changed;
+// with no entry in `app/channels.ts` it throws immediately (never a silent
+// no-op).
+export { emit, registerChannels } from "./channels.js";
+export type {
+    ChannelDefinition,
+    ChannelMap,
+    ChannelScopeResult,
+} from "./channels.js";
 
 // ============================================
 // ASYNC LOCAL STORAGE - Dados isolados por request
@@ -448,6 +459,45 @@ const registerStreamRoutes = async (
 };
 
 // ============================================
+// REGISTER CHANNEL ROUTES - Live loader (channels) por módulo
+// ============================================
+
+const registerChannelRoutes = (
+    app: Hono,
+    nodes: RouteNode[],
+    parentMiddlewares: MiddlewareHandler[] = []
+) => {
+    for (const node of nodes) {
+        const moduleId = node.module?.metadata?.moduleId;
+        // Acumula middlewares: pai → filho (mesma herança das páginas/actions)
+        const currentMiddlewares = [
+            ...parentMiddlewares,
+            ...(node.middlewares || []),
+        ];
+
+        if (node.module && moduleId) {
+            const channels = node.module.channels;
+            if (Array.isArray(channels)) {
+                for (const channel of channels) {
+                    registerChannelRoute(
+                        app,
+                        `/_channel/${moduleId}/${channel}`,
+                        channel,
+                        node.module,
+                        moduleId,
+                        currentMiddlewares
+                    );
+                }
+            }
+        }
+
+        if (node.children) {
+            registerChannelRoutes(app, node.children, currentMiddlewares);
+        }
+    }
+};
+
+// ============================================
 // REGISTER ENDPOINT ROUTES - Declarative HTTP endpoints (EndpointRoute)
 // ============================================
 
@@ -582,6 +632,9 @@ export const createApp = async (routes: AppRoutes): Promise<Hono> => {
 
     // Stream routes (SSE) — convenção stream_* por módulo
     await registerStreamRoutes(app, routes);
+
+    // Channel routes (live loader, SSE) — convenção channels por módulo
+    registerChannelRoutes(app, routes);
 
     // Endpoint routes (declarative HTTP endpoints mixed into the route tree)
     const pageGetPaths = collectPageGetPaths(routes);

@@ -9,6 +9,7 @@
 import type { EventStream } from "../events.js";
 import { getRegisteredStreams } from "../events.js";
 import { abortAllSocketSessions, injectWebSocketServer } from "../sockets.js";
+import { __resetChannels, registerChannels } from "../channels.js";
 import {
     createIsolatedContext,
     withAppContext,
@@ -24,6 +25,8 @@ import type {
     SubscribeOptions,
     MockContextOptions,
     CreateTestAppOptions,
+    ChannelModuleRef,
+    TestChannelSubscription,
     TestSubscription,
     TestSocketSession,
     SocketTestOptions,
@@ -75,6 +78,12 @@ export async function createTestApp(opts: CreateTestAppOptions): Promise<TestApp
         // Run user bootstrap so any addRoutes/onServer/createEventStream
         // calls land in this isolated context.
         if (opts.bootstrap) await opts.bootstrap();
+
+        // The live-loader channel map, registered before the app is created:
+        // the channel routes validate every declared name against it. Without
+        // the option the map registered by `bootstrap` (or a previous app) is
+        // kept — never wiped.
+        if (opts.channels) registerChannels(opts.channels);
 
         // Build the actual Hono app
         const { createApp } = await import("../server.js");
@@ -328,6 +337,25 @@ function buildTestAppApi(
             return await buildSubscription<TEvent, TSnapshot>({ response });
         },
 
+        async channel<T = any>(
+            module: ChannelModuleRef,
+            name: string,
+            o: SubscribeOptions = {}
+        ): Promise<TestChannelSubscription<T>> {
+            const moduleId = typeof module === "string"
+                ? module
+                : module?.metadata?.moduleId;
+            if (!moduleId) throwNoChannelModuleId(module);
+            const response = await streamingRequest(
+                "GET",
+                `/_channel/${moduleId}/${name}`,
+                o
+            );
+            // Snapshots travel as `snapshot` events and are surfaced as events:
+            // the channel has no `message` events at all.
+            return await buildSubscription<T, T>({ response, snapshotEvents: true });
+        },
+
         async socket(
             handlerInput: SocketHandler | SocketStub | { __path: string } | string,
             o: SocketTestOptions = {}
@@ -377,6 +405,18 @@ function buildTestAppApi(
                 }) as unknown as T;
             };
 
+            // `channel(module, name, opts)` has three arguments — its own wrapper
+            // instead of shoehorning it into the two-argument shape.
+            const wrapChannel = (method: typeof api.channel): typeof api.channel => {
+                return (async (module: any, name: string, o: any = {}) => {
+                    const cookies = await getCookies();
+                    return await method.call(api, module, name, {
+                        ...o,
+                        cookies: { ...cookies, ...(o?.cookies ?? {}) },
+                    });
+                }) as unknown as typeof api.channel;
+            };
+
             const sub: TestApp = {
                 hono,
                 port: api.port,
@@ -389,6 +429,7 @@ function buildTestAppApi(
                 action: wrap(api.action),
                 loader: wrap(api.loader),
                 subscribe: wrap(api.subscribe),
+                channel: wrapChannel(api.channel),
                 socket: wrap(api.socket),
                 sessionCookies: api.sessionCookies,
                 as: api.as, // chaining .as.as works — last wins
@@ -412,6 +453,8 @@ function buildTestAppApi(
                     console.error("[velojs/testing] stream.__reset failed:", err);
                 }
             }
+            // Drop every live channel connection
+            __resetChannels();
         },
 
         async close() {
@@ -446,6 +489,15 @@ async function wrapResponse(response: Response): Promise<TestResponse> {
         blob: () => response.clone().blob(),
         raw: response,
     };
+}
+
+function throwNoChannelModuleId(module: ChannelModuleRef): never {
+    const seen = typeof module === "string" ? module : "(a module without metadata)";
+    throw new Error(
+        "[velojs/testing] channel(module, name) needs the module's metadata.moduleId " +
+            `— got ${seen}. Pass the imported route module (the Vite plugin injects the ` +
+            "metadata) or the moduleId string."
+    );
 }
 
 function throwNoStreamPath(stream: EventStream<any, any>): never {

@@ -42,7 +42,7 @@ State synchronization is a first-class part of the loader contract, opt-in per m
 
 **Context.** The framework already derives routes from module conventions: actions at `/_action/{moduleId}/{name}`, event streams at `/_event/{moduleId}/{name}`, sockets at `/_socket/{moduleId}/{name}`. Addressing is uniform and observable, and the client already speaks one protocol per primitive.
 
-**Decision.** Every declared channel generates an automatic SSE route `/_event/{moduleId}/{channel}` (the same family as `stream_*` and `/_action`). After hydration, the client opens one `EventSource` per channel of the page.
+**Decision.** Every declared channel generates an automatic SSE route in the same family as `stream_*` and `/_action` (the literal path was amended to `/_channel/{moduleId}/{channel}` — see Amendments). After hydration, the client opens one `EventSource` per channel of the page.
 
 **Alternatives considered and rejected.** A single multiplexed connection with an internal tag protocol. Rejected: a new abstraction with no counterpart in the framework, incoherent with the existing addressing patterns.
 
@@ -116,7 +116,7 @@ State synchronization is a first-class part of the loader contract, opt-in per m
 
 **Alternatives considered and rejected.** The framework rendering its own visual indicator (a banner or status overlay). Rejected: it violates the house rule that visual state is CSS reacting to data, and each app needs to shape freshness feedback to its own visual language.
 
-**Consequences.** Applications style freshness however they want, keyed off a stable piece of data. The framework stays presentation-agnostic. Full freshness (live/stale/error) lands in Slice 3.
+**Consequences.** Applications style freshness however they want, keyed off a stable piece of data. The framework stays presentation-agnostic. The live/stale/error states land in Slice 1, aggregated per page; Slice 3 refines them (see Amendments).
 
 ### D10 — First load unchanged, full compatibility
 
@@ -134,7 +134,7 @@ The slices are ordered and non-overlapping.
 
 ### Slice 1 — End-to-end core
 
-The `loader` + `channels` convention with guards (channels without a loader in the module is an explicit dev/build error; `.tsx` module conventions inside `app/` hold as today); automatic routes with inherited middlewares; per-channel connection with a snapshot on connect; partition by resolver with the session default; emit in invalidation mode (no payload); basic freshness; deterministic tests in `createTestApp` (emit-and-observe without sleeps, partition testable with a fake principal and two connections, inherited middleware testable); synchronization of AGENTS.md, README, and site/docs with the state-vs-flow rule and the D7 guiding questions ("is this a value or a sequence?" and "does the change come from someone else or from me?").
+The `loader` + `channels` convention with guards (channels without a loader in the module is an explicit dev/build error; `.tsx` module conventions inside `app/` hold as today); automatic routes (`/_channel/{moduleId}/{channel}`, see Amendments) with inherited middlewares; per-channel connection with a snapshot on connect; partition by resolver with the session default; emit in invalidation mode (no payload); basic freshness (live/stale/error, aggregated per page, in `useLoader`/`Loader`); deterministic tests in `createTestApp` (emit-and-observe without sleeps, partition testable with a fake principal and two connections, inherited middleware testable); synchronization of AGENTS.md, README, and site/docs with the state-vs-flow rule and the D7 guiding questions ("is this a value or a sequence?" and "does the change come from someone else or from me?").
 
 ### Slice 2 — Named slices and rich emission
 
@@ -142,7 +142,21 @@ Emit with a typed `Partial`; shallow merge on arrival with an accumulator; expli
 
 ### Slice 3 — Operations and observability
 
-Channel idle timeout; `Cache-Control: no-store`, heartbeat, and operational notes for proxies; an inspector of live channels per page; full freshness (live/stale/error).
+Channel idle timeout; `Cache-Control: no-store`, heartbeat, and operational notes for proxies; an inspector of live channels per page; freshness refinements — stagnation by inactivity timeout (an open connection that has said nothing for N — proxy/sleeping tab) and per-channel granularity (per connection, not aggregated). The three states themselves are Slice 1's (see Amendments).
+
+## Amendments
+
+### Amendment 1 — Channel path: `/_channel/{moduleId}/{channel}` (supersedes the D2 literal)
+
+D2 recorded the channel route as `/_event/{moduleId}/{channel}`, the same path family as `stream_*`. That literal collides with a `stream_*` declared by the same module: a module with both `stream_logs` and a `channels: ["logs"]` declaration would register two different handlers at one path, and whichever won would silently swallow the other.
+
+The path was therefore amended to `/_channel/{moduleId}/{channel}`. This is a detail of path **inside** the family D2 chose — addressing stays uniform with `/_action`/`/_event`/`/_socket`, inheritance of middlewares and inspectability are unchanged, and D2's rejected alternative (a single multiplexed connection with an internal tag protocol) stays rejected. The deviation is conscious and local: a channel and a stream of the same module never share a path.
+
+### Amendment 2 — Freshness reallocated between slices (supersedes D9's "Slice 3" consequence)
+
+The three freshness states (`live`/`stale`/`error`) are delivered by **Slice 1**, aggregated per page and exposed on the `useLoader()`/`Loader()` handle — without them a live page has no way to say it lost the wire, and the slice would ship a stream nobody can observe.
+
+Slice 3 keeps the refinements: stagnation by inactivity timeout (an open connection that has said nothing for N) and per-channel granularity (freshness per connection rather than aggregated per page). This document is the anchor of the following slices and must not contradict what Slice 1 delivers.
 
 ## Non-goals (future)
 

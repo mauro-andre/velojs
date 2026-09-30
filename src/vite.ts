@@ -949,6 +949,110 @@ export function collectFullPaths(
 }
 
 // ============================================
+// LIVE LOADER — channel convention guards
+// ============================================
+
+/**
+ * Names declared by a module's `channels` export — `null` when the module does
+ * not declare the convention (no `channels` array export at all).
+ *
+ * Only the array form is a channel declaration: `app/channels.ts` also exports
+ * a `channels` binding, but an object (the name → resolver map), and must never
+ * be read as a module declaring channels.
+ */
+export function declaredChannelNames(code: string): string[] | null {
+    const ast = parse(code, {
+        sourceType: "module",
+        plugins: ["typescript", "jsx"],
+    });
+
+    let found: string[] | null = null;
+
+    traverse(ast, {
+        ExportNamedDeclaration(nodePath) {
+            if (found) return;
+            const declaration = nodePath.node.declaration;
+            if (!t.isVariableDeclaration(declaration)) return;
+
+            for (const declarator of declaration.declarations) {
+                if (!t.isIdentifier(declarator.id, { name: "channels" })) continue;
+                let init = declarator.init;
+                if (
+                    init &&
+                    (t.isTSSatisfiesExpression(init) || t.isTSAsExpression(init))
+                ) {
+                    init = init.expression;
+                }
+                if (!t.isArrayExpression(init)) continue;
+
+                const names: string[] = [];
+                for (const element of init.elements) {
+                    // Only literal names can be validated against the app map;
+                    // anything else is left alone (the convention is an array of
+                    // channel names).
+                    if (t.isStringLiteral(element)) names.push(element.value);
+                }
+                found = names;
+            }
+        },
+    });
+
+    return found;
+}
+
+/**
+ * Channel names declared in the app's channel map file (`app/channels.ts`) —
+ * the canonical list the framework validates module declarations against.
+ * A missing file yields an empty set, which makes every declaration unknown.
+ */
+export function readChannelMapNames(file: string): Set<string> {
+    const names = new Set<string>();
+    if (!fs.existsSync(file)) return names;
+
+    let ast;
+    try {
+        ast = parse(fs.readFileSync(file, "utf-8"), {
+            sourceType: "module",
+            plugins: ["typescript", "jsx"],
+        });
+    } catch {
+        return names;
+    }
+
+    traverse(ast, {
+        ExportNamedDeclaration(nodePath) {
+            const declaration = nodePath.node.declaration;
+            if (!t.isVariableDeclaration(declaration)) return;
+
+            for (const declarator of declaration.declarations) {
+                if (!t.isIdentifier(declarator.id, { name: "channels" })) continue;
+                let init = declarator.init;
+                if (
+                    init &&
+                    (t.isTSSatisfiesExpression(init) || t.isTSAsExpression(init))
+                ) {
+                    init = init.expression;
+                }
+                if (!t.isObjectExpression(init)) continue;
+
+                for (const prop of init.properties) {
+                    if (!t.isObjectProperty(prop)) continue;
+                    if (t.isIdentifier(prop.key)) names.add(prop.key.name);
+                    else if (t.isStringLiteral(prop.key)) names.add(prop.key.value);
+                }
+            }
+        },
+    });
+
+    return names;
+}
+
+/** The `app/channels.ts` file of an app directory, if it exists. */
+function channelMapFiles(appDir: string): string[] {
+    return [path.join(appDir, "channels.ts"), path.join(appDir, "channels.tsx")];
+}
+
+// ============================================
 // VIRTUAL MODULE IDs
 // ============================================
 
@@ -969,15 +1073,35 @@ function veloTransformPlugin(veloConfig: VeloConfig, appDirectory: string): Plug
     // Map de moduleId → { fullPath, path } (populado no buildStart)
     const pathInfoMap = new Map<string, PathInfo>();
 
+    // The app's channel map names, read from `app/channels.ts` on first use and
+    // invalidated when that file changes. It is what validates every module's
+    // `channels` declaration — a name with no entry is an explicit error.
+    let channelNamesCache: Set<string> | null = null;
+
+    const channelNames = (): Set<string> => {
+        if (!channelNamesCache) {
+            const file = channelMapFiles(appDir).find((f) => fs.existsSync(f));
+            channelNamesCache = file ? readChannelMapNames(file) : new Set<string>();
+        }
+        return channelNamesCache;
+    };
+
+    // Static builds announce each module with channels once — the channels are
+    // inert there, and the warning is what keeps that from being discovered in
+    // production.
+    const warnedStatic = new Set<string>();
+
     return {
         name: "velo:transform",
         enforce: "pre",
 
         configResolved(resolvedConfig) {
             appDir = path.resolve(resolvedConfig.root, appDirectory);
+            channelNamesCache = null;
         },
 
         buildStart() {
+            channelNamesCache = null;
             // Lê routes.tsx e popula o Map de paths
             const routesFilePath = path.join(appDir, routesFile);
             if (fs.existsSync(routesFilePath)) {
@@ -991,6 +1115,13 @@ function veloTransformPlugin(veloConfig: VeloConfig, appDirectory: string): Plug
         },
 
         handleHotUpdate({ file, server }) {
+            // O mapa de canais mudou: os nomes precisam ser relidos.
+            if (channelMapFiles(appDir).includes(file)) {
+                channelNamesCache = null;
+                server.ws.send({ type: "full-reload" });
+                return [];
+            }
+
             // Reconstrói o Map quando routes.tsx muda
             const routesFilePath = path.join(appDir, routesFile);
             if (file === routesFilePath) {
@@ -1033,13 +1164,24 @@ function veloTransformPlugin(veloConfig: VeloConfig, appDirectory: string): Plug
             const clientInitPath = path.join(appDir, clientInit).replace(/\.tsx?$/, ".js");
 
             if (id === RESOLVED_VIRTUAL_SERVER) {
+                // The app's live-loader channel map (`app/channels.ts`) is a
+                // convention file: the framework imports it and registers it,
+                // so `emit()` and the channel routes resolve partitions without
+                // the app wiring anything itself.
+                const channelMapFile = channelMapFiles(appDir).find((f) => fs.existsSync(f));
+                const channelMapPath = channelMapFile
+                    ? channelMapFile.replace(/\.tsx?$/, ".js")
+                    : null;
+
                 return `
 globalThis.__veloBuildHash = __VELO_BUILD_HASH__;
 globalThis.__veloClientJs = __VELO_CLIENT_JS__;
 globalThis.__veloClientCss = __VELO_CLIENT_CSS__;
 import "${serverInitPath}";
 import routes from "${routesPath}";
-import { startServer } from "@mauroandre/velojs/server";
+import { startServer${channelMapPath ? ", registerChannels" : ""} } from "@mauroandre/velojs/server";
+${channelMapPath ? `import { channels as __veloChannelMap } from "${channelMapPath}";` : ""}
+${channelMapPath ? "registerChannels(__veloChannelMap);" : ""}
 
 export { routes };
 export default await startServer({ routes, port: __VELO_CONFIG_PORT__, hostname: __VELO_CONFIG_HOSTNAME__ });
@@ -1089,6 +1231,49 @@ startClient({ routes });
             const hasLoaderCall = /\bLoader\s*</.test(code) || /\bLoader\s*\(/.test(code);
             const hasUseLoaderCall = /\buseLoader\s*</.test(code) || /\buseLoader\s*\(/.test(code);
             const hasEndpointHandler = /\bhandler\s*:/.test(code);
+            const hasChannelsDecl = /export\s+(const|let|var)\s+channels\b/.test(code);
+
+            const moduleId = path
+                .relative(appDir, id)
+                .replace(/\.(tsx?|jsx?)$/, "")
+                .replace(/\\/g, "/");
+
+            // 0. Live loader guards — erro explícito, nunca silêncio. A module
+            // that declares `channels` must have a `loader` to synchronize and
+            // an entry per channel in `app/channels.ts`. Both are dev/build
+            // errors; the silent line is a module OUTSIDE these conventions
+            // (untransformed), where nothing fires at all.
+            if (hasChannelsDecl) {
+                const declared = declaredChannelNames(code);
+                if (declared) {
+                    if (!hasLoader) {
+                        throw new Error(
+                            `[velojs] "${moduleId}" declares \`channels\` without a \`loader\` — ` +
+                            `there is nothing to synchronize. Add a loader or remove the export.`
+                        );
+                    }
+                    const known = channelNames();
+                    const unknown = declared.filter((name) => !known.has(name));
+                    if (unknown.length > 0) {
+                        throw new Error(
+                            `[velojs] "${moduleId}" declares channel(s) ${unknown
+                                .map((n) => `"${n}"`)
+                                .join(", ")} with no entry in app/channels.ts — ` +
+                            `add the partition resolver for each name (a typo or a rename ` +
+                            `would otherwise be a silent no-op).`
+                        );
+                    }
+                    if (process.env.VELO_STATIC && !warnedStatic.has(moduleId)) {
+                        warnedStatic.add(moduleId);
+                        console.warn(
+                            `[velojs] "${moduleId}" declares channels (${declared.join(
+                                ", "
+                            )}) — inert in a static build: there is no SSE server, ` +
+                            `so no connection is opened and freshness stays "live".`
+                        );
+                    }
+                }
+            }
 
             // Routes file path (used to scope the endpoint strip)
             const routesFilePath = path.join(appDir, routesFile);
@@ -1109,11 +1294,6 @@ startClient({ routes });
 
             // Se tem Component, loader, action, stream, socket, ou chamadas de Loader/useLoader, aplica transformações
             if (hasComponent || hasLoader || hasAction || hasStream || hasSocket || hasLoaderCall || hasUseLoaderCall) {
-                const moduleId = path
-                    .relative(appDir, id)
-                    .replace(/\.(tsx?|jsx?)$/, "")
-                    .replace(/\\/g, "/");
-
                 // Busca pathInfo no Map
                 const pathInfo = pathInfoMap.get(moduleId);
 

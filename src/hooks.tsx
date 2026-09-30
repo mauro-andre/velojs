@@ -20,6 +20,23 @@ import {
     refetchModule,
     __veloUpdatePending,
 } from "./loader-store.js";
+import { loaderFreshness, type Freshness } from "./live-loader.js";
+
+export type { Freshness } from "./live-loader.js";
+
+/**
+ * What `Loader()`/`useLoader()` return. `freshness` is the page-level state of
+ * the live loader: `"live"` (connected), `"stale"` (connection closed or
+ * reconnecting) and `"error"` (the last loader re-execution failed). On a page
+ * with no `channels` it exists and stays `"live"`. The framework exposes it as
+ * data for CSS to react to — it renders no JSX of its own.
+ */
+export interface LoaderHandle<T> {
+    data: Signal<T | null>;
+    loading: Signal<boolean>;
+    refetch: () => void;
+    freshness: Signal<Freshness>;
+}
 
 // Flag: true when a newer build has been deployed. Owned by the loader store,
 // which is what talks to the server and sees the build hash.
@@ -93,11 +110,7 @@ export function touch<T>(sig: Signal<T | null>): void {
  *
  * @param moduleId - Injetado automaticamente pelo veloPlugin
  */
-export function Loader<T>(moduleId?: string): {
-    data: Signal<T | null>;
-    loading: Signal<boolean>;
-    refetch: () => void;
-} {
+export function Loader<T>(moduleId?: string): LoaderHandle<T> {
     // Servidor: getter que sempre lê do AsyncLocalStorage (sem cache).
     // O binding é module-scope, mas o VALOR é por-request — é isso que torna o
     // handle seguro de exportar, ao contrário de guardar o signal de um request
@@ -115,20 +128,28 @@ export function Loader<T>(moduleId?: string): {
             data: data as Signal<T | null>,
             loading: signal(false),
             refetch: () => {},
+            freshness: loaderFreshness(),
         };
     }
 
     if (!moduleId) {
-        return { data: signal<T | null>(null), loading: signal(false), refetch: () => {} };
+        return {
+            data: signal<T | null>(null),
+            loading: signal(false),
+            refetch: () => {},
+            freshness: loaderFreshness(),
+        };
     }
 
     // Cliente: a entrada compartilhada do store. Hidrata do __PAGE_DATA__ sem
     // consumir, e é reidratada na navegação quando os params que a rota deste
-    // módulo declara mudam — sem deps, sem driver.
+    // módulo declara mudam — sem deps, sem driver. O loader vivo escreve nesta
+    // mesma entrada a cada snapshot, e o `freshness` da página é compartilhado.
     return {
         data: loaderEntry<T>(moduleId),
         loading: loaderLoading(moduleId),
         refetch: () => refetchModule(moduleId),
+        freshness: loaderFreshness(),
     };
 }
 
@@ -151,17 +172,13 @@ export function Loader<T>(moduleId?: string): {
  * @param moduleId - Injetado automaticamente pelo veloPlugin
  * @param deps - Array de dependências (triggers re-fetch quando mudam)
  */
-export function useLoader<T>(): { data: Signal<T | null>; loading: Signal<boolean>; refetch: () => void };
-export function useLoader<T>(deps: any[]): { data: Signal<T | null>; loading: Signal<boolean>; refetch: () => void };
-export function useLoader<T>(moduleId: string, deps?: any[]): { data: Signal<T | null>; loading: Signal<boolean>; refetch: () => void };
+export function useLoader<T>(): LoaderHandle<T>;
+export function useLoader<T>(deps: any[]): LoaderHandle<T>;
+export function useLoader<T>(moduleId: string, deps?: any[]): LoaderHandle<T>;
 export function useLoader<T>(
     moduleIdOrDeps?: string | any[],
     deps?: any[],
-): {
-    data: Signal<T | null>;
-    loading: Signal<boolean>;
-    refetch: () => void;
-} {
+): LoaderHandle<T> {
     // Resolve args: usuário chama useLoader(deps), vite transforma em useLoader(moduleId, deps)
     let moduleId: string | undefined;
     let resolvedDeps: any[] | undefined;
@@ -184,11 +201,17 @@ export function useLoader<T>(
             data: useSignal<T | null>(initialData),
             loading: useSignal(false),
             refetch: () => {},
+            freshness: loaderFreshness(),
         };
     }
 
     if (!moduleId) {
-        return { data: useSignal<T | null>(null), loading: useSignal(false), refetch: () => {} };
+        return {
+            data: useSignal<T | null>(null),
+            loading: useSignal(false),
+            refetch: () => {},
+            freshness: loaderFreshness(),
+        };
     }
 
     // Cliente: a MESMA entrada que o Loader deste módulo devolve, para que um
@@ -197,6 +220,7 @@ export function useLoader<T>(
     const data = loaderEntry<T>(moduleId);
     const loading = loaderLoading(moduleId);
     const refetch = () => refetchModule(moduleId);
+    const freshness = loaderFreshness();
 
     // Deps continuam existindo para reatividade que a rota NÃO declara (uma
     // query string, um signal de client). Mudança de path param já é tratada
@@ -211,7 +235,7 @@ export function useLoader<T>(
         refetch();
     }, resolvedDeps ?? []);
 
-    return { data, loading, refetch };
+    return { data, loading, refetch, freshness };
 }
 
 /**

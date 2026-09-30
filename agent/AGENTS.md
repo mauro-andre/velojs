@@ -34,6 +34,7 @@ hard constraints, not style.
 | `useParams()` / `useQuery()` / `usePathname()` inside a `loader` | the loader's own args: `async ({ params, query, c }) => {}` | the async context wraps only rendering; loaders run **before** it → returns `{}` / `"/"` |
 | `c.req.param(...)` or `params.x` inside `action_*`, `stream_*`, `socket_*` | actions: read it from `body`. streams/sockets: send `?channel=` from the client and read `query.channel` | these register at **static** paths (`/_action/{moduleId}/{name}`, `/_event/…`, `/_socket/…`) — the page's `:params` are not in scope → always `{}` / `undefined` |
 | a page in `.jsx` / `.js`, or any page outside `appDirectory` | `.tsx` inside `app/` | **zero transforms**: no metadata, no stubs, loader ships to the client |
+| `export const channels = [...]` in a `.jsx` / `.js` page, or any page outside `appDirectory` | `.tsx` inside `app/` | **zero transforms**: the channel guards never run, so the channel is inert — no route, no connection, no error |
 | a root layout that doesn't render a literal `<head>` | `isRoot` component renders `<html><head>…</head><body>{children}</body></html>` | `__PAGE_DATA__` is injected by replacing `</head>` → **every loader hydrates `null`** and refetches |
 
 Never pass a module id to `useLoader()` / `Loader()` yourself — the plugin injects it.
@@ -62,6 +63,93 @@ is per-process, so a value stored there belongs to whichever request wrote it la
 An entry refreshes on navigation when the params **its own route declares** change
 (`/x/:id`). A query string is not declared in `routes.tsx`, so nothing infers it — use
 `useLoader([query.tab])` when data depends on one.
+
+## Keeping a page value faithful: `loader` + `channels`
+
+The loader has two faces. The common one fetches once per request (SSR) and
+re-fetches on SPA navigation — that is all a page needs when its data changes
+because of the user themselves or not at all. When a value must **track server
+state over time** (a family's total updated by another person's request, a
+background scheduler mutating data), declare channels next to the loader:
+
+```tsx
+// app/gastos/Gastos.tsx
+export const loader = async ({ c }: LoaderArgs) => {
+    const user = c.get("user");
+    return { somaFamilia: await gastosService.somaFamilia(user.familiaId) };
+};
+export const channels = ["gastosFamilia"];
+
+export const Component = () => {
+    const { data, freshness } = useLoader();
+    return <h2 class={freshness.value}>Família: R$ {data.value?.somaFamilia}</h2>;
+};
+```
+
+And declare the partition of each channel once, in `app/channels.ts`:
+
+```ts
+// app/channels.ts — the app's channel map: name → partition resolver
+export const channels = {
+    gastosFamilia: {
+        // ctx: on subscribe, the principal materialized in c.get("user");
+        // on emit, the object the emitter passed. Returns the partition key.
+        scope: (ctx) => `familia:${ctx.familiaId}`,
+    },
+};
+```
+
+Any server-side code signals that the partition changed:
+
+```ts
+import { emit } from "@mauroandre/velojs/server";
+await emit("gastosFamilia", { familiaId: 7 });
+```
+
+The framework derives `GET /_channel/{moduleId}/{channel}` (same family as
+`/_action` and `/_event`), inheriting the route node's `middlewares`; after
+hydration the client opens one connection per (module, channel) of the rendered
+hierarchy and closes it on unmount. Every new connection receives the **current
+state** (the loader re-executed with that connection's own principal), and every
+`emit` re-executes the loader per connection in the emitting partition, pushing
+a snapshot that replaces the module's data. The component re-renders on its own —
+the page has no code for any of it.
+
+**The partition contract is fixed.** On subscribe the scope receives
+`c.get("user")` — the house key, the same one used by stream/socket resolvers. If
+your middlewares materialize the principal under another key, set it in `"user"`
+too. With no authenticated principal the scope receives `undefined`: a public
+channel ignores it (`() => "all"`), an authenticated one returns `null`, which
+denies the subscription with 403. The partition **never** comes from the query
+string or from any client input.
+
+Same channel declared by a layout and by a page → one connection per module,
+each feeding its own module's data; a single `emit` by channel name reaches both.
+
+`useLoader()` and `Loader()` also expose `freshness` — a signal with `"live"`,
+`"stale"` (connection closed/reconnecting) and `"error"` (the last re-execution
+failed), aggregated per page. It is data for CSS to react to; the framework
+renders no JSX for it. Without `channels` it exists and stays `"live"`.
+
+Guards are explicit, never silent: `channels` in a module without a `loader`
+("nothing to synchronize") and a channel with no entry in `app/channels.ts` both
+fail the dev server and the build; `emit()` on an unknown channel throws
+immediately naming it (`emit` on a valid channel with no subscribers is a no-op).
+In `velojs build --static` the channels are **inert** — no server, so the client
+opens no connection and freshness stays `"live"` — and the build warns, naming
+the module.
+
+### State or flow? Two questions, always the same two
+
+| Question | Answer | Tool |
+|---|---|---|
+| Is this a **value** or a **sequence**? | value — "what is it now?", replacement | `loader` + `channels` (live loader) |
+| | sequence — "what happened?", accumulation (chat, log, metric series, progress) | `stream_*` / `socket_*` |
+| Does the change come from **someone else** or from **me**? | from someone else / from a background job | `loader` + `channels` |
+| | from me (my own action) | `refetch()` after the action — no channel |
+
+Do not turn on a channel where a post-action `refetch()` suffices, and do not
+use `stream_*` for a value that is simply replaced.
 
 ## A stream/socket `channel` is untrusted client input
 
@@ -99,6 +187,7 @@ cannot influence it.
 | File | Role |
 |---|---|
 | `app/routes.tsx` | The route tree. `export default [...] satisfies AppRoutes`, `import * as` for every page/layout |
+| `app/channels.ts` | The live-loader channel map: channel name → partition resolver (`scope`). Convention file, imported by the framework |
 | `app/<domain>/Page.tsx` | One module per route: `Component`, plus optional `loader`, `action_*`, `stream_*`, `socket_*`, `metadata`. Group by domain (`app/auth/`, `app/admin/`), not in a flat `pages/` folder |
 | `app/layouts/*.tsx` | Shared layouts. Long-lived `stream_*` declarations usually live on the layout that spans their pages |
 | `app/modules/<domain>/` | Server-side logic imported by pages: `*.service.ts`, `*.middleware.ts`, `*.stream.ts`. Not routed |
@@ -134,6 +223,7 @@ API from this file — it is deliberately incomplete.
 | Navigation, `<Link>` | `link-component` |
 | `<Scripts />`, assets, favicon | `scripts-component` |
 | SSE, live/progress/streaming data | `event-streams` |
+| A page value that must track server state (`loader` + `channels`) | `live-loader` |
 | WebSockets, bidirectional realtime | `sockets` |
 | `addRoutes`, `onServer`, ports, server lifecycle | `server-api` |
 | The build, transforms, `veloPlugin` options | `vite-plugin` |

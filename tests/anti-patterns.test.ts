@@ -75,6 +75,8 @@ const RULE = {
     paramsInConventionRoute:
         "`c.req.param(...)` or `params.x` inside `action_*`, `stream_*`, `socket_*`",
     untransformedFile: "a page in `.jsx` / `.js`, or any page outside `appDirectory`",
+    channelsOutsideConventions:
+        "`export const channels = [...]` in a `.jsx` / `.js` page, or any page outside `appDirectory`",
     rootWithoutHead: "a root layout that doesn't render a literal `<head>`",
 } as const;
 
@@ -291,6 +293,25 @@ export const loader = async () => ({ x: 1 });`;
     ruleTest(RULE.untransformedFile, "skips a page outside appDirectory", () => {
         expect(transformPlugin().transform(PAGE, "/proj/src/Home.tsx", {})).toBeNull();
     });
+
+    ruleTest(
+        RULE.channelsOutsideConventions,
+        "a page outside the conventions never reaches the channels guards — the channel is inert, with no error",
+        () => {
+            // The file has a loader, so the "channels without loader" guard is
+            // not what stays silent: with no transform at all, the channel is
+            // simply dead — no route, no connection, no error.
+            const CHANNELS_PAGE = `export const Component = () => null;
+export const loader = async () => ({});
+export const channels = ["qualquerCanal"];`;
+            expect(
+                transformPlugin().transform(CHANNELS_PAGE, "/proj/app/Home.jsx", {}),
+            ).toBeNull();
+            expect(
+                transformPlugin().transform(CHANNELS_PAGE, "/proj/src/Home.tsx", {}),
+            ).toBeNull();
+        },
+    );
 });
 
 // ============================================
