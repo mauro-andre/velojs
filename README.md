@@ -467,6 +467,7 @@ A page value that must **track server state over time** — a total another
 person's request changes, data a background scheduler mutates — declares the
 channels that keep it fresh. No extra component, no manual subscription: the
 module exports `channels` next to its `loader`.
+The one-sentence model: the live loader keeps a page's state replica faithful to the server — the first payload arrives through the usual path (SSR, `__PAGE_DATA__`, the `?_data=1` refetch), and from then on every change is **addressed**, by the app's own rules, to the group of clients it concerns, **by duty or by interest**, each one receiving the state computed for its own scope.
 
 ```tsx
 // app/expenses/Expenses.tsx
@@ -767,6 +768,8 @@ same JSON in the browser. It exists **only in dev** — the map of channels and
 partitions is internal information, and it never ships in a production build.
 
 ### The partition contract
+
+**Addressed, not broadcast.** A partition is not a filter applied after a broadcast. The `emit` is addressed: the runtime resolves the partition key and writes only to the connections of that group — a client outside the group never hears about the change, not even a byte. Two reasons make a partition matter, and they compose: **by duty** (authorization — the data belongs to that team, that family, that project; others must not see it) and **by interest** (relevance — the tab watching project 9 has nothing to wake up for when project 7 changes). The same `scope` serves both; the app decides which, or both at once.
 
 On subscribe the `scope` receives `{ user, params }`. `user` is `c.get("user")`
 — the house key, the same one the stream/socket channel resolvers use (a

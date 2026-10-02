@@ -4,7 +4,7 @@ description: "Keep a loader value faithful to server state in real time: declare
 
 # Live loader
 
-A `loader` fetches a page's data once per request and re-fetches it on SPA navigation. That is everything a page needs when its data changes because of the user themselves — or not at all. A **value that must track server state over time** (a team total another person's request changes, data a background scheduler mutates) needs the loader to stay faithful. That is the live loader: the same `loader`, the same `useLoader()` read, plus a sibling `channels` export.
+A `loader` fetches a page's data once per request and re-fetches it on SPA navigation. That is everything a page needs when its data changes because of the user themselves — or not at all. A **value that must track server state over time** (a team total another person's request changes, data a background scheduler mutates) needs the loader to stay faithful. That is the live loader: the same `loader`, the same `useLoader()` read, plus a sibling `channels` export. The one-sentence model: the live loader keeps a page's state replica faithful to the server — the first payload arrives through the usual path (SSR, `__PAGE_DATA__`, the `?_data=1` refetch), and from then on every change is **addressed**, by the app's own rules, to the group of clients it concerns, **by duty or by interest**, each one receiving the state computed for its own scope.
 
 ## The three declarations
 
@@ -282,6 +282,8 @@ The **silence detector** is the client half of the idle timeout: a connection th
 On a page with no `channels` the fields exist, the record is empty and the aggregate stays `"live"` for its whole life.
 
 ## The partition contract
+
+**Addressed, not broadcast.** A partition is not a filter applied after a broadcast. The `emit` is addressed: the runtime resolves the partition key and writes only to the connections of that group — a client outside the group never hears about the change, not even a byte. Two reasons make a partition matter, and they compose: **by duty** (authorization — the data belongs to that team, that family, that project; others must not see it) and **by interest** (relevance — the tab watching project 9 has nothing to wake up for when project 7 changes). The same `scope` serves both; the app decides which, or both at once.
 
 On subscribe the `scope` receives `{ user, params }`. `user` is whatever a middleware materialized under the house key `"user"` — the same key the stream/socket channel resolvers use; a middleware that materializes the principal somewhere else should set it in `"user"` too:
 

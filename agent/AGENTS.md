@@ -108,6 +108,8 @@ import { emit } from "@mauroandre/velojs/server";
 await emit("teamExpenses", { user: { teamId: 7 } });
 ```
 
+An `emit` is addressed to the partition's group — clients outside the group never hear about it (not a broadcast the client filters); partitions exist by duty (authorization) or by interest (relevance).
+
 Or, when the producer already holds the new value, it pushes it as a typed slice:
 
 ```ts
