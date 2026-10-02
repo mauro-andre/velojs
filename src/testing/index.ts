@@ -34,6 +34,7 @@ export type {
     BodyRequestOptions,
     LoaderRequestOptions,
     SubscribeOptions,
+    ChannelSubscribeOptions,
     NextOptions,
     MockContextOptions,
     Cookies,

@@ -92,9 +92,11 @@ And declare the partition of each channel once, in `app/channels.ts`:
 // app/channels.ts — the app's channel map: name → partition resolver
 export const channels = {
     teamExpenses: {
-        // ctx: on subscribe, the principal materialized in c.get("user");
-        // on emit, the object the emitter passed. Returns the partition key.
-        scope: (ctx) => `team:${ctx.teamId}`,
+        // On subscribe the ctx is { user, params }: the principal materialized
+        // in c.get("user") and the route params the connection declared. On
+        // emit it is the object the producer built, with the fields this scope
+        // consumes. Returns the partition key.
+        scope: ({ user }) => `team:${user.teamId}`,
     },
 };
 ```
@@ -103,24 +105,79 @@ Any server-side code signals that the partition changed:
 
 ```ts
 import { emit } from "@mauroandre/velojs/server";
-await emit("teamExpenses", { teamId: 7 });
+await emit("teamExpenses", { user: { teamId: 7 } });
 ```
 
 Or, when the producer already holds the new value, it pushes it as a typed slice:
 
 ```ts
 import * as Expenses from "../app/expenses/Expenses.js";
-await emit(Expenses, "teamExpenses", { teamId: 7 }, { teamTotal: 880 });
+await emit(Expenses, "teamExpenses", { user: { teamId: 7 } }, { teamTotal: 880 });
 ```
 
 The framework derives `GET /_channel/{moduleId}/{channel}` (same family as
 `/_action` and `/_event`), inheriting the route node's `middlewares`; after
 hydration the client opens one connection per (module, channel) of the rendered
 hierarchy and closes it on unmount. Every new connection receives the **current
-state** (the loader re-executed with that connection's own principal), and every
-`emit` re-executes the loader per connection in the emitting partition, pushing
-a snapshot that replaces the module's data. The component re-renders on its own —
-the page has no code for any of it.
+state** (the loader re-executed with that connection's own principal and route
+params), and every `emit` re-executes the loader per connection in the emitting
+partition, pushing a snapshot that replaces the module's data. The component
+re-renders on its own — the page has no code for any of it.
+
+### Routes with `:params` — declare, do not choose
+
+A channel declared in a module whose route declares `:params` (`/projeto/:id`, a
+page or a layout) partitions per **resource**, and the loader re-executes with
+`params.id` filled — the connect snapshot and every emit.
+
+```tsx
+// app/projeto/Projeto.tsx — the route /projeto/:id
+export const loader = async ({ params }: LoaderArgs) => ({
+    arquivos: await projetoService.arquivos(params.id),
+});
+export const channels = ["projetoArquivos"];
+```
+
+```ts
+// app/channels.ts
+export const channels = {
+    projetoArquivos: {
+        scope: ({ user, params }) => {
+            if (!params?.id) return null;
+            if (user && !podeVer(user, params.id)) return null;   // 403
+            return `projeto:${params.id}`;
+        },
+    },
+};
+```
+
+- The client **declares** the address it is already seeing: it extracts the params the module's `fullPath` declares, matching as a **prefix** of the pathname (a layout `/projeto/:id` covers `/projeto/7/sala` and extracts `id=7`; the child's suffix takes no part), and sends them in `?_route=<json>`. A catch-all (`/docs/*`) declares no `:` key — the connection travels by principal.
+- The server **decides**: it validates the keys against the module's declared path (a key the path does not declare rejects the subscription with **400**) and the `scope` validates the policy — possession/permission — deriving the key. `params` are never an authorization input: they are not free input, they are the declared route, validated by shape and then by policy.
+- The internal `_route` key never reaches the loader's `query` — it is transport, not page data.
+- The connection is **keyed by the extracted params**, not by the pathname: `/projeto/7` → `/projeto/9` closes the connection and opens a new one (snapshot on connect); `/projeto/7` → `/projeto/7/sala` does not reconnect. Do not expect a refetch on a pathname change that does not move the params.
+
+### Group lifecycle — arming a source with a cost of life
+
+A watcher (filesystem, process, an external subscription) must not run forever
+for an empty group. `onGroupOpen` fires when the **first** connection enters a
+group (channel + partition) and `onGroupClose` when the **last** one leaves —
+by any cause (disconnect, idle, revalidation):
+
+```ts
+export const channels = {
+    projetoArquivos: {
+        scope: ({ params }) => (params?.id ? `projeto:${params.id}` : null),
+        onGroupOpen: ({ params }) =>
+            watchers.armar(params.id, () => emit("projetoArquivos", { params: { id: params.id } })),
+        onGroupClose: ({ partition }) => watchers.desarmar(),
+    },
+};
+```
+
+- A second connection of the same group fires nothing. One that arrives while the close hook is still running joins the surviving group without arming it: the runtime re-arms the group when the disarm finishes — a live group is never left without its source.
+- Both hooks may be async and are **awaited**: on open, before the connect snapshot; on close, before the group is discarded. A hook that throws (or rejects) is logged loudly, naming channel and partition, and the group continues — the cold-source snapshot still arrives; only the live data waits for the fix.
+- The hook is infrastructure, not policy: it does not receive `user`.
+- The `params` of `onGroupOpen` belong to the connection that opened the group. They are identical across the group **only when the partition derives from them** (a watcher per resource). A channel partitioned by **principal** declared in a module with `:params` mixes resources in one group: do not consume the hook's params there — they are arbitrary for the rest of the group.
 
 ### Two ways to emit — invalidation or the value itself
 
@@ -153,19 +210,25 @@ name keeps reaching every module of the channel.
 - **Coalescing.** Invalidation emits fold per (channel, partition): the first opens a window, the emits inside it join it (the deadline does not move), and closing the window fires **one** re-execution round per connection — no invalidation is lost. Default `50ms` in any registration without options; `registerChannels(map, { coalesceMs: 0 })` disables it (immediate). A slice never waits for a window: it is pushed directly.
   **The window changes what `await emit(…)` means.** With the window off (`0`, and the test toolkit's default) the await resolves after the round was delivered; with a window open it resolves as soon as the gesture is registered — the log line is already out, the delivery comes later. Never assert a screen update right after `await emit(…)` under the default window: assert the arrival (`next()`/`nextEvent()`) or wait for the effect.
 - **Emit log.** Every `emit`, in either mode, writes one `console.log` line at the moment of the gesture: `channel`, `partition`, `kind` (`invalidate`/`slice`), `connections` (the size of the group at that instant — before coalescing and before revalidation) and a timestamp. The consolidated delivery writes no second line; an emit whose `scope` resolves to nothing logs `partition=null connections=0`. `registerChannels(map, { logEmits: false })` silences it; `createTestApp` registers with window `0` and takes the same options in `channelOptions` — the map itself stays in `channels`, the options are a sibling key.
-- **Partition revalidation.** Before delivering anything, the runtime re-derives each connection's partition by running the `scope` again with the principal captured at subscribe. A connection whose partition moved — or whose scope now returns `null` — is removed from the group and closed: the client sees the connection closed (`freshness` goes `"stale"`) and receives none of that emit's data. A `scope` that **throws** on re-derivation is treated the same way (fail-closed: a resolver that failed cannot vouch for the partition) and the failure is logged naming the channel — a scope that does I/O must handle its own failures. Only the partition is revalidated; session/cookie expiry stays with the normal request pipeline.
+- **Partition revalidation.** Before delivering anything, the runtime re-derives each connection's partition by running the `scope` again with the ctx captured at subscribe — the principal and the validated route params of that connection. A connection whose partition moved — or whose scope now returns `null` — is removed from the group and closed: the client sees the connection closed (`freshness` goes `"stale"`) and receives none of that emit's data. A `scope` that **throws** on re-derivation is treated the same way (fail-closed: a resolver that failed cannot vouch for the partition) and the failure is logged naming the channel — a scope that does I/O must handle its own failures. Only the partition is revalidated; session/cookie expiry stays with the normal request pipeline.
 - **Heartbeat and idle timeout — the transport clocks.** Every channel answer carries `Cache-Control: no-store` (a proxy or the browser must never serve a cached snapshot) and a heartbeat: an SSE comment (`: ping`) written through the write chain every `heartbeatMs` — default `20000`, the same ruler the `stream_*` SSE surface uses; `0` disables it. A comment generates no client event and does not count as a delivery. A connection with **no deliveries** (snapshot or slice) for `idleMs` — default `300000` (5 min); `0` disables — is closed by the server, and the heartbeat does **not** reset the idle clock: idle is about data, heartbeat is transport.
   **Practical consequences.** A live but quiet page cycles by design: the server closes it, the `EventSource` reconnects by itself and the snapshot on connect repairs the state — do not build anything against that cycle, and do not interpret a periodic reconnect of a quiet page as a bug. In tests, `createTestApp` defaults both clocks to `0` (deterministic); a test exercising them passes `idleMs`/`heartbeatMs` in `channelOptions` and drives them with fake timers — **never assert freshness without advancing the fake timers through the window**.
 - **Behind a reverse proxy (the house recipe, Caddy).** SSE needs the proxy to flush immediately and never buffer the response, or the page goes silent with everything alive. In the Caddyfile: `flush_interval -1` on the app's `reverse_proxy` (negative value = flush as data arrives; a positive interval would batch chunks and delay every snapshot). For nginx in front: `X-Accel-Buffering: no`. The heartbeat keeps the proxy from killing the idle stream; the idle timeout closes what nobody reads anymore.
 - **Inspector — asking the server what is alive.** `inspectChannels()` (from `@mauroandre/velojs/server`) returns the live state: per channel, the groups identified by the pair (moduleId, partition key) — which page holds every connection — each with its connection count and the timestamp of its last delivery; the coalescing windows still open; the grand totals. Always available; expose it with whatever guard the app judges. In development only, `GET /_channel-inspect` answers the same JSON in the browser — it never ships in a production build (the map of channels and partitions is internal information); a production app that wants something similar exposes `inspectChannels()` itself.
 
 **The partition contract is fixed.** On subscribe the scope receives
-`c.get("user")` — the house key, the same one used by stream/socket resolvers. If
-your middlewares materialize the principal under another key, set it in `"user"`
-too. With no authenticated principal the scope receives `undefined`: a public
-channel ignores it (`() => "all"`), an authenticated one returns `null`, which
-denies the subscription with 403. The partition **never** comes from the query
-string or from any client input.
+`{ user, params }`: `user` is `c.get("user")` — the house key, the same one used
+by stream/socket resolvers; if your middlewares materialize the principal under
+another key, set it in `"user"` too — and `params` are the route params the
+connection declared, already validated. With no authenticated principal `user`
+is `undefined`: a public channel ignores it (`() => "all"`), an authenticated one
+returns `null`, which denies the subscription with 403; an app that does not
+materialize a principal at all (a network guard, e.g. loopback) writes
+`({ params }) => …`. On emit the scope receives the object the producer built,
+with the fields it consumes (`{ params: … }` or `{ user: … }`). A scope that
+**throws** on subscribe denies with **403** and logs loudly, naming the channel.
+The partition **never** comes from the query string or from any other client
+input.
 
 Same channel declared by a layout and by a page → one connection per module,
 each feeding its own module's data; a single `emit` by channel name reaches both.
@@ -194,6 +257,10 @@ immediately naming it (`emit` on a valid channel with no subscribers is a no-op)
 and `emit(module, channel, …)` on a module that does not declare that channel, or
 that has no `loader`, throws immediately naming both (a slice that is not an
 object throws too).
+A subscription whose route params carry a key the module's path does not declare
+is rejected with **400**, naming the key — the client may only declare what the
+route declares. A `scope` that **throws** on subscribe denies with **403** and
+logs loudly, naming the channel (it used to answer 500).
 In `velojs build --static` the channels are **inert** — no server, so the client
 opens no connection and freshness stays `"live"` — and the build warns, naming
 the module.
@@ -246,7 +313,7 @@ cannot influence it.
 | File | Role |
 |---|---|
 | `app/routes.tsx` | The route tree. `export default [...] satisfies AppRoutes`, `import * as` for every page/layout |
-| `app/channels.ts` | The live-loader channel map: channel name → partition resolver (`scope`). Convention file, imported by the framework |
+| `app/channels.ts` | The live-loader channel map: channel name → `{ scope, onGroupOpen, onGroupClose }` — the partition resolver and the group lifecycle. Convention file, imported by the framework |
 | `app/<domain>/Page.tsx` | One module per route: `Component`, plus optional `loader`, `action_*`, `stream_*`, `socket_*`, `metadata`. Group by domain (`app/auth/`, `app/admin/`), not in a flat `pages/` folder |
 | `app/layouts/*.tsx` | Shared layouts. Long-lived `stream_*` declarations usually live on the layout that spans their pages |
 | `app/modules/<domain>/` | Server-side logic imported by pages: `*.service.ts`, `*.middleware.ts`, `*.stream.ts`. Not routed |

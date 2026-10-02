@@ -19,7 +19,7 @@ import {
 const ROOT = fs.mkdtempSync(path.join(os.tmpdir(), "velo-live-loader-"));
 
 const CHANNEL_MAP = `export const channels = {
-    teamExpenses: { scope: (ctx: any) => \`team:\${ctx.teamId}\` },
+    teamExpenses: { scope: ({ user }: any) => \`team:\${user.teamId}\` },
     public: { scope: () => "all" },
 };
 `;

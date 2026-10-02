@@ -22,10 +22,10 @@ type TeamUser = { id: number; teamId: number };
 const store: Record<number, number> = {};
 
 const CHANNELS = {
-    teamExpenses: { scope: (ctx: any) => `team:${ctx.teamId}` },
+    teamExpenses: { scope: ({ user }: any) => `team:${user.teamId}` },
     public: { scope: () => "all" },
     partitioned: {
-        scope: (ctx: any) => (ctx?.teamId != null ? `team:${ctx.teamId}` : null),
+        scope: ({ user }: any) => (user?.teamId != null ? `team:${user.teamId}` : null),
     },
 };
 
@@ -147,7 +147,7 @@ describe("live loader — emit", () => {
         await sub.next({ timeoutMs: 1000 });
 
         store[7] = 25;
-        await emit("teamExpenses", { teamId: 7 });
+        await emit("teamExpenses", { user: { teamId: 7 } });
 
         expect(await sub.next({ timeoutMs: 1000 })).toEqual({ teamTotal: 25 });
 
@@ -168,13 +168,13 @@ describe("live loader — emit", () => {
         await b.next({ timeoutMs: 1000 });
 
         store[7] = 11;
-        await emit("teamExpenses", { teamId: 7 });
+        await emit("teamExpenses", { user: { teamId: 7 } });
         expect(await a.next({ timeoutMs: 1000 })).toEqual({ teamTotal: 11 });
 
         // B's stream is FIFO: a snapshot wrongly pushed by A's emit would be
         // parsed before B's own, so the next event would not be B's value.
         store[8] = 22;
-        await emit("teamExpenses", { teamId: 8 });
+        await emit("teamExpenses", { user: { teamId: 8 } });
         expect(await b.next({ timeoutMs: 1000 })).toEqual({ teamTotal: 22 });
         expect(b.events.length).toBe(2); // connect + own emit — nothing else
 
@@ -213,7 +213,7 @@ describe("live loader — emit", () => {
         expect(await pageSub.next({ timeoutMs: 1000 })).toEqual({ teamTotal: 5 });
 
         store[7] = 15;
-        await emit("teamExpenses", { teamId: 7 });
+        await emit("teamExpenses", { user: { teamId: 7 } });
 
         expect(await layoutSub.next({ timeoutMs: 1000 })).toEqual({ teamTotal: 15 });
         expect(await pageSub.next({ timeoutMs: 1000 })).toEqual({ teamTotal: 15 });
@@ -225,13 +225,13 @@ describe("live loader — emit", () => {
 
     it("is a no-op on a valid channel with no subscribers", async () => {
         const app = await appWith(expensesRoutes());
-        await expect(emit("teamExpenses", { teamId: 7 })).resolves.toBeUndefined();
+        await expect(emit("teamExpenses", { user: { teamId: 7 } })).resolves.toBeUndefined();
         await app.close();
     });
 
     it("throws immediately on a channel with no entry in the map, naming it (CA6)", async () => {
         const app = await appWith(expensesRoutes());
-        await expect(emit("teamExpense", { teamId: 7 })).rejects.toThrow(/teamExpense/);
+        await expect(emit("teamExpense", { user: { teamId: 7 } })).rejects.toThrow(/teamExpense/);
         await app.close();
     });
 });
@@ -341,10 +341,10 @@ describe("live loader — guards", () => {
 
         // An emit for the forged partition reaches nobody on this connection.
         store[9] = 1234;
-        await emit("teamExpenses", { teamId: 9 });
+        await emit("teamExpenses", { user: { teamId: 9 } });
 
         store[7] = 4;
-        await emit("teamExpenses", { teamId: 7 });
+        await emit("teamExpenses", { user: { teamId: 7 } });
         expect(await sub.next({ timeoutMs: 1000 })).toEqual({ teamTotal: 4 });
         expect(sub.events.length).toBe(2);
 

@@ -23,6 +23,7 @@ import type {
     BodyRequestOptions,
     LoaderRequestOptions,
     SubscribeOptions,
+    ChannelSubscribeOptions,
     MockContextOptions,
     CreateTestAppOptions,
     ChannelModuleRef,
@@ -357,16 +358,23 @@ function buildTestAppApi(
         async channel<T = any>(
             module: ChannelModuleRef,
             name: string,
-            o: SubscribeOptions = {}
+            o: ChannelSubscribeOptions = {}
         ): Promise<TestChannelSubscription<T>> {
             const moduleId = typeof module === "string"
                 ? module
                 : module?.metadata?.moduleId;
             if (!moduleId) throwNoChannelModuleId(module);
+            // The declared route params travel in `?_route=`, exactly as the
+            // client runtime sends them — the server validates the keys against
+            // the module's path for real.
+            const routeQuery = o.params ? { _route: JSON.stringify(o.params) } : {};
             const response = await streamingRequest(
                 "GET",
                 `/_channel/${moduleId}/${name}`,
-                o
+                {
+                    ...o,
+                    query: { ...(o.query ?? {}), ...routeQuery },
+                }
             );
             // Snapshots and slices travel as their own SSE events and are
             // surfaced as events: the channel has no `message` events at all.

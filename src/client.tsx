@@ -134,6 +134,7 @@ const buildRoutes = (
             <ChannelBoundary
                 moduleId={node.module?.metadata?.moduleId}
                 channels={node.module?.channels}
+                fullPath={node.module?.metadata?.fullPath}
             >
                 {children}
             </ChannelBoundary>

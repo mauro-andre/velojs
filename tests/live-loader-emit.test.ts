@@ -31,7 +31,7 @@ interface ExpensesData {
 let store: Record<number, ExpensesData> = {};
 
 const CHANNELS = {
-    teamExpenses: { scope: (ctx: any) => `team:${ctx.teamId}` },
+    teamExpenses: { scope: ({ user }: any) => `team:${user.teamId}` },
 };
 
 const getSessionCookie = async ({ user }: { user: any }) => ({
@@ -107,7 +107,7 @@ describe("live loader — slice mode", () => {
         expect(await sub.next({ timeoutMs: 1000 })).toEqual({ teamTotal: 10, items: ["a"] });
         expect(calls.n).toBe(1); // the connect snapshot ran the loader
 
-        await emit(Page, "teamExpenses", { teamId: 7 }, { teamTotal: 880 });
+        await emit(Page, "teamExpenses", { user: { teamId: 7 } }, { teamTotal: 880 });
 
         // The wire carries the raw slice, and the loader did not run again.
         expect(await sub.next({ timeoutMs: 1000 })).toEqual({ teamTotal: 880 });
@@ -138,7 +138,7 @@ describe("live loader — slice mode", () => {
         expect(await layoutSub.next({ timeoutMs: 1000 })).toEqual({ teamTotal: 10, items: ["a"] });
         expect(await pageSub.next({ timeoutMs: 1000 })).toEqual({ teamTotal: 10, items: ["a"] });
 
-        await emit(Page, "teamExpenses", { teamId: 7 }, { teamTotal: 15 });
+        await emit(Page, "teamExpenses", { user: { teamId: 7 } }, { teamTotal: 15 });
 
         expect(await pageSub.next({ timeoutMs: 1000 })).toEqual({ teamTotal: 15 });
         expect(layoutSub.events).toHaveLength(1); // connect only — no slice, no snapshot
@@ -167,7 +167,7 @@ describe("live loader — slice mode", () => {
         await pageSub.next({ timeoutMs: 1000 });
 
         store[7] = { teamTotal: 33, items: ["z"] };
-        await emit("teamExpenses", { teamId: 7 });
+        await emit("teamExpenses", { user: { teamId: 7 } });
 
         expect(await layoutSub.next({ timeoutMs: 1000 })).toEqual({ teamTotal: 33, items: ["z"] });
         expect(await pageSub.next({ timeoutMs: 1000 })).toEqual({ teamTotal: 33, items: ["z"] });
@@ -187,7 +187,7 @@ describe("live loader — slice mode", () => {
         await a.next({ timeoutMs: 1000 });
         await b.next({ timeoutMs: 1000 });
 
-        await emit(Page, "teamExpenses", { teamId: 7 }, { teamTotal: 111 });
+        await emit(Page, "teamExpenses", { user: { teamId: 7 } }, { teamTotal: 111 });
         expect(await a.next({ timeoutMs: 1000 })).toEqual({ teamTotal: 111 });
         expect(b.events).toHaveLength(1);
 
@@ -210,15 +210,15 @@ function __typeOnlySliceChecks(): void {
     const Page = expensesModule({ moduleId: "expenses/Expenses" });
 
     // A valid slice: known keys, right types.
-    void emit(Page, "teamExpenses", { teamId: 7 }, { teamTotal: 880 });
+    void emit(Page, "teamExpenses", { user: { teamId: 7 } }, { teamTotal: 880 });
     // Partial: sending one key is the point.
-    void emit(Page, "teamExpenses", { teamId: 7 }, { items: ["a", "b"] });
+    void emit(Page, "teamExpenses", { user: { teamId: 7 } }, { items: ["a", "b"] });
     // @ts-expect-error — the key does not exist in the loader's return
-    void emit(Page, "teamExpenses", { teamId: 7 }, { unknownKey: 1 });
+    void emit(Page, "teamExpenses", { user: { teamId: 7 } }, { unknownKey: 1 });
     // @ts-expect-error — the value type does not match the loader's return
-    void emit(Page, "teamExpenses", { teamId: 7 }, { teamTotal: "880" });
+    void emit(Page, "teamExpenses", { user: { teamId: 7 } }, { teamTotal: "880" });
     // @ts-expect-error — the slice is required in the module form
-    void emit(Page, "teamExpenses", { teamId: 7 });
+    void emit(Page, "teamExpenses", { user: { teamId: 7 } });
 }
 
 describe("live loader — slice typing (CA3)", () => {
@@ -269,17 +269,17 @@ describe("live loader — slice guards", () => {
             channels: ["teamExpenses", "notInMap"],
         });
         await expect(
-            emit(Page, "notInMap", { teamId: 7 }, { teamTotal: 1 }),
+            emit(Page, "notInMap", { user: { teamId: 7 } }, { teamTotal: 1 }),
         ).rejects.toThrow(/notInMap/);
     });
 
     it("throws when the slice is not an object of changed keys", async () => {
         const Page = expensesModule({ moduleId: "expenses/Expenses" });
         await expect(
-            emit(Page, "teamExpenses", { teamId: 7 }, [1, 2] as any),
+            emit(Page, "teamExpenses", { user: { teamId: 7 } }, [1, 2] as any),
         ).rejects.toThrow(/slice must be the object of changed keys/);
         await expect(
-            emit(Page, "teamExpenses", { teamId: 7 }, 7 as any),
+            emit(Page, "teamExpenses", { user: { teamId: 7 } }, 7 as any),
         ).rejects.toThrow(/slice must be the object/);
     });
 });
@@ -306,11 +306,11 @@ describe("live loader — coalescing (CA7)", () => {
         calls.n = 0;
 
         store[7] = { teamTotal: 2, items: ["a"] };
-        await emit("teamExpenses", { teamId: 7 });
+        await emit("teamExpenses", { user: { teamId: 7 } });
         store[7] = { teamTotal: 3, items: ["a"] };
-        await emit("teamExpenses", { teamId: 7 });
+        await emit("teamExpenses", { user: { teamId: 7 } });
         store[7] = { teamTotal: 4, items: ["a"] };
-        await emit("teamExpenses", { teamId: 7 });
+        await emit("teamExpenses", { user: { teamId: 7 } });
 
         // Inside the window nothing ran: three gestures, zero rounds.
         expect(calls.n).toBe(0);
@@ -322,7 +322,7 @@ describe("live loader — coalescing (CA7)", () => {
 
         // An emit after the close opens a new window.
         store[7] = { teamTotal: 5, items: ["a"] };
-        await emit("teamExpenses", { teamId: 7 });
+        await emit("teamExpenses", { user: { teamId: 7 } });
         expect(calls.n).toBe(1);
         await vi.advanceTimersByTimeAsync(20);
         expect(calls.n).toBe(2);
@@ -344,9 +344,9 @@ describe("live loader — coalescing (CA7)", () => {
         await b.next({ timeoutMs: 1000 });
         calls.n = 0;
 
-        await emit("teamExpenses", { teamId: 7 });
-        await emit("teamExpenses", { teamId: 8 });
-        await emit("teamExpenses", { teamId: 7 });
+        await emit("teamExpenses", { user: { teamId: 7 } });
+        await emit("teamExpenses", { user: { teamId: 8 } });
+        await emit("teamExpenses", { user: { teamId: 7 } });
 
         await vi.advanceTimersByTimeAsync(20);
         // One round per connection: two connections, two loader executions.
@@ -369,7 +369,7 @@ describe("live loader — coalescing (CA7)", () => {
         calls.n = 0;
 
         store[7] = { teamTotal: 11, items: ["a"] };
-        await emit("teamExpenses", { teamId: 7 });
+        await emit("teamExpenses", { user: { teamId: 7 } });
         // The round already happened when `emit` resolved — no timer to wait for.
         expect(calls.n).toBe(1);
         expect(await sub.next({ timeoutMs: 1000 })).toEqual({ teamTotal: 11, items: ["a"] });
@@ -394,8 +394,8 @@ describe("live loader — coalescing (CA7)", () => {
         calls.n = 0;
 
         store[7] = { teamTotal: 12, items: ["a"] };
-        await emit("teamExpenses", { teamId: 7 });
-        await emit("teamExpenses", { teamId: 7 });
+        await emit("teamExpenses", { user: { teamId: 7 } });
+        await emit("teamExpenses", { user: { teamId: 7 } });
         expect(calls.n).toBe(0);
 
         await vi.advanceTimersByTimeAsync(49);
@@ -420,7 +420,7 @@ describe("live loader — coalescing (CA7)", () => {
         calls.n = 0;
 
         // Nowhere near the window closing (10s away): the slice travels now.
-        await emit(Page, "teamExpenses", { teamId: 7 }, { teamTotal: 42 });
+        await emit(Page, "teamExpenses", { user: { teamId: 7 } }, { teamTotal: 42 });
         expect(await sub.next({ timeoutMs: 1000 })).toEqual({ teamTotal: 42 });
         expect(calls.n).toBe(0);
 
@@ -451,8 +451,8 @@ describe("live loader — emit log (CA8)", () => {
                 .channel(Page, "teamExpenses");
             await sub.next({ timeoutMs: 1000 });
 
-            await emit("teamExpenses", { teamId: 7 });
-            await emit(Page, "teamExpenses", { teamId: 7 }, { teamTotal: 1 });
+            await emit("teamExpenses", { user: { teamId: 7 } });
+            await emit(Page, "teamExpenses", { user: { teamId: 7 } }, { teamTotal: 1 });
 
             const lines = emitLines(log);
             expect(lines).toHaveLength(2);
@@ -485,9 +485,9 @@ describe("live loader — emit log (CA8)", () => {
             await a.next({ timeoutMs: 1000 });
             await b.next({ timeoutMs: 1000 });
 
-            await emit("teamExpenses", { teamId: 7 });
-            await emit("teamExpenses", { teamId: 7 });
-            await emit("teamExpenses", { teamId: 7 });
+            await emit("teamExpenses", { user: { teamId: 7 } });
+            await emit("teamExpenses", { user: { teamId: 7 } });
+            await emit("teamExpenses", { user: { teamId: 7 } });
             expect(emitLines(log)).toHaveLength(3);
             expect(emitLines(log)[0]).toContain("connections=2");
 
@@ -514,8 +514,8 @@ describe("live loader — emit log (CA8)", () => {
                 getSessionCookie,
             });
 
-            await emit("teamExpenses", { teamId: 7 });
-            await emit(Page, "teamExpenses", { teamId: 7 }, { teamTotal: 1 });
+            await emit("teamExpenses", { user: { teamId: 7 } });
+            await emit(Page, "teamExpenses", { user: { teamId: 7 } }, { teamTotal: 1 });
 
             const lines = emitLines(log);
             expect(lines).toHaveLength(2);
@@ -540,8 +540,8 @@ describe("live loader — emit log (CA8)", () => {
                 .channel(Page, "teamExpenses");
             await sub.next({ timeoutMs: 1000 });
 
-            await emit("teamExpenses", { teamId: 7 });
-            await emit(Page, "teamExpenses", { teamId: 7 }, { teamTotal: 1 });
+            await emit("teamExpenses", { user: { teamId: 7 } });
+            await emit(Page, "teamExpenses", { user: { teamId: 7 } }, { teamTotal: 1 });
             expect(await sub.next({ timeoutMs: 1000 })).toEqual({ teamTotal: 10, items: ["a"] });
             expect(await sub.next({ timeoutMs: 1000 })).toEqual({ teamTotal: 1 });
 
@@ -565,10 +565,11 @@ describe("live loader — partition revalidation (CA9)", () => {
 
     const memberChannels = {
         teamExpenses: {
-            // A producer that already knows the affected partition names it; a
-            // connection resolves its own from the principal's membership.
-            scope: (ctx: any) =>
-                ctx?.producerPartition ?? membership.get(ctx?.userId) ?? null,
+            // A producer that already knows the affected partition names it (as
+            // a producer field); a connection resolves its own from the
+            // principal's membership.
+            scope: ({ user, params }: any) =>
+                params?.partition ?? membership.get(user?.userId) ?? null,
         },
     };
 
@@ -596,7 +597,7 @@ describe("live loader — partition revalidation (CA9)", () => {
         membership.set(1, "team:9");
         store[7] = { teamTotal: 30, items: ["a"] };
 
-        await emit("teamExpenses", { producerPartition: "team:7" });
+        await emit("teamExpenses", { params: { partition: "team:7" } });
 
         // A was re-derived to another partition: closed, and no snapshot of the
         // group it no longer belongs to.
@@ -624,7 +625,7 @@ describe("live loader — partition revalidation (CA9)", () => {
 
         membership.set(1, null);
 
-        await emit("teamExpenses", { producerPartition: "team:7" });
+        await emit("teamExpenses", { params: { partition: "team:7" } });
 
         await expect(a.next({ timeoutMs: 1000 })).rejects.toThrow(/closed/);
         expect(a.events).toHaveLength(1);
@@ -647,7 +648,7 @@ describe("live loader — partition revalidation (CA9)", () => {
         await b.next({ timeoutMs: 1000 });
 
         membership.set(1, "team:9");
-        await emit(Page, "teamExpenses", { producerPartition: "team:7" }, { teamTotal: 77 });
+        await emit(Page, "teamExpenses", { params: { partition: "team:7" } }, { teamTotal: 77 });
 
         await expect(a.next({ timeoutMs: 1000 })).rejects.toThrow(/closed/);
         expect(a.events).toHaveLength(1);
@@ -672,7 +673,7 @@ describe("live loader — toolkit contract (CA11)", () => {
             .channel(Page, "teamExpenses");
         expect(await sub.next({ timeoutMs: 1000 })).toEqual({ teamTotal: 10, items: ["a"] });
 
-        await emit(Page, "teamExpenses", { teamId: 7 }, { teamTotal: 99 });
+        await emit(Page, "teamExpenses", { user: { teamId: 7 } }, { teamTotal: 99 });
         expect(await sub.next({ timeoutMs: 1000 })).toEqual({ teamTotal: 99 }); // raw, unmerged
 
         await sub.close();
@@ -693,13 +694,13 @@ describe("live loader — toolkit contract (CA11)", () => {
         });
 
         store[7] = { teamTotal: 25, items: ["a"] };
-        await emit("teamExpenses", { teamId: 7 });
+        await emit("teamExpenses", { user: { teamId: 7 } });
         expect(await sub.nextEvent({ timeoutMs: 1000 })).toEqual({
             type: "snapshot",
             data: { teamTotal: 25, items: ["a"] },
         });
 
-        await emit(Page, "teamExpenses", { teamId: 7 }, { items: ["x", "y"] });
+        await emit(Page, "teamExpenses", { user: { teamId: 7 } }, { items: ["x", "y"] });
         expect(await sub.nextEvent({ timeoutMs: 1000 })).toEqual({
             type: "slice",
             data: { items: ["x", "y"] },

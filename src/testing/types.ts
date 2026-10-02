@@ -102,6 +102,19 @@ export interface SubscribeOptions extends RequestOptions {
     channel?: string;
 }
 
+/**
+ * Options of a live-loader channel connection.
+ *
+ * `params` are the route params the connection declares — the same ones the
+ * browser extracts from the URL and sends in `?_route=`. The server-side
+ * validation of the declared path runs for real: a key the module's path does
+ * not declare rejects the subscription (400), never silently ignores the input.
+ */
+export interface ChannelSubscribeOptions extends SubscribeOptions {
+    /** Route params the connection declares (serialized into `?_route=`). */
+    params?: Params;
+}
+
 export interface NextOptions {
     /** Reject if no event arrives within this many ms. */
     timeoutMs: number;
@@ -246,16 +259,21 @@ export interface TestApp {
      * read) or a moduleId string. Cookies (and therefore the principal) come
      * from the options or from `app.as(user)`; the route node's middlewares run
      * for real, so an unauthenticated subscription is denied exactly as in
-     * production.
+     * production. `params` are the route params the connection declares — the
+     * server validates their keys against the module's path.
      *
      * ```ts
      * const sub = await app.as({ id: 7 }).channel(Expenses, "teamExpenses");
      * await sub.next({ timeoutMs: 1000 });        // snapshot on connect
-     * await emit("teamExpenses", { teamId: 7 });
+     * await emit("teamExpenses", { user: { teamId: 7 } });
      * expect(await sub.next({ timeoutMs: 1000 })).toEqual({ teamTotal: 2 });
      *
+     * // A route with `:params`: the connection declares them and the loader
+     * // re-executes with them.
+     * const project = await app.channel(Project, "projectFiles", { params: { id: "7" } });
+     *
      * // The same arrivals discriminated: nextEvent() tells a snapshot from a slice.
-     * await emit(Expenses, "teamExpenses", { teamId: 7 }, { teamTotal: 880 });
+     * await emit(Expenses, "teamExpenses", { user: { teamId: 7 } }, { teamTotal: 880 });
      * expect(await sub.nextEvent({ timeoutMs: 1000 })).toEqual({
      *     type: "slice",
      *     data: { teamTotal: 880 },
@@ -265,7 +283,7 @@ export interface TestApp {
     channel<T = any>(
         module: ChannelModuleRef,
         name: string,
-        opts?: SubscribeOptions
+        opts?: ChannelSubscribeOptions
     ): Promise<TestChannelSubscription<T>>;
 
     // Sockets

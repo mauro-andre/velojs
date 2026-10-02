@@ -24,7 +24,7 @@ const store: Record<number, number> = {};
 
 const CHANNELS = {
     public: { scope: () => "all" },
-    teamExpenses: { scope: (ctx: any) => `team:${ctx.teamId}` },
+    teamExpenses: { scope: ({ user }: any) => `team:${user.teamId}` },
 };
 
 const teamTotal = async ({ c }: any) => ({
@@ -198,7 +198,7 @@ describe("live loader — idle timeout", () => {
 
         await vi.advanceTimersByTimeAsync(60);
         store[7] = 2;
-        await emit("teamExpenses", { teamId: 7 });
+        await emit("teamExpenses", { user: { teamId: 7 } });
         expect(await sub.next({ timeoutMs: 1000 })).toEqual({ teamTotal: 2 });
 
         // 60 + 60 > 100 since the last delivery: still open.
@@ -486,7 +486,7 @@ describe("live loader — inspectChannels", () => {
             .channel(Mod, "teamExpenses");
         await sub.next({ timeoutMs: 1000 });
 
-        await emit("teamExpenses", { teamId: 7 });
+        await emit("teamExpenses", { user: { teamId: 7 } });
         expect(inspectChannels().openCoalesceWindows).toEqual([
             { channel: "teamExpenses", partition: "team:7" },
         ]);

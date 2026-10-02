@@ -23,6 +23,9 @@ export { emit, inspectChannels, registerChannels } from "./channels.js";
 export type {
     ChannelDefinition,
     ChannelMap,
+    ChannelScopeContext,
+    ChannelGroupOpenContext,
+    ChannelGroupCloseContext,
     ChannelScopeResult,
     ChannelRegistryOptions,
     ChannelEmitModule,

@@ -11,21 +11,27 @@
  *
  * ```ts
  * export const channels = {
- *     teamExpenses: { scope: (ctx) => `team:${ctx.teamId}` },
+ *     teamExpenses: { scope: ({ user }) => `team:${user?.teamId}` },
  * };
  * ```
  *
- * On subscribe the resolver receives the materialized principal (`c.get("user")`,
- * the house key); without an authenticated principal it receives `undefined`, so
- * a public channel ignores it (`() => "all"`) and an authenticated one returns
- * `null` (which denies the subscription with 403). The partition NEVER derives
- * from the query string or from any client input.
+ * On subscribe the resolver receives `{ user, params }`: `user` is the
+ * materialized principal (`c.get("user")`, the house key — `undefined` when the
+ * app does not materialize one, so a public channel ignores it and an
+ * authenticated one returns `null`, which denies the subscription with 403) and
+ * `params` are the route params the client declared and the runtime validated
+ * against the module's path (empty for a route without `:params`). The
+ * partition NEVER derives from the query string or from any other client input;
+ * `params` are not input — they are the address the client is already seeing,
+ * validated by shape and then by the scope (ownership/permission).
  *
- * `emit(channel, ctx)` resolves the same partition key on the producer side,
- * finds the group of connections in that partition and re-executes the loader
- * for each connection — with that connection's own principal — pushing a fresh
- * snapshot down the wire. Emitting to a channel with no subscribers is a no-op;
- * emitting to a channel with no entry in the app map throws immediately.
+ * `emit(channel, ctx)` resolves the same partition key on the producer side —
+ * the producer builds the same `{ user, params }` shape with the fields its
+ * scope consumes — finds the group of connections in that partition and
+ * re-executes the loader for each connection, with that connection's own
+ * principal and route params, pushing a fresh snapshot down the wire. Emitting
+ * to a channel with no subscribers is a no-op; emitting to a channel with no
+ * entry in the app map throws immediately.
  *
  * `emit(module, channel, ctx, slice)` is the second mode, addressed to the
  * (module, channel) pair: the producer already holds the value, so it travels
@@ -35,12 +41,18 @@
  * one channel can be declared by modules with different `Data` (a layout and a
  * page), and a slice is the shape of exactly one of them.
  *
+ * A channel's group (channel + partition) has a lifecycle: the first connection
+ * arms it (`onGroupOpen({ partition, params })`) and the last one disarms it
+ * (`onGroupClose({ partition })`), both awaited — that is where a watcher with a
+ * cost of life is armed and disarmed, instead of running forever for an empty
+ * group.
+ *
  * Every emit logs one line (channel, partition, kind, connections at the
  * moment of the gesture, timestamp) unless `logEmits: false` is registered,
  * and invalidations are folded by a coalescing window per (channel, partition)
  * (`coalesceMs`, default 50, `0` disables). Before delivering anything the
- * runtime re-derives each connection's partition with the principal captured
- * on subscribe: a connection that moved (or whose scope now returns null) is
+ * runtime re-derives each connection's partition with the ctx captured on
+ * subscribe: a connection that moved (or whose scope now returns null) is
  * dropped and closed instead of receiving data of a group it left.
  */
 
@@ -56,14 +68,60 @@ import type { LoaderArgs, RouteModule } from "./types.js";
 export type ChannelScopeResult = string | null | undefined;
 
 /**
+ * The ctx of a partition resolver — the same shape on both sides.
+ *
+ * On **subscribe** the runtime builds it: `user` is the materialized principal
+ * (`c.get("user")`, the house key — `undefined` when the app does not
+ * materialize one) and `params` are the route params the client declared and
+ * the runtime validated against the module's path (URL strings; empty for a
+ * route without `:params`).
+ *
+ * On **emit** the producer builds the same object with the fields its scope
+ * consumes — `{ params: { id: 7 } }` for a resource channel, `{ user: … }`
+ * for a principal one — and the same `scope` runs against it.
+ */
+export interface ChannelScopeContext {
+    user?: any;
+    params?: Record<string, any>;
+}
+
+/**
+ * What `onGroupOpen` receives: the partition key of the group that just got its
+ * first connection, and the validated route params of **that** connection.
+ *
+ * The params are identical across the group only when the partition derives
+ * from them (a watcher per resource — the case the hook exists for). A channel
+ * partitioned by principal, declared in a module with `:params`, mixes
+ * resources in the same group and the hook's params are the first connection's
+ * — arbitrary for the rest; such a channel must not consume them here.
+ */
+export interface ChannelGroupOpenContext {
+    partition: string;
+    params: Record<string, string>;
+}
+
+/** What `onGroupClose` receives: the partition key of the group being torn down. */
+export interface ChannelGroupCloseContext {
+    partition: string;
+}
+
+/**
  * One entry of the app's channel map (`app/channels.ts`).
  *
- * `scope` receives the materialized principal on subscribe (`c.get("user")`)
- * and the emitter's object on emit. Returning `null` denies with 403.
- * Omitted → the channel is public (`() => "all"`).
+ * `scope` receives `{ user, params }` on subscribe and the emitter's object on
+ * emit; returning `null` denies with 403. Omitted → the channel is public
+ * (`() => "all"`).
+ *
+ * `onGroupOpen`/`onGroupClose` are the group lifecycle — armed by the first
+ * connection of a (channel, partition) group, disarmed by the last one — and
+ * may be async: the runtime awaits them (the group is only marked open after
+ * `onGroupOpen` resolves; only discarded after `onGroupClose` resolves). A hook
+ * that throws or rejects is logged loudly and the group continues.
  */
 export interface ChannelDefinition {
-    scope?: (ctx: any) => ChannelScopeResult | Promise<ChannelScopeResult>;
+    scope?: (ctx: ChannelScopeContext) => ChannelScopeResult | Promise<ChannelScopeResult>;
+    onGroupOpen?: (ctx: ChannelGroupOpenContext) => void | Promise<void>;
+    onGroupClose?: (ctx: ChannelGroupCloseContext) => void | Promise<void>;
 }
 
 /** The `app/channels.ts` map: channel name → partition resolver. */
@@ -187,8 +245,10 @@ export function registerChannels(
     idleMs = options?.idleMs ?? DEFAULT_IDLE_MS;
     heartbeatMs = options?.heartbeatMs ?? DEFAULT_HEARTBEAT_MS;
     logEmits = options?.logEmits ?? true;
-    // A re-registration invalidates the windows still open.
+    // A re-registration invalidates the windows still open and the group opens
+    // still in flight (they belong to the map being replaced).
     cancelPendingWindows();
+    groupOpens.clear();
 }
 
 /** The currently registered channel map (read-only use). */
@@ -240,6 +300,14 @@ export interface ChannelConnection {
 /** channel → partition key → live connections. Empty groups do not exist. */
 const groups = new Map<string, Map<string, Set<ChannelConnection>>>();
 
+/**
+ * In-flight `onGroupOpen` promises, per (channel, partition). Kept so a
+ * `onGroupClose` that lands while the open hook is still running waits for it —
+ * the pair is always ordered open → close — and so the group is only marked
+ * open once the hook resolves.
+ */
+const groupOpens = new Map<string, Promise<void>>();
+
 /** One open coalescing window: `(channel, partition)` → its timer. */
 interface CoalesceWindow {
     timer: ReturnType<typeof setTimeout>;
@@ -249,16 +317,12 @@ interface CoalesceWindow {
 
 const windows = new Map<string, CoalesceWindow>();
 
-function windowKey(channel: string, partition: string): string {
-    return `${channel}\u0000${partition}`;
-}
-
 /**
  * Closes the open window of a (channel, partition): one re-execution round is
  * the effect of every emit that fell inside it — no invalidation is lost.
  */
 function openWindow(channel: string, partition: string): void {
-    const key = windowKey(channel, partition);
+    const key = groupKey(channel, partition);
     // The first emit opens the window; the later ones join it without moving
     // the deadline (a sliding window would postpone the round indefinitely on
     // a hot producer).
@@ -377,7 +441,16 @@ function byPartitionSize(byPartition: Map<string, Set<ChannelConnection>>): numb
     return size;
 }
 
-function addConnection(conn: ChannelConnection): void {
+/** The key of a (channel, partition) pair — the connection group and its coalescing window. */
+function groupKey(channel: string, partition: string): string {
+    return `${channel}\u0000${partition}`;
+}
+
+/**
+ * Registers the connection in its group. Returns `true` when it is the first
+ * one — the transition that opens the group (and fires `onGroupOpen`).
+ */
+function addConnection(conn: ChannelConnection): boolean {
     let byPartition = groups.get(conn.channel);
     if (!byPartition) {
         byPartition = new Map();
@@ -388,21 +461,119 @@ function addConnection(conn: ChannelConnection): void {
         set = new Set();
         byPartition.set(conn.partition, set);
     }
+    const wasEmpty = set.size === 0;
     set.add(conn);
+    return wasEmpty;
 }
 
-function removeConnection(conn: ChannelConnection): void {
+/**
+ * Removes the connection from its group. Returns `true` when it was the last
+ * one — the transition that empties the group (and fires `onGroupClose`).
+ */
+function removeConnection(conn: ChannelConnection): boolean {
     const byPartition = groups.get(conn.channel);
     const set = byPartition?.get(conn.partition);
-    if (!byPartition || !set) return;
+    if (!byPartition || !set) return false;
     set.delete(conn);
-    if (set.size === 0) byPartition.delete(conn.partition);
+    const emptied = set.size === 0;
+    if (emptied) byPartition.delete(conn.partition);
     if (byPartition.size === 0) groups.delete(conn.channel);
+    return emptied;
 }
 
-/** Test-only. Drops every live connection and closes every open window. */
+// ============================================
+// GROUP LIFECYCLE
+// ============================================
+
+/**
+ * Fires `onGroupOpen` for a group that just received its first connection, and
+ * keeps the promise until it resolves: that is what "marked open" means — a
+ * second connection entering meanwhile joins the open group and never fires
+ * the hook again.
+ *
+ * A hook that throws (or rejects) is logged loudly, naming channel and
+ * partition, and the group continues: the connect snapshot still delivers data
+ * from the cold source, the live data simply does not arrive until the hook is
+ * fixed — and the log is what says so.
+ */
+function openGroup(
+    channel: string,
+    partition: string,
+    params: Record<string, string>,
+): Promise<void> {
+    const key = groupKey(channel, partition);
+    const hook = channelMap[channel]?.onGroupOpen;
+
+    const pending = (async () => {
+        if (typeof hook !== "function") return;
+        try {
+            await hook({ partition, params });
+        } catch (err) {
+            console.error(
+                `[velojs] channel "${channel}" onGroupOpen failed for partition "${partition}":`,
+                err,
+            );
+        }
+    })();
+
+    groupOpens.set(key, pending);
+    void pending.then(() => {
+        if (groupOpens.get(key) === pending) groupOpens.delete(key);
+    });
+    return pending;
+}
+
+/**
+ * Takes the connection out of its group, awaiting the group's `onGroupClose`
+ * before the last one is actually discarded (the watcher disarms before the
+ * group stops existing). An in-flight `onGroupOpen` is awaited first, so the
+ * pair is always ordered; if another connection entered while we waited, this
+ * one is not the last anymore and no close fires.
+ *
+ * The close hook is async, so a connection may enter the group while it runs:
+ * that one finds the group occupied (the leaving connection is still in it) and
+ * never opens it itself, so the surviving group is **re-armed here**, after the
+ * discard — the source must not stay disarmed over a live group.
+ */
+async function leaveGroup(conn: ChannelConnection): Promise<void> {
+    const key = groupKey(conn.channel, conn.partition);
+    const opening = groupOpens.get(key);
+    if (opening) await opening;
+
+    const set = groups.get(conn.channel)?.get(conn.partition);
+    if (!set || !set.has(conn) || set.size > 1) {
+        // Not the last one (or already gone): just leave the group.
+        removeConnection(conn);
+        return;
+    }
+
+    const hook = channelMap[conn.channel]?.onGroupClose;
+    if (typeof hook === "function") {
+        try {
+            await hook({ partition: conn.partition });
+        } catch (err) {
+            console.error(
+                `[velojs] channel "${conn.channel}" onGroupClose failed for partition ` +
+                `"${conn.partition}":`,
+                err,
+            );
+        }
+    }
+
+    removeConnection(conn);
+
+    // The group may have gained connections while the close hook was running
+    // (they joined a group that was still occupied). They are the group now:
+    // the source is armed for them, with the params of the first one.
+    const survivors = groups.get(conn.channel)?.get(conn.partition);
+    const first = survivors ? [...survivors][0] : undefined;
+    if (first) await openGroup(conn.channel, conn.partition, first.params);
+}
+
+/** Test-only. Drops every live connection, group and open window. */
 export function __resetChannels(): void {
     groups.clear();
+    groupOpens.clear();
     cancelPendingWindows();
 }
 
@@ -412,7 +583,7 @@ export function __resetChannels(): void {
 
 async function resolvePartition(
     def: ChannelDefinition,
-    ctx: unknown,
+    ctx: ChannelScopeContext,
 ): Promise<ChannelScopeResult> {
     const scope = def.scope;
     // A channel with no resolver is public by construction.
@@ -427,9 +598,10 @@ function contextVariable(c: Context, key: string): unknown {
 
 /**
  * Re-derives the partition of every connection in a group, running the scope
- * with the principal captured at subscribe. A connection whose partition moved
- * — or whose scope now returns `null` — is closed and removed from the group
- * before any delivery: it must not receive data of a grouping it left.
+ * with the ctx captured at subscribe (`{ user, params }` — the principal and
+ * the validated route params of the connection). A connection whose partition
+ * moved — or whose scope now returns `null` — is closed and removed from the
+ * group before any delivery: it must not receive data of a grouping it left.
  *
  * Returns the connections still in the group (`null` when none is left).
  */
@@ -446,7 +618,10 @@ async function revalidateGroup(
     for (const conn of [...set]) {
         let next: ChannelScopeResult;
         try {
-            next = await resolvePartition(def, conn.principal);
+            next = await resolvePartition(def, {
+                user: conn.principal,
+                params: conn.params,
+            });
         } catch (err) {
             // A scope that throws on re-derivation cannot vouch for the
             // partition: the connection is dropped, never silently kept.
@@ -518,16 +693,20 @@ export async function pushSnapshot(conn: ChannelConnection): Promise<void> {
 /**
  * Signals that a channel's partition changed: every connection in that
  * partition receives a fresh snapshot (its loader re-executed with the
- * connection's own principal). Connections in other partitions receive
- * nothing; a channel with no subscribers is a no-op; a channel with no entry
- * in the app map throws immediately, naming the channel.
+ * connection's own principal and route params). Connections in other
+ * partitions receive nothing; a channel with no subscribers is a no-op; a
+ * channel with no entry in the app map throws immediately, naming the channel.
+ *
+ * The ctx is the object the same `scope` receives: the producer builds it with
+ * the fields its scope consumes (`{ params: { id: 7 } }` for a resource
+ * channel, `{ user: … }` for a principal one).
  *
  * ```ts
  * import { emit } from "@mauroandre/velojs/server";
- * await emit("teamExpenses", { teamId: 7 });
+ * await emit("teamExpenses", { user: { teamId: 7 } });
  * ```
  */
-export function emit(channel: string, ctx?: unknown): Promise<void>;
+export function emit(channel: string, ctx?: ChannelScopeContext): Promise<void>;
 /**
  * Slice mode: pushes the value the producer already holds to the connections
  * of the (module, channel) pair in the emitting partition — **without**
@@ -536,13 +715,13 @@ export function emit(channel: string, ctx?: unknown): Promise<void>;
  *
  * ```ts
  * import * as Expenses from "../app/expenses/Expenses.js";
- * await emit(Expenses, "teamExpenses", { teamId: 7 }, { teamTotal: 880 });
+ * await emit(Expenses, "teamExpenses", { user: { teamId: 7 } }, { teamTotal: 880 });
  * ```
  */
 export function emit<M extends ChannelEmitModule>(
     module: M,
     channel: string,
-    ctx: unknown,
+    ctx: ChannelScopeContext,
     slice: ChannelSlice<M>,
 ): Promise<void>;
 export function emit(
@@ -552,8 +731,8 @@ export function emit(
     slice?: unknown,
 ): Promise<void> {
     return typeof channelOrModule === "string"
-        ? emitInvalidation(channelOrModule, channelOrCtx)
-        : emitSlice(channelOrModule, channelOrCtx as string, ctx, slice);
+        ? emitInvalidation(channelOrModule, (channelOrCtx ?? {}) as ChannelScopeContext)
+        : emitSlice(channelOrModule, channelOrCtx as string, ctx as ChannelScopeContext, slice);
 }
 
 /**
@@ -562,7 +741,7 @@ export function emit(
  * nothing; a channel with no subscribers is a no-op (but still logged); a
  * channel with no entry in the app map throws immediately, naming the channel.
  */
-async function emitInvalidation(channel: string, ctx: unknown): Promise<void> {
+async function emitInvalidation(channel: string, ctx: ChannelScopeContext): Promise<void> {
     const def = channelMap[channel];
     if (!def) {
         throw new Error(
@@ -599,7 +778,7 @@ async function emitInvalidation(channel: string, ctx: unknown): Promise<void> {
 async function emitSlice(
     module: ChannelEmitModule,
     channel: string,
-    ctx: unknown,
+    ctx: ChannelScopeContext,
     slice: unknown,
 ): Promise<void> {
     const moduleId = module?.metadata?.moduleId;
@@ -724,6 +903,77 @@ export function createChannelWriteChain(
  */
 export type ChannelWritePayload = { event: string; data: string } | string;
 
+// ============================================
+// ROUTE PARAMS — declared by the client, validated by the server
+// ============================================
+
+/** Query key carrying the route params the connection declares. */
+export const ROUTE_PARAMS_QUERY = "_route";
+
+/**
+ * The `:param` names a route path declares, in declaration order. A path with
+ * a catch-all (`/docs/*`) declares none: the pattern has no key to extract, so
+ * the connection travels by principal only.
+ */
+export function declaredRouteParams(fullPath: string | null | undefined): string[] {
+    if (!fullPath) return [];
+    return fullPath
+        .split("/")
+        .filter((segment) => segment.startsWith(":"))
+        .map((segment) => segment.slice(1));
+}
+
+/**
+ * Parses and validates the `?_route=` payload of a channel connection against
+ * the names the module's route path declares.
+ *
+ * The client declares the params of the URL it is already seeing; it is not
+ * free input: a key the module's path does not declare rejects the
+ * subscription with an explicit error, and every value is a URL string. An
+ * absent payload is the empty object — a route without `:params` sends none.
+ */
+export function parseRouteParamsQuery(
+    raw: string | undefined | null,
+    declared: readonly string[],
+): { params: Record<string, string>; error: string | null } {
+    if (raw === undefined || raw === null || raw === "") {
+        return { params: {}, error: null };
+    }
+
+    let parsed: unknown;
+    try {
+        parsed = JSON.parse(raw);
+    } catch {
+        return { params: {}, error: `the ?${ROUTE_PARAMS_QUERY}= payload is not valid JSON` };
+    }
+
+    if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+        return {
+            params: {},
+            error: `the ?${ROUTE_PARAMS_QUERY}= payload must be an object of route params`,
+        };
+    }
+
+    const params: Record<string, string> = {};
+    for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
+        if (!declared.includes(key)) {
+            const declaredList = declared.length > 0 ? declared.join(", ") : "none";
+            return {
+                params: {},
+                error:
+                    `route param "${key}" is not declared by the module's path ` +
+                    `(declared: ${declaredList})`,
+            };
+        }
+        if (typeof value !== "string") {
+            return { params: {}, error: `route param "${key}" must be a URL string` };
+        }
+        params[key] = value;
+    }
+
+    return { params, error: null };
+}
+
 /**
  * Registers the internal SSE route of one declared channel:
  * `GET /_channel/{moduleId}/{channel}`, inheriting the route node's
@@ -733,9 +983,10 @@ export type ChannelWritePayload = { event: string; data: string } | string;
  * channel with no entry in `app/channels.ts`, is an explicit error — never a
  * silent inert route.
  *
- * The principal is captured on the connection for the partition revalidation
- * of every emit, and `terminate` lets an emit close a connection whose
- * partition no longer holds.
+ * The connection carries the client-declared route params (validated here
+ * against the module's path), the principal captured for the partition
+ * revalidation of every emit, and `terminate` lets an emit close a connection
+ * whose partition no longer holds.
  */
 export function registerChannelRoute(
     app: Hono,
@@ -759,27 +1010,52 @@ export function registerChannelRoute(
     }
 
     const loader = module.loader;
+    const declaredParams = declaredRouteParams(module.metadata?.fullPath);
 
     const handler = async (c: Context) => {
         const def = channelMap[channel]!;
 
-        // The ctx contract is fixed: the materialized principal, by convention
-        // under the house key "user". No principal → undefined; the scope may
-        // ignore it (public channel) or return null (denies with 403).
+        // The connection declares the params of the URL the client is already
+        // seeing; the server validates the shape against the module's path —
+        // a key the path does not declare is an explicit rejection, never a
+        // silently ignored input.
+        const parsed = parseRouteParamsQuery(
+            c.req.query(ROUTE_PARAMS_QUERY),
+            declaredParams,
+        );
+        if (parsed.error) {
+            console.error(`[velojs] channel "${channel}": rejecting subscription — ${parsed.error}`);
+            return c.json({ error: "invalid-route-params", message: parsed.error }, 400);
+        }
+        const params = parsed.params;
+
+        // The ctx contract is fixed: `{ user, params }`. The principal comes
+        // from the house key "user" (no principal → undefined; the scope may
+        // ignore it or return null, which denies with 403). A scope that
+        // throws cannot vouch for the partition: denied loudly, never silently.
         const principal = contextVariable(c, "user");
 
         let partition: string | null | undefined;
         try {
-            partition = await resolvePartition(def, principal);
+            partition = await resolvePartition(def, { user: principal, params });
         } catch (err) {
             console.error(`[velojs] channel "${channel}" scope threw:`, err);
-            return c.json({ error: "internal" }, 500);
+            return c.json({ error: "forbidden" }, 403);
         }
         if (partition == null) {
             return c.json({ error: "forbidden" }, 403);
         }
 
         const { streamSSE } = await import("hono/streaming");
+
+        // The query delivered to the re-executed loader is the connection's
+        // own minus the internal `_route` key — it is protocol transport, not
+        // page data.
+        const query: Record<string, string> = {};
+        for (const [key, value] of Object.entries(c.req.query())) {
+            if (key === ROUTE_PARAMS_QUERY) continue;
+            query[key] = value;
+        }
 
         const response = await streamSSE(c, async (sse) => {
             let disposed = false;
@@ -804,8 +1080,8 @@ export function registerChannelRoute(
                 principal,
                 loader,
                 c,
-                params: c.req.param(),
-                query: c.req.query(),
+                params,
+                query,
                 send: (event, data) => {
                     if (disposed) return Promise.resolve();
                     const isDelivery =
@@ -828,8 +1104,12 @@ export function registerChannelRoute(
                 disposed = true;
                 if (idleTimer !== null) clearTimeout(idleTimer);
                 if (heartbeat !== null) clearInterval(heartbeat);
-                removeConnection(conn);
                 resolveDone();
+                // Out of the group — and, when this was the last connection,
+                // through the group's `onGroupClose` before the group is
+                // discarded. Any cause (disconnect, idle, revalidation) ends
+                // up here.
+                void leaveGroup(conn);
             };
 
             /**
@@ -872,14 +1152,18 @@ export function registerChannelRoute(
             }
 
             // Registered before the connect snapshot so an emit that lands in
-            // between still reaches this connection.
-            addConnection(conn);
+            // between still reaches this connection. The first connection of
+            // the group fires `onGroupOpen`, awaited before the snapshot: the
+            // source is armed before the first data arrives, and a rejected
+            // hook is logged and the group continues.
+            const opened = addConnection(conn);
             sse.onAbort(cleanup);
             armIdle();
             if (heartbeat !== null) {
                 const unref = (heartbeat as unknown as { unref?: () => void }).unref;
                 if (typeof unref === "function") unref.call(heartbeat);
             }
+            if (opened) await openGroup(channel, partition, params);
 
             // Snapshot on connect: the pane never shows the SSR value while the
             // server has already moved on. A reconnect is a new connection and

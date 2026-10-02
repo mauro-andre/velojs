@@ -489,9 +489,11 @@ export const Component = () => {
 // app/channels.ts — the app's channel map: name → partition resolver
 export const channels = {
     teamExpenses: {
-        // ctx: on subscribe, the principal materialized in c.get("user");
-        // on emit, the object the emitter passed. Returns the partition key.
-        scope: (ctx) => `team:${ctx.teamId}`,
+        // On subscribe the ctx is { user, params }: the principal materialized
+        // in c.get("user") and the route params the connection declared. On
+        // emit it is the object the producer built, with the fields this scope
+        // consumes. Returns the partition key.
+        scope: ({ user }) => `team:${user.teamId}`,
     },
 };
 ```
@@ -500,7 +502,7 @@ export const channels = {
 // anywhere server-side: an action, server.tsx, a scheduler, a webhook
 import { emit } from "@mauroandre/velojs/server";
 
-await emit("teamExpenses", { teamId: 7 });
+await emit("teamExpenses", { user: { teamId: 7 } });
 ```
 
 ### What happens
@@ -513,18 +515,95 @@ await emit("teamExpenses", { teamId: 7 });
   channel declared by both a layout and a page produces one connection per
   module, each feeding its own module's data; a single `emit` reaches both.
 - Every new connection immediately receives the **current state**, computed by
-  re-executing the loader with that connection's own principal — so the pane
-  never shows the SSR value while the server has already moved on.
-- `emit(channel, ctx)` resolves the partition with the same `scope`, finds the
-  connections in that partition and pushes a fresh snapshot to each one — its
-  loader re-executed with its own principal. Connections of other partitions
-  receive nothing.
+  re-executing the loader with that connection's own principal and route
+  params — so the pane never shows the SSR value while the server has already
+  moved on.
+- `emit(channel, ctx)` resolves the partition with the same `scope` — the
+  producer builds the same `{ user, params }` shape with the fields its scope
+  consumes — finds the connections in that partition and pushes a fresh
+  snapshot to each one: its loader re-executed with its own principal and route
+  params. Connections of other partitions receive nothing.
 - The snapshot **replaces** the module's loader data; the component re-renders
   by itself. `useLoader()` and `Loader()` also expose `freshness` — `"live"`,
   `"stale"` (connection closed/reconnecting/silent), `"error"` (the last
   re-execution failed) — aggregated per page, plus `freshnessByChannel`, the
   same states keyed by each of the module's channel names. They are data for
   CSS to react to.
+
+### Routes with `:params` — the client declares, the server decides
+
+A channel declared in a module whose route has `:params` (`/projeto/:id`, a page
+or a layout) partitions per **resource**, and the loader re-executes with
+`params.id` filled — the connect snapshot and every emit.
+
+```tsx
+// app/projeto/Projeto.tsx — the route /projeto/:id
+export const loader = async ({ params }: LoaderArgs) => ({
+    arquivos: await projetoService.arquivos(params.id),
+});
+export const channels = ["projetoArquivos"];
+```
+
+```ts
+// app/channels.ts
+export const channels = {
+    projetoArquivos: {
+        scope: ({ user, params }) => {
+            if (!params?.id) return null;
+            if (user && !podeVer(user, params.id)) return null;   // 403
+            return `projeto:${params.id}`;
+        },
+    },
+};
+```
+
+- The client **declares** the address it is already seeing: it extracts the
+  params the module's `fullPath` declares, matching as a **prefix** of the
+  pathname (a layout `/projeto/:id` covers `/projeto/7/sala` and extracts
+  `id=7`; the child's suffix takes no part) and sends them in `?_route=<json>`.
+  A catch-all (`/docs/*`) declares no `:` key — the connection travels by
+  principal.
+- The server **decides**: it validates the keys against the module's declared
+  path — a key the path does not declare rejects the subscription with **400** —
+  and the `scope` validates the policy (possession/permission), deriving the
+  key. `params` are never an authorization input: they are the declared route,
+  validated by shape and then by policy.
+- The internal `_route` key never reaches the loader's `query`: it is transport,
+  not page data.
+- The connection is **keyed by the extracted params**, not by the pathname:
+  `/projeto/7` → `/projeto/9` closes the connection and opens a new one (with a
+  snapshot on connect); `/projeto/7` → `/projeto/7/sala` does not reconnect.
+
+### Group lifecycle: `onGroupOpen` / `onGroupClose`
+
+A source with a **cost of life** — a filesystem watcher, a process, a
+subscription to an external service — must not run forever for an empty group.
+The first connection of a group (channel + partition) arms it and the last one
+disarms it, by any cause (disconnect, idle, revalidation):
+
+```ts
+export const channels = {
+    projetoArquivos: {
+        scope: ({ params }) => (params?.id ? `projeto:${params.id}` : null),
+        onGroupOpen: ({ params }) =>
+            watchers.armar(params.id, () => emit("projetoArquivos", { params: { id: params.id } })),
+        onGroupClose: ({ partition }) => watchers.desarmar(),
+    },
+};
+```
+
+- A second connection of the same group fires nothing.
+- Both hooks may be async and are **awaited**: on open, before the connect
+  snapshot (the source is armed before the first data arrives); on close, before
+  the group is discarded. A hook that throws (or rejects) is logged loudly,
+  naming channel and partition, and the group continues — the cold-source
+  snapshot still arrives, only the live data waits for the fix.
+- The hook is infrastructure, not policy: it does not receive `user`.
+- The `params` of `onGroupOpen` belong to the connection that opened the group
+  and are identical across it **only when the partition derives from them** (a
+  watcher per resource). A channel partitioned by **principal**, declared in a
+  module with `:params`, mixes resources in one group: do not consume the
+  hook's params there.
 
 ### Two ways to emit
 
@@ -544,10 +623,10 @@ import { emit } from "@mauroandre/velojs/server";
 import * as Expenses from "../app/expenses/Expenses.js";
 
 // invalidation: the runtime re-executes Expenses.loader per connection
-await emit("teamExpenses", { teamId: 7 });
+await emit("teamExpenses", { user: { teamId: 7 } });
 
 // slice: the value is already in hand — delivered as-is, no re-execution
-await emit(Expenses, "teamExpenses", { teamId: 7 }, { teamTotal: 880 });
+await emit(Expenses, "teamExpenses", { user: { teamId: 7 } }, { teamTotal: 880 });
 ```
 
 Why the module, and not just the channel name? Because the same channel can be
@@ -602,8 +681,9 @@ key on top of the current value.
   `createTestApp` registers with the window off and takes the same options in
   `channelOptions`.
 - **Partition revalidation.** Before delivering anything, the runtime re-derives
-  each connection's partition by running the `scope` again with the principal
-  captured at subscribe. A connection whose partition moved — or whose scope now
+  each connection's partition by running the `scope` again with the ctx captured
+  at subscribe — the principal and the validated route params of that
+  connection. A connection whose partition moved — or whose scope now
   returns `null` — is removed from the group and closed: the client sees the
   connection closed (`freshness` goes `"stale"`) and receives none of that
   emit's data. A `scope` that **throws** on re-derivation is treated the same
@@ -688,12 +768,20 @@ partitions is internal information, and it never ships in a production build.
 
 ### The partition contract
 
-On subscribe the `scope` receives `c.get("user")` — the house key, the same one
-the stream/socket channel resolvers use (a middleware that materializes the
-principal elsewhere should set it in `"user"` too). Without an authenticated
-principal it receives `undefined`: a public channel ignores it (`() => "all"`),
-an authenticated one returns `null`, which denies the subscription with 403.
-The partition **never** derives from the query string or from any client input.
+On subscribe the `scope` receives `{ user, params }`. `user` is `c.get("user")`
+— the house key, the same one the stream/socket channel resolvers use (a
+middleware that materializes the principal elsewhere should set it in `"user"`
+too) — and `params` are the route params the connection declared, already
+validated. Without an authenticated principal `user` is `undefined`: a public
+channel ignores it (`() => "all"`), an authenticated one returns `null`, which
+denies the subscription with 403; an app that does not materialize a principal
+at all (a network guard, e.g. loopback) writes `({ params }) => …`. On emit the
+same scope receives the object the producer built, with the fields it consumes
+(`{ params: … }` or `{ user: … }`). A scope that **throws** on subscribe denies
+with **403** and logs loudly, naming the channel.
+The partition **never** derives from the query string or from any other client
+input: `params` are the declared route — validated by shape — not a choice of
+subject.
 
 ### State or flow?
 
@@ -714,6 +802,11 @@ Two questions decide, every time:
   server and in the build, naming the channel.
 - `emit()` on a channel with no entry in the map: throws immediately, naming
   the channel. `emit()` on a valid channel with no subscribers is a no-op.
+- Route params with a key the module's path does **not** declare: the
+  subscription is rejected with **400**, naming the key — the client may only
+  declare what the route declares.
+- A `scope` that **throws** on subscribe: denied with **403** and logged
+  loudly, naming the channel.
 - `emit(module, channel, …)` on a module that does not declare that channel, or
   that has no `loader`: throws immediately, naming both. A slice that is not an
   object throws too.
@@ -739,10 +832,14 @@ const app = await createTestApp({
 
 const sub = await app.as({ user: { teamId: 7 } }).channel(Expenses, "teamExpenses");
 await sub.next({ timeoutMs: 1000 });     // snapshot on connect
-await emit("teamExpenses", { teamId: 7 });
+await emit("teamExpenses", { user: { teamId: 7 } });
 const snapshot = await sub.next({ timeoutMs: 1000 });
-await emit(Expenses, "teamExpenses", { teamId: 7 }, { teamTotal: 880 });
+await emit(Expenses, "teamExpenses", { user: { teamId: 7 } }, { teamTotal: 880 });
 const slice = await sub.next({ timeoutMs: 1000 });
+
+// A route with `:params`: the connection declares them (validated for real).
+const project = await app.channel(Project, "projetoArquivos", { params: { id: "7" } });
+expect(await project.next({ timeoutMs: 1000 })).toEqual({ id: "7", files: ["a.txt"] });
 ```
 
 `next()` returns the payload exactly as it travelled (a whole snapshot or a raw
@@ -1689,7 +1786,7 @@ await asAlice.subscribe(stream_progress, { channel: appId });
 // Live loader — open a channel with a principal, emit, await the next snapshot
 const live = await app.as({ user: { teamId: 7 } }).channel(Expenses, "teamExpenses");
 await live.next({ timeoutMs: 1000 });            // snapshot on connect
-await emit("teamExpenses", { teamId: 7 });
+await emit("teamExpenses", { user: { teamId: 7 } });
 const snapshot = await live.next({ timeoutMs: 1000 });
 
 await app.close();
@@ -1705,7 +1802,7 @@ await app.close();
 | `app.action(fn, opts)` | Invoke `action_*` by function reference |
 | `app.loader(fn, opts)` | Invoke `loader` and unwrap response data |
 | `app.subscribe(stream, opts)` | Subscribe to a stream; returns `TestSubscription` with `next/nextN/snapshot/close/closed` |
-| `app.channel(module, name, opts)` | Open a live-loader channel connection; snapshots and slices arrive through `next()` (raw) or `nextEvent()` (`{ type, data }`) |
+| `app.channel(module, name, opts)` | Open a live-loader channel connection; `opts.params` declares the route params (validated for real — a wrong key rejects with 400); snapshots and slices arrive through `next()` (raw) or `nextEvent()` (`{ type, data }`) |
 | `app.as({ user })` | Sub-client with cookies bound to a user |
 | `app.sessionCookies({ user })` | Build cookies via `getSessionCookie` |
 | `app.mockContext(opts)` | Escape hatch — partial Hono Context for direct invocation |

@@ -52,11 +52,11 @@ State synchronization is a first-class part of the loader contract, opt-in per m
 
 **Context.** A channel's data is per-subject: one page can watch many independent subjects (a user, an organization, a resource). The framework already resolves stream channels server-side (a `stream_*` resolver) with the request context available, but a partition of loader data is a security boundary, not just a routing key.
 
-**Decision.** Which partition of a channel a connection belongs to is resolved on the server by a resolver that receives the request context. The default derives from the authenticated session/principal; it supports scoping by resource or by role. The partition never derives from the query string or from any client input, and it is revalidated on every emit.
+**Decision.** Which partition of a channel a connection belongs to is resolved on the server by a resolver that receives the request context. The default derives from the authenticated session/principal; it supports scoping by resource or by role. The partition never derives from the query string or from any client input, and it is revalidated on every emit. (The ctx is the object `{ user, params }`, and the route params the client declares are not "client input" in this sense — the runtime validates them and the resolver still decides; see Amendment 4.)
 
 **Alternatives considered and rejected.** A client-declared partition. Rejected: untrusted input and an IDOR vector — a client must not choose which subject's data it receives.
 
-**Consequences.** Partition isolation is a server invariant, auditable in one place, and the client cannot widen its own scope. Every emit re-checks the partition so a stale connection cannot keep receiving a subject it no longer owns. The resolver is testable directly (fake principal, two connections).
+**Consequences.** Partition isolation is a server invariant, auditable in one place, and the client cannot widen its own scope. Every emit re-checks the partition so a stale connection cannot keep receiving a subject it no longer owns. The resolver is testable directly (fake principal, two connections). A group has a lifecycle the app can hook (`onGroupOpen`/`onGroupClose`, Amendment 4) — the unit for a source with a cost of life.
 
 ### D4 — Emit addressed in two modes
 
@@ -144,6 +144,10 @@ Emit with a typed `Partial`, addressed to the (module, channel) pair (see Amendm
 
 Channel idle timeout; `Cache-Control: no-store`, heartbeat, and operational notes for proxies; an inspector of live channels per page; freshness refinements — stagnation by inactivity timeout (an open connection that has said nothing for N — proxy/sleeping tab) and per-channel granularity (per connection, not aggregated). The three states themselves are Slice 1's (see Amendments).
 
+### Slice 4 — Route params and group lifecycle
+
+Loader data on a route with `:params` (`/projeto/:id`) partitions per resource: the client **declares** the route params it is already seeing (extracted from the URL, matching the module's `fullPath` as a prefix) and the server validates the shape against the declared path and the policy in the `scope`; the connection is keyed by those params, not by the pathname. The scope ctx becomes the object `{ user, params }`. A source with a cost of life is armed and disarmed by the group: `onGroupOpen` on the first connection of a (channel, partition) group, `onGroupClose` on the last one, both awaited (see Amendment 4).
+
 ## Amendments
 
 ### Amendment 1 — Channel path: `/_channel/{moduleId}/{channel}` (supersedes the D2 literal)
@@ -165,6 +169,28 @@ D4 recorded the second mode as `emit(channel, partition-context, slice)` — add
 The slice mode is therefore addressed to the **(module, channel) pair**: `emit(module, channel, partition-context, slice)`. The module is the imported route module — its `metadata.moduleId` is what identifies the connections — the slice is typed `Partial<Awaited<ReturnType<typeof Module.loader>>>`, and the runtime delivers it **only** to the connections of that pair in the resolved partition. The invalidation mode stays exactly as D4 wrote it: `emit(channel, partition-context)`, by name, reaching every module that declares the channel, each connection re-executed with its own principal.
 
 This is a deviation of the **address**, not of the decision: the payload's nature (a `Partial` of the loader's return), the shallow merge on arrival (D6) and the delivery without re-execution are D4's. D4's rejected alternative — always emitting with a payload — stays rejected, and the invalidation mode remains the one that needs no knowledge of the loader's shape.
+
+### Amendment 4 — The scope ctx is `{ user, params }`, and the client declares (does not choose) the route params (supersedes D3's literal ctx and refines its "no client input" clause)
+
+D3 recorded the partition resolver as receiving the request context, with the partition never deriving "from the query string or from any client input". That literal has no place for a page that watches **one resource** (`/projeto/:id`): the canonical case of Slice 4 has the loader reading `params.id`, and a connection that arrives without the route's params would re-execute the loader without a resource — the partition would lose both its relevance (all tabs of a principal in one group, the emit unable to wake only the right one) and its meaning.
+
+The resolution is a distinction that becomes part of D3:
+
+- **The client declares the address it is already seeing.** On opening the connection of module M, the client extracts the params M's route declares — matching the module's `fullPath` as a **prefix** of the pathname, so a layout declared at `/projeto/:id` covers `/projeto/7/sala` and extracts `id=7`; a catch-all declares no key — and sends them serialized in one query param (`?_route=<json>`). That is the same information `?_data=1` already carries on every SPA navigation, not free input: a key the module's path does not declare rejects the subscription with an explicit error.
+- **The server decides what the connection receives.** It validates the shape (declared keys, string values) and runs the `scope` with `{ user, params }` — the principal and the validated params — which validates the resource against the principal (possession/permission) and derives the partition key. `null` denies with 403.
+
+So the ctx of the scope becomes the object `{ user, params }` on both sides: on subscribe the runtime builds it (the principal under the house key `"user"`, `undefined` when the app materializes none, plus the validated params); on emit the producer builds the same object with the fields its scope consumes (`{ params: { id: 7 } }` for a resource channel, `{ user: … }` for a principal one) and the same `scope` runs against it. D3's rejected alternative — a client-declared **partition** — stays rejected: the client declares a route, never a subject.
+
+Two consequences of the same amendment:
+
+- **The connection is keyed by the declared params, not by the pathname.** Navigating `/projeto/7` → `/projeto/9` closes the connection and opens a new one (with a snapshot on connect), mirroring the loader store, which refetches when the params of its own route move; `/projeto/7` → `/projeto/7/sala` does not reconnect — the child's suffix is not part of the connection's identity.
+- **The scope-throw on subscribe changes status.** A `scope` that throws while resolving the partition of a subscription used to answer **500** (a runtime behavior, never specified). It now denies with **403** and logs loudly, naming the channel — a deliberate, observable contract change: a resolver that failed cannot vouch for a partition, and the failure is never silent.
+
+**Group lifecycle.** A source with a cost of life (a filesystem watcher, a process, an external subscription) needs the group, not the connection, as its unit: `ChannelDefinition` gains optional `onGroupOpen({ partition, params })` — fired by the runtime when the **first** connection enters a (channel + partition) group — and `onGroupClose({ partition })` — fired when the **last** one leaves, by any cause (disconnect, idle, revalidation). A second connection of the same group fires nothing, and both hooks may be async: the runtime awaits them, marking the group open only after `onGroupOpen` resolves and discarding it only after `onGroupClose` resolves. A hook that throws or rejects is logged loudly, naming channel and partition, and the group continues — the connect snapshot still delivers from the cold source. The hook is infrastructure, not policy: it does not receive `user`.
+
+**One caveat recorded.** The `params` of `onGroupOpen` are those of the connection that opened the group. They are identical across the group **only when the partition derives from them** (a watcher per resource). A channel partitioned by principal, declared in a module with `:params`, mixes resources in one group and the hook's params are arbitrary for the connections that followed — such a channel must not consume them.
+
+This is an evolution taken while the contract of Slices 1–3 has no external consumer: changing it now is evolution, later it would be breaking.
 
 ## Non-goals (future)
 

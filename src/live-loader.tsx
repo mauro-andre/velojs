@@ -3,11 +3,18 @@
  *
  * After hydration, every rendered module that declares `channels` opens one SSE
  * connection per (module, channel) at `/_channel/{moduleId}/{channel}`. The
- * snapshot the connection receives — the connect snapshot and each emit's —
- * replaces the value of the module's entry in the loader store, so the page
- * stays faithful to server state without a line of code from the developer:
- * `useLoader()`/`Loader()` handles keep the same signal instance and the
- * reading component re-renders on its own.
+ * connection declares the route params the module's path declares, extracted
+ * from the current URL and serialized in `?_route=` — the client declares the
+ * address it is already seeing, the server validates it against the declared
+ * path and decides the partition. The snapshot the connection receives — the
+ * connect snapshot and each emit's — replaces the value of the module's entry
+ * in the loader store, so the page stays faithful to server state without a
+ * line of code from the developer: `useLoader()`/`Loader()` handles keep the
+ * same signal instance and the reading component re-renders on its own.
+ *
+ * The connection is keyed by those params, not by the pathname: navigating
+ * between children of the same params keeps the connection; a move to another
+ * resource closes it and opens a new one.
  *
  * A `slice` event is the other delivery mode: the producer already holds the
  * value, so the payload carries only the changed keys. A slice is merged
@@ -44,8 +51,9 @@
  */
 import { signal, type Signal } from "@preact/signals";
 import { useEffect } from "preact/hooks";
+import { useLocation } from "wouter-preact";
 import type { ComponentChildren } from "preact";
-import { loaderEntry } from "./loader-store.js";
+import { extractParams, loaderEntry } from "./loader-store.js";
 
 declare const __VELO_STATIC__: boolean;
 
@@ -222,10 +230,21 @@ function recompute(): void {
  * closer — the channel lives exactly as long as the module that declares it is
  * mounted.
  *
+ * `routeParams` are the params the module's route declares, extracted from the
+ * current URL: the client **declares** the address it is already seeing (the
+ * same information `?_data=1` carries on every SPA navigation), serialized in
+ * the `?_route=` query param of the connection. It is not free input — the
+ * server validates the keys against the module's path and rejects what the path
+ * does not declare.
+ *
  * Inert (no connection, no freshness change) in a static build: there is no
  * server to speak SSE.
  */
-export function connectChannel(moduleId: string, channel: string): () => void {
+export function connectChannel(
+    moduleId: string,
+    channel: string,
+    routeParams?: Record<string, string> | undefined,
+): () => void {
     if (typeof __VELO_STATIC__ !== "undefined" && __VELO_STATIC__) return () => {};
     if (typeof window === "undefined" || typeof EventSource === "undefined") {
         return () => {};
@@ -258,9 +277,13 @@ export function connectChannel(moduleId: string, channel: string): () => void {
 
     // Slices are accumulated per module and flushed together, so a second
     // slice that lands while an earlier one is pending joins the same flush,
-    // in arrival order.
+    // in arrival order. The declared params travel in `?_route=`, one query
+    // param for the whole object.
+    const declared = routeParams && Object.keys(routeParams).length > 0
+        ? `?_route=${encodeURIComponent(JSON.stringify(routeParams))}`
+        : "";
     const es = new EventSource(
-        `/_channel/${encodeURI(moduleId)}/${encodeURIComponent(channel)}`,
+        `/_channel/${encodeURI(moduleId)}/${encodeURIComponent(channel)}${declared}`,
     );
 
     es.addEventListener(SNAPSHOT_EVENT, (e) => {
@@ -323,31 +346,71 @@ export function connectChannel(moduleId: string, channel: string): () => void {
 }
 
 /**
+ * The params the module's route declares, extracted from a pathname. The
+ * module's `fullPath` matches as a **prefix** of the pathname: a layout
+ * declared at `/projeto/:id` covers `/projeto/7/sala` and extracts `id=7` —
+ * the child's suffix takes no part in the extraction. A path with a catch-all
+ * (`/docs/*`) declares no `:` key and yields the empty object, so the channel
+ * travels by principal.
+ */
+export function channelRouteParams(
+    fullPath: string | undefined,
+    pathname: string,
+): Record<string, string> {
+    if (!fullPath) return {};
+    return extractParams(fullPath, pathname) ?? {};
+}
+
+/**
  * Mounts the live channels of one route module. It renders its children
  * unchanged (no DOM node, so SSR output and hydration are untouched) and only
  * exists to tie the connection lifecycle to the module's own mount/unmount —
  * SPA navigation and page close close the connections.
+ *
+ * The connection is **keyed by the params the module's route declares**, not
+ * by the pathname: navigating between children of the same params
+ * (`/projeto/7` → `/projeto/7/sala`) does not reconnect (the child's suffix is
+ * not part of the connection's identity), while a move to another resource
+ * (`/projeto/7` → `/projeto/9`) closes the old connection and opens a new one —
+ * with a fresh snapshot on connect, mirroring the loader store, which refetches
+ * when its own route's params move.
  */
 export function ChannelBoundary({
     moduleId,
     channels,
+    fullPath,
     children,
 }: {
     moduleId?: string | undefined;
     channels?: readonly string[] | undefined;
+    /** The module's declared route path (`metadata.fullPath`) — its `:params`. */
+    fullPath?: string | undefined;
     children?: ComponentChildren;
 }): ComponentChildren {
     // Arrays are recreated on every render; the joined names are the real
     // dependency of the effect.
     const key = channels && channels.length > 0 ? channels.join(",") : "";
 
+    // The location hook is the re-render trigger; the extraction below reads
+    // the live URL. The effect is keyed by the extracted params, so a child of
+    // the same params never reconnects.
+    useLocation();
+    const routeKey = key === "" || typeof window === "undefined"
+        ? ""
+        : JSON.stringify(channelRouteParams(fullPath, window.location.pathname));
+
     useEffect(() => {
         if (!moduleId || key === "") return;
-        const closers = key.split(",").map((channel) => connectChannel(moduleId, channel));
+        const params = routeKey === ""
+            ? undefined
+            : (JSON.parse(routeKey) as Record<string, string>);
+        const closers = key.split(",").map((channel) =>
+            connectChannel(moduleId, channel, params),
+        );
         return () => {
             for (const close of closers) close();
         };
-    }, [moduleId, key]);
+    }, [moduleId, key, routeKey]);
 
     return children;
 }
