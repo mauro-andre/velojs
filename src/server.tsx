@@ -326,10 +326,11 @@ const registerRoutes = (
             };
 
             if (isCatchAll) {
-                // Não registra como GET normal: um "*" registrado antes do
-                // serveStatic engoliria os assets em produção. O notFound do
-                // Hono só dispara quando nada casou E o serveStatic não achou
-                // arquivo — o último recurso correto para a página 404.
+                // Não registra como GET normal: um "*" na tabela de rotas
+                // capturaria qualquer caminho não casado. Com o estático de
+                // produção montado antes das rotas, assets já estão a salvo — e
+                // o 404 do app segue sendo o último recurso: o notFound do Hono
+                // só dispara quando nem rota nem arquivo responderam.
                 app.notFound(handler);
             } else if (currentMiddlewares.length > 0) {
                 app.on(["GET"], [fullPath!], ...currentMiddlewares, handler);
@@ -621,6 +622,32 @@ const registerEndpointRoutes = (
 };
 
 // ============================================
+// CLIENT ASSETS - dist/client é público e vem antes das rotas
+// ============================================
+
+/**
+ * Monta o estático de `dist/client` ANTES da tabela de rotas do app. Assets
+ * têm hash de conteúdo e são públicos por desenho: rota dinâmica de topo
+ * (`/:mes`) ou middleware de auth de rota nunca veem um caminho de asset — o
+ * arquivo responde direto. O gating é o mesmo da montagem antiga (tardia): só
+ * em produção, sem SSG (`VELO_STATIC`) e sem prefixo externo em
+ * `STATIC_BASE_URL`; um miss chama `next()`, então rotas, actions, streams,
+ * sockets, endpoints e o catch-all (`notFound`) continuam respondendo tudo que
+ * não é arquivo.
+ */
+const mountClientStatic = async (app: Hono): Promise<void> => {
+    if (process.env.NODE_ENV !== "production" || process.env.VELO_STATIC) return;
+
+    // CDN/bucket: os assets são servidos fora do processo — nada local.
+    const staticUrl = process.env.STATIC_BASE_URL || "";
+    if (staticUrl.startsWith("http")) return;
+
+    const { serveStatic } = await import("@hono/node-server/serve-static");
+    const { join } = await import("node:path");
+    app.use("/*", serveStatic({ root: join(process.cwd(), "dist/client") }));
+};
+
+// ============================================
 // CREATE APP - Cria app Hono com rotas
 // ============================================
 
@@ -632,6 +659,10 @@ export const createApp = async (routes: AppRoutes): Promise<Hono> => {
     if (process.env.NODE_ENV !== "production") {
         app.use("*", logger());
     }
+
+    // Assets do cliente: entram DEPOIS dos middlewares de infraestrutura acima
+    // (normalização de barra final e logger) e ANTES de qualquer rota do app.
+    await mountClientStatic(app);
 
     // Custom routes (registradas via addRoutes no server.tsx do app)
     const ctx = getAppContext();
@@ -696,19 +727,10 @@ export const startServer = async (options: StartServerOptions) => {
     const hostname = process.env.HOST || options.hostname || undefined;
     const app = await createApp(routes);
 
-    // Production: serve static files and start server
+    // Production: start the HTTP server. Static assets are already mounted in
+    // createApp — ahead of the app routes, behind the infra middlewares.
     if (process.env.NODE_ENV === "production" && !process.env.VELO_STATIC) {
         const { serve } = await import("@hono/node-server");
-        const { serveStatic } = await import("@hono/node-server/serve-static");
-        const { join } = await import("node:path");
-
-        const clientDir = join(process.cwd(), "dist/client");
-
-        // Serve static files from dist/client/ if STATIC_BASE_URL is not external
-        const staticUrl = process.env.STATIC_BASE_URL || "";
-        if (!staticUrl.startsWith("http")) {
-            app.use("/*", serveStatic({ root: clientDir }));
-        }
 
         const server = serve({ fetch: app.fetch, port, ...(hostname ? { hostname } : {}) });
         // serve() returns before listen() completes — address() is null (or

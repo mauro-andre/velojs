@@ -222,9 +222,10 @@ describe("createApp — statusCode + 404", () => {
     });
 
     it("falls through serveStatic to the 404 page in production order (SSR platform)", async () => {
-        // Mimic startServer's production wiring: serveStatic is mounted on /*
-        // AFTER createApp. An unknown path finds no route and no static file, so
-        // serveStatic calls next() → Hono runs app.notFound() → our 404 page.
+        // serveStatic calls next() when no file matches → Hono runs
+        // app.notFound() → our 404 page. The real production wiring mounts it
+        // inside createApp, ahead of the routes (tests/production-assets.test.tsx);
+        // the fall-through contract is the same wherever the middleware sits.
         const app = await createApp(buildRoutes());
         app.use("/*", serveStatic({ root: "/tmp/velojs-nonexistent-client-dir" }));
 

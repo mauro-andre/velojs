@@ -2028,7 +2028,7 @@ velojs build
 
 Asset filenames include content hashes for long-term browser caching. The server build reads the Vite manifest to inject the correct filenames into `<Scripts>`.
 
-In production, `velojs start` sets `NODE_ENV=production` automatically and serves static files from `dist/client/`. HTML responses are served with `Cache-Control: no-cache` so browsers always fetch the latest HTML (which references the current hashed assets).
+In production, `velojs start` sets `NODE_ENV=production` automatically and serves static files from `dist/client/`. Assets carry content hashes and are **public by design**, so the server answers an existing file **before the app's route table** — a page route, an action endpoint or a route middleware (an auth guard redirecting to `/login`, for instance) never sees an asset path. Only the framework's own infra middlewares (trailing-slash normalization, the logger) run ahead of the asset lookup. Paths that are not files fall through to the app routes as usual (SSR pages, actions, streams, sockets, endpoints, the catch-all 404). HTML responses are served with `Cache-Control: no-cache` so browsers always fetch the latest HTML (which references the current hashed assets).
 
 ### Static assets on CDN
 
@@ -2038,7 +2038,7 @@ Set `STATIC_BASE_URL` to serve static assets from a CDN or S3 bucket:
 STATIC_BASE_URL=https://cdn.example.com/assets node dist/server.js
 ```
 
-The `<Scripts />` component and CSS `url()` references will use this prefix automatically.
+The `<Scripts />` component and CSS `url()` references will use this prefix automatically. When `STATIC_BASE_URL` starts with `http`, the server mounts no local static at all — every path is an app path, and the assets' public-by-design semantics come from the bucket/CDN.
 
 ---
 

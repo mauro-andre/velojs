@@ -24,6 +24,12 @@ npx velojs start
 
 This automatically sets `NODE_ENV=production` and starts the server. In production mode, VeloJS serves static files from `dist/client/` and handles SSR for all page routes.
 
+### Assets are served before the app routes
+
+`dist/client` assets are **public by design**: their names carry content hashes and their URLs are fetched by the browser with no session and no route logic attached. The server answers an existing file from `dist/client` **before the app's route table** — so a page route, an action endpoint or a route middleware (an auth guard redirecting to `/login`, for instance) never sees an asset path. Only the framework's own infra middlewares (trailing-slash normalization and the logger) run ahead of the asset lookup.
+
+Paths that are not files keep the normal flow: SSR pages, actions, streams, sockets, endpoints and the app's catch-all 404. A top-level dynamic route (`/:mes`) therefore means only app paths — `/client.<hash>.js` is served as a file, while `/2026-10` goes through the route's middlewares and loaders.
+
 ## Dockerfile
 
 Here's a production-ready Dockerfile with multi-stage build:
@@ -123,7 +129,7 @@ If you want to serve static assets (JS, CSS, images) from a CDN or S3 bucket ins
 STATIC_BASE_URL=https://cdn.example.com/assets npx velojs start
 ```
 
-The `<Scripts />` component and CSS `url()` references will automatically use this prefix. The server will skip serving static files when `STATIC_BASE_URL` points to an external URL.
+The `<Scripts />` component and CSS `url()` references will automatically use this prefix. When `STATIC_BASE_URL` starts with `http`, the server mounts no local static at all: every path is an app path, and the public-by-design semantics come from the bucket/CDN.
 
 ## Included dependencies
 
