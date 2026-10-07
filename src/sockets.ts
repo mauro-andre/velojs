@@ -27,6 +27,7 @@
 
 import type { Context, Hono, MiddlewareHandler } from "hono";
 import type { RouteNode } from "./types.js";
+import { byteLength, trace, type TelemetryStatus } from "./telemetry.js";
 
 // ============================================
 // TYPES
@@ -178,13 +179,31 @@ export function getAppSockets(app: Hono): ReadonlyMap<string, RegisteredSocket> 
 function buildEvents(
     app: Hono,
     handler: SocketHandler,
-    c: Context
+    c: Context,
+    info: { path: string; moduleId?: string | undefined; name?: string | undefined }
 ) {
     const queue: (string | Uint8Array)[] = [];
     let resolveNext: (() => void) | null = null;
     let streamClosed = false;
     let kept = false;
     let wsRef: any = null;
+
+    // One trace per socket connection. `socket-connect` measures the setup —
+    // from the upgrade to the moment the handler takes over (`keepOpen()` or
+    // its settle) or to the next macrotask, whichever comes first; every frame
+    // the handler sends afterwards is a `delivery` line of the same trace, and
+    // the connection's end is its `close` line.
+    const t = trace("socket-connect", {
+        route: info.path,
+        module: info.moduleId,
+        name: info.name,
+    });
+    let setupDone = false;
+    const finishSetup = (status: TelemetryStatus): void => {
+        if (setupDone) return;
+        setupDone = true;
+        t.end({ status });
+    };
 
     const ctrl = new AbortController();
     addSession(app, ctrl);
@@ -207,10 +226,13 @@ function buildEvents(
     const send = (msg: string | Uint8Array | object): void => {
         if (!wsRef || streamClosed) return;
         try {
-            if (typeof msg === "string" || msg instanceof Uint8Array) {
-                wsRef.send(msg);
-            } else {
-                wsRef.send(JSON.stringify(msg));
+            const payload: string | Uint8Array =
+                typeof msg === "string" || msg instanceof Uint8Array
+                    ? msg
+                    : JSON.stringify(msg);
+            wsRef.send(payload);
+            if (t.enabled) {
+                t.delivery(typeof payload === "string" ? byteLength(payload) : payload.byteLength);
             }
         } catch (err) {
             console.error("[velojs] socket send failed:", err);
@@ -226,12 +248,14 @@ function buildEvents(
 
     const keepOpen = (): void => {
         kept = true;
+        finishSetup("ok");
     };
 
     const finalize = () => {
         if (!streamClosed) {
             streamClosed = true;
             resolveNext?.();
+            t.close();
         }
         if (!ctrl.signal.aborted) {
             try { ctrl.abort(); } catch {}
@@ -256,15 +280,22 @@ function buildEvents(
                     })
                 )
                     .then(() => {
+                        finishSetup("ok");
                         // If the handler returned without keepOpen, close the socket.
                         if (!kept && wsRef && !streamClosed) {
                             try { wsRef.close(); } catch {}
                         }
                     })
                     .catch((err) => {
+                        finishSetup("error");
                         console.error("[velojs] socket handler threw:", err);
                         try { wsRef?.close(1011, "handler error"); } catch {}
                     });
+                // A `for await` over `incoming` never settles before the
+                // disconnect: the setup window closes on the next macrotask so
+                // a long-lived socket still reports its setup promptly.
+                if (typeof setImmediate === "function") setImmediate(() => finishSetup("ok"));
+                else setTimeout(() => finishSetup("ok"), 0);
             },
             onMessage(evt: any) {
                 if (streamClosed) return;
@@ -297,7 +328,8 @@ export async function registerSocketHandler(
     app: Hono,
     path: string,
     handler: SocketHandler,
-    middlewares: MiddlewareHandler[] = []
+    middlewares: MiddlewareHandler[] = [],
+    info: { moduleId?: string | undefined; name?: string | undefined } = {}
 ): Promise<void> {
     // Always store in the per-app registry (for the testing toolkit).
     let reg = appSockets.get(app);
@@ -312,7 +344,7 @@ export async function registerSocketHandler(
     if (!adapter) return;
 
     const routeMw = adapter.upgradeWebSocket((c: Context) => {
-        return buildEvents(app, handler, c).events;
+        return buildEvents(app, handler, c, { path, ...info }).events;
     });
 
     if (middlewares.length > 0) {
@@ -351,7 +383,10 @@ export async function registerSocketRoutes(
                     // Attach `__path` to the function so testing toolkit can do `app.socket(fn)`
                     try { (handler as any).__path = path; } catch {}
                     try { (handler as any).__isVeloSocket = true; } catch {}
-                    await registerSocketHandler(app, path, handler as SocketHandler, currentMw);
+                    await registerSocketHandler(app, path, handler as SocketHandler, currentMw, {
+                        moduleId,
+                        name,
+                    });
                 }
             }
 

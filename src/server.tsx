@@ -10,6 +10,14 @@ import { getAppContext } from "./app-context.js";
 import { flushPendingStreamRoutes, registerStreamHandler } from "./events.js";
 import { registerSocketRoutes, injectWebSocketServer, abortAllSocketSessions } from "./sockets.js";
 import { inspectChannels, registerChannelRoute } from "./channels.js";
+import {
+    jsonBytes,
+    responseBytes,
+    trace,
+    byteLength,
+    type TelemetryTrace,
+} from "./telemetry.js";
+import { initNodeTelemetry } from "./telemetry-node.js";
 
 // The live loader's server API: `emit` signals a channel's partition changed —
 // by name (the runtime re-executes the loader) or by module with a typed slice
@@ -130,9 +138,10 @@ export const jsonForScript = (value: unknown): string =>
 const renderPage = (
     c: Context,
     Component: VNode,
-    data?: unknown,
-    statusCode?: number
-) => {
+    data: unknown,
+    statusCode: number | undefined,
+    t: TelemetryTrace
+): { response: Response; bytes: number | undefined } => {
     // Status explícito da rota (default 200). Setado via preset do Hono para
     // valer tanto no HTML SSR quanto no JSON do _data=1 abaixo. Um status
     // setado por um loader (c.status) é preservado quando statusCode é undefined.
@@ -140,54 +149,73 @@ const renderPage = (
         c.status(statusCode as Parameters<typeof c.status>[0]);
     }
 
-    // Navegação SPA - retorna apenas JSON
+    // Navegação SPA - retorna apenas JSON. Não há render: o trace de `data`
+    // carrega só os loaders.
     if (c.req.query("_data") === "1") {
         const buildHash = (globalThis as any).__veloBuildHash || undefined;
         const json = data ? { ...(data as Record<string, unknown>), __buildHash: buildHash } : { __buildHash: buildHash };
-        return c.json(json);
+        // Byte sizes are only computed when a destination is active — the
+        // disabled path pays nothing.
+        return { response: c.json(json), bytes: t.enabled ? jsonBytes(json) : undefined };
     }
 
-    // SSR - renderiza HTML completo dentro do contexto isolado
-    const path = c.req.path;
-    const html = serverDataStorage.run(
-        (data as Record<string, unknown>) ?? {},
-        () => {
-            return preactRender(<Router ssrPath={path}>{Component}</Router>);
+    // SSR - renderiza HTML completo dentro do contexto isolado. O span do
+    // render fecha o interior da página ao lado dos spans dos loaders: a
+    // diferença para o total é o buraco do middleware (fora desta fatia).
+    const renderSpan = t.span("render");
+    try {
+        const path = c.req.path;
+        let html = serverDataStorage.run(
+            (data as Record<string, unknown>) ?? {},
+            () => {
+                return preactRender(<Router ssrPath={path}>{Component}</Router>);
+            }
+        );
+
+        // HTML should not be cached by the browser — assets use content hashes instead
+        c.header("Cache-Control", "no-cache");
+
+        // Com dados - injeta window.__PAGE_DATA__ no <head> (antes dos scripts do app)
+        if (data) {
+            const script = `<script>window.__PAGE_DATA__=${jsonForScript(data)}</script>`;
+            // O substituto PRECISA ser função: com string, o replace interpreta
+            // $& $' $` $1 $$ dentro do payload (dados do loader) — $' injetaria o
+            // resto do documento no meio do JSON, reabrindo o vetor de quebra.
+            html = html.replace("</head>", () => `${script}</head>`);
         }
-    );
 
-    // HTML should not be cached by the browser — assets use content hashes instead
-    c.header("Cache-Control", "no-cache");
-
-    // Sem dados - retorna HTML simples
-    if (!data) {
-        return c.html(html);
+        renderSpan.end("ok");
+        return { response: c.html(html), bytes: t.enabled ? byteLength(html) : undefined };
+    } catch (err) {
+        renderSpan.end("error");
+        throw err;
     }
-
-    // Com dados - injeta window.__PAGE_DATA__ no <head> (antes dos scripts do app)
-    const script = `<script>window.__PAGE_DATA__=${jsonForScript(data)}</script>`;
-    // O substituto PRECISA ser função: com string, o replace interpreta
-    // $& $' $` $1 $$ dentro do payload (dados do loader) — $' injetaria o
-    // resto do documento no meio do JSON, reabrindo o vetor de quebra.
-    return c.html(html.replace("</head>", () => `${script}</head>`));
 };
 
 // ============================================
 // LOAD PAGE - Executa loaders e coleta componentes
 // ============================================
 
-const loadPage = async (modules: RouteModule[], c: Context) => {
+const loadPage = async (modules: RouteModule[], c: Context, t: TelemetryTrace) => {
     const params = c.req.param();
     const query = c.req.query();
     const loaderArgs: LoaderArgs = { params, query, c };
 
-    // Executa todos os loaders em paralelo
+    // Executa todos os loaders em paralelo — cada um é um span filho do trace
+    // da página, nomeado pelo módulo que o declarou.
     const results = await Promise.all(
         modules.map(async (module) => {
             if (!module.loader) return null;
-            const loaderData = await module.loader(loaderArgs);
             const moduleId = module.metadata?.moduleId;
-            return moduleId ? { moduleId, loaderData } : null;
+            const span = t.span(`loader:${moduleId ?? "anonymous"}`);
+            try {
+                const loaderData = await module.loader(loaderArgs);
+                span.end("ok");
+                return moduleId ? { moduleId, loaderData } : null;
+            } catch (err) {
+                span.end("error");
+                throw err;
+            }
         })
     );
 
@@ -305,24 +333,49 @@ const registerRoutes = (
             }
 
             const handler = async (c: Context) => {
-                const { components, data, shortCircuit } = await loadPage(currentModules, c);
-                if (shortCircuit) {
-                    // Navegação SPA: o fetch do cliente seguiria um 302 para o
-                    // HTML de destino e quebraria no r.json(). O endpoint de
-                    // dados devolve o alvo e deixa o cliente navegar.
-                    const location = shortCircuit.headers.get("Location");
-                    if (
-                        c.req.query("_data") === "1" &&
-                        location &&
-                        shortCircuit.status >= 300 &&
-                        shortCircuit.status < 400
-                    ) {
-                        return c.json({ __redirect: location });
+                // Um request de página nasce um trace (tipo `data` no refetch
+                // JSON `?_data=1`, `page` no SSR), endereçado pelo path pattern
+                // da rota — nunca pela URL materializada, que inviabilizaria a
+                // agregação. O módulo é a folha da hierarquia (a página).
+                const isData = c.req.query("_data") === "1";
+                const leaf = currentModules[currentModules.length - 1];
+                const t = trace(isData ? "data" : "page", {
+                    route: fullPath ?? leaf?.metadata?.fullPath,
+                    module: leaf?.metadata?.moduleId,
+                });
+                try {
+                    const { components, data, shortCircuit } = await loadPage(currentModules, c, t);
+                    if (shortCircuit) {
+                        // Navegação SPA: o fetch do cliente seguiria um 302 para o
+                        // HTML de destino e quebraria no r.json(). O endpoint de
+                        // dados devolve o alvo e deixa o cliente navegar.
+                        const location = shortCircuit.headers.get("Location");
+                        if (
+                            isData &&
+                            location &&
+                            shortCircuit.status >= 300 &&
+                            shortCircuit.status < 400
+                        ) {
+                            t.end({
+                                status: "ok",
+                                bytes: t.enabled ? jsonBytes({ __redirect: location }) : undefined,
+                            });
+                            return c.json({ __redirect: location });
+                        }
+                        t.end({
+                            status: "ok",
+                            bytes: t.enabled ? await responseBytes(shortCircuit) : undefined,
+                        });
+                        return shortCircuit;
                     }
-                    return shortCircuit;
+                    const nested = nestComponents(components);
+                    const { response, bytes } = renderPage(c, nested, data, statusCode, t);
+                    t.end({ status: "ok", bytes });
+                    return response;
+                } catch (err) {
+                    t.end({ status: "error" });
+                    throw err;
                 }
-                const nested = nestComponents(components);
-                return renderPage(c, nested, data, statusCode);
             };
 
             if (isCatchAll) {
@@ -375,6 +428,13 @@ const registerActionRoutes = (
                 if (typeof action === "function") {
                     const actionPath = `/_action/${moduleId}/${actionName}`;
                     const handler = async (c: Context) => {
+                        // A action é identificada por módulo E nome; o status vira
+                        // `error` quando ela lança (o 500 é consequência, não causa).
+                        const t = trace("action", {
+                            route: node.module?.metadata?.fullPath,
+                            module: moduleId,
+                            name: actionName,
+                        });
                         let body = {};
                         try {
                             body = await c.req.json();
@@ -390,12 +450,15 @@ const registerActionRoutes = (
                         };
                         try {
                             const result = await action(actionArgs);
-                            return c.json(result ?? { ok: true });
+                            const payload = result ?? { ok: true };
+                            t.end({ status: "ok", bytes: t.enabled ? jsonBytes(payload) : undefined });
+                            return c.json(payload);
                         } catch (error) {
                             const message =
                                 error instanceof Error
                                     ? error.message
                                     : "Action failed";
+                            t.end({ status: "error" });
                             return c.json({ error: message }, 500);
                         }
                     };
@@ -460,7 +523,8 @@ const registerStreamRoutes = async (
                             app,
                             streamPath,
                             stream as any,
-                            currentMiddlewares as any
+                            currentMiddlewares as any,
+                            { moduleId, name: streamName }
                         );
                     }
                 }
@@ -595,11 +659,27 @@ const registerEndpointRoutes = (
 
             const handlerFn = node.handler!;
             const wrapped = async (c: Context) => {
-                return await handlerFn({
-                    c,
-                    params: c.req.param(),
-                    query: c.req.query(),
-                });
+                // Endpoint declarativo: método + rota é a identidade; bytes
+                // quando a resposta tem corpo medível.
+                const t = trace("endpoint", { route: fullPath, method });
+                try {
+                    const response = await handlerFn({
+                        c,
+                        params: c.req.param(),
+                        query: c.req.query(),
+                    });
+                    t.end({
+                        status: "ok",
+                        bytes:
+                            t.enabled && response instanceof Response
+                                ? await responseBytes(response)
+                                : undefined,
+                    });
+                    return response;
+                } catch (err) {
+                    t.end({ status: "error" });
+                    throw err;
+                }
             };
 
             if (currentMiddlewares.length > 0) {
@@ -653,6 +733,11 @@ const mountClientStatic = async (app: Hono): Promise<void> => {
 
 export const createApp = async (routes: AppRoutes): Promise<Hono> => {
     const app = new Hono();
+
+    // Native telemetry: the app is booting, so the boot record is written
+    // first — the file's first line, the sink's first POST. Env-driven: without
+    // a destination this is a no-op and nothing exists (dev included).
+    await initNodeTelemetry();
 
     app.use(trimTrailingSlash());
 

@@ -30,6 +30,7 @@
 
 import type { Context, Hono, MiddlewareHandler } from "hono";
 import { getAppContext, registerDisposer, unregisterDisposer } from "./app-context.js";
+import { byteLength, trace } from "./telemetry.js";
 
 // ============================================
 // TYPES
@@ -718,14 +719,33 @@ function defaultChannelFn(c: Context): string {
 /**
  * Registers a GET SSE route for the given stream at the given path.
  * Used both by standalone streams and by stream_* discovery.
+ *
+ * `info` carries the convention identity (moduleId + stream name) into the
+ * telemetry `stream-connect` trace; standalone streams pass none and are
+ * addressed by their declared path only.
  */
+export interface StreamTelemetryInfo {
+    moduleId?: string | undefined;
+    name?: string | undefined;
+}
+
 export function registerStreamHandler<TEvent, TSnapshot>(
     app: Hono,
     path: string,
     stream: EventStream<TEvent, TSnapshot>,
-    middlewares: Array<(c: Context, next: () => Promise<void>) => any> = []
+    middlewares: Array<(c: Context, next: () => Promise<void>) => any> = [],
+    info: StreamTelemetryInfo = {}
 ): void {
     const handler = async (c: Context) => {
+        // One trace per connection: from this handler's entry to the end of the
+        // connect phase (channel resolution + snapshot-on-connect). Everything
+        // delivered afterwards is a `delivery` line of the same trace, and the
+        // connection's end is its `close` line with the lifetime total.
+        const t = trace("stream-connect", {
+            route: path,
+            module: info.moduleId,
+            name: info.name,
+        });
         const { streamSSE } = await import("hono/streaming");
 
         // Resolve channel (may be async, may reject the connection)
@@ -739,13 +759,16 @@ export function registerStreamHandler<TEvent, TSnapshot>(
                 resolved = await resolver(c);
             } catch (err) {
                 console.error("[velojs] channel resolver threw:", err);
+                t.end({ status: "error" });
                 return c.json({ error: "internal" }, 500);
             }
             if (resolved == null) {
+                t.end({ status: "error" });
                 return c.json({ error: "forbidden" }, 403);
             }
             channelKey = resolved;
         }
+        t.setFields({ channel: channelKey === BROADCAST_CHANNEL ? undefined : channelKey });
 
         const heartbeatMs = stream.__config.heartbeatMs;
         const heartbeatInterval =
@@ -756,10 +779,9 @@ export function registerStreamHandler<TEvent, TSnapshot>(
             // 1. Buffered events from { snapshot: true } emits
             const bufferedEvents = stream.__buffers.get(channelKey);
             if (bufferedEvents && bufferedEvents.length > 0) {
-                await sse.writeSSE({
-                    event: "snapshot",
-                    data: JSON.stringify(bufferedEvents),
-                });
+                const data = JSON.stringify(bufferedEvents);
+                await sse.writeSSE({ event: "snapshot", data });
+                if (t.enabled) t.delivery(byteLength(data));
             }
 
             // 2. Custom snapshot callback (state-machine pattern)
@@ -768,10 +790,9 @@ export function registerStreamHandler<TEvent, TSnapshot>(
                     channelKey === BROADCAST_CHANNEL ? undefined : channelKey
                 );
                 if (snapshot !== undefined) {
-                    await sse.writeSSE({
-                        event: "snapshot",
-                        data: JSON.stringify(snapshot),
-                    });
+                    const data = JSON.stringify(snapshot);
+                    await sse.writeSSE({ event: "snapshot", data });
+                    if (t.enabled) t.delivery(byteLength(data));
                 }
             }
 
@@ -800,13 +821,21 @@ export function registerStreamHandler<TEvent, TSnapshot>(
                 disposed = true;
                 if (heartbeat) clearInterval(heartbeat);
                 stream.__onDisconnect(channelKey, listener);
+                // The connection is over: the close line carries how many frames
+                // it delivered and how long it lived.
+                t.close();
                 resolveDone();
             };
 
             // Listener function with attached `close()` for explicit close() signaling
             const listener = ((event: TEvent) => {
                 if (disposed) return;
-                enqueueWrite({ data: JSON.stringify(event) });
+                const data = JSON.stringify(event);
+                // The delivery line is stamped at enqueue: the close line must
+                // total every delivery the connection made, even the one that
+                // loses the race against a disconnect.
+                if (t.enabled) t.delivery(byteLength(data));
+                enqueueWrite({ data });
 
                 if (stream.__config.closeOn?.(event)) {
                     // Wait for the event write (and any prior pending writes) to drain
@@ -846,6 +875,9 @@ export function registerStreamHandler<TEvent, TSnapshot>(
                     : null;
 
             sse.onAbort(cleanup);
+
+            // The connect phase is done: listener registered, snapshots written.
+            t.end({ status: "ok" });
 
             await done;
         });

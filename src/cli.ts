@@ -99,6 +99,8 @@ Commands:
   start            Start production server
   graph [app-dir]   Generate .velojs/graph.json (route tree + dependency graph)
   graph --view      Generate the graph and open an interactive viewer
+  telemetry [path]  Rank the native telemetry JSONL (count, p50/p95, errors, bytes)
+                    by route/action/channel; no path reads VELO_TELEMETRY_FILE
 
 Examples:
   velojs init my-app
@@ -109,6 +111,9 @@ Examples:
   velojs graph
   velojs graph src/app
   velojs graph --view
+  velojs telemetry
+  velojs telemetry --last 60m
+  velojs telemetry ./telemetry.prod.jsonl
 `);
 };
 
@@ -151,6 +156,16 @@ switch (command) {
             const { serveGraphViewer } = await import("./graph-viewer.js");
             const url = await serveGraphViewer(rootDir);
             console.log(`Graph viewer running at ${url} (Ctrl+C to stop)`);
+        }
+        break;
+    }
+    case "telemetry": {
+        const { runTelemetryCli } = await import("./telemetry-cli.js");
+        try {
+            await runTelemetryCli(args.slice(1));
+        } catch (e) {
+            console.error((e as Error).message);
+            process.exit(1);
         }
         break;
     }

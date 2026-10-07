@@ -59,6 +59,14 @@
 import type { Context, Hono, MiddlewareHandler } from "hono";
 import { DEFAULT_HEARTBEAT_MS } from "./events.js";
 import type { LoaderArgs, RouteModule } from "./types.js";
+import {
+    byteLength,
+    spanRecorder,
+    trace,
+    type TelemetrySpanRecorder,
+    type TelemetryStatus,
+    type TelemetryTrace,
+} from "./telemetry.js";
 
 // ============================================
 // TYPES
@@ -295,6 +303,12 @@ export interface ChannelConnection {
      * comments never touch it.
      */
     lastDeliveryAt?: number | undefined;
+    /**
+     * The connection's telemetry trace: `channel-connect` with the snapshot
+     * span, then one `delivery` line per snapshot/slice and the final `close`
+     * line. Absent (no-op) when collection is off.
+     */
+    telemetry?: TelemetryTrace | undefined;
 }
 
 /** channel → partition key → live connections. Empty groups do not exist. */
@@ -313,6 +327,11 @@ interface CoalesceWindow {
     timer: ReturnType<typeof setTimeout>;
     channel: string;
     partition: string;
+    /**
+     * The gestures that opened or joined the window: each one gets its own
+     * `emit` trace at round completion, carrying the round's re-execution spans.
+     */
+    gestures: TelemetryTrace[];
 }
 
 const windows = new Map<string, CoalesceWindow>();
@@ -321,23 +340,47 @@ const windows = new Map<string, CoalesceWindow>();
  * Closes the open window of a (channel, partition): one re-execution round is
  * the effect of every emit that fell inside it — no invalidation is lost.
  */
-function openWindow(channel: string, partition: string): void {
+function openWindow(channel: string, partition: string, gesture: TelemetryTrace | null): void {
     const key = groupKey(channel, partition);
     // The first emit opens the window; the later ones join it without moving
     // the deadline (a sliding window would postpone the round indefinitely on
     // a hot producer).
-    if (windows.has(key)) return;
+    const existing = windows.get(key);
+    if (existing) {
+        if (gesture) existing.gestures.push(gesture);
+        return;
+    }
 
+    const window: CoalesceWindow = {
+        timer: undefined as unknown as ReturnType<typeof setTimeout>,
+        channel,
+        partition,
+        gestures: gesture ? [gesture] : [],
+    };
     const timer = setTimeout(() => {
         windows.delete(key);
-        void runInvalidationRound(channel, partition);
+        void runCoalescedRound(window);
     }, coalesceMs);
 
     // A pending window must never hold the process open.
     const unref = (timer as { unref?: () => void }).unref;
     if (typeof unref === "function") unref.call(timer);
 
-    windows.set(key, { timer, channel, partition });
+    window.timer = timer;
+    windows.set(key, window);
+}
+
+/**
+ * Runs the round an expired window accumulated and closes every gesture's
+ * trace with the round's spans and reach.
+ */
+async function runCoalescedRound(window: CoalesceWindow): Promise<void> {
+    const recorder = spanRecorder();
+    const reached = await runInvalidationRound(window.channel, window.partition, recorder);
+    for (const gesture of window.gestures) {
+        gesture.addSpans(recorder.spans);
+        gesture.end({ status: "ok", connections: reached });
+    }
 }
 
 function cancelPendingWindows(): void {
@@ -640,12 +683,26 @@ async function revalidateGroup(
 
 /**
  * Delivers one invalidation round: the loader re-executed once per connection
- * still in the group, each with its own principal.
+ * still in the group, each with its own principal — each re-execution is a
+ * child span of the trace that caused the round.
+ *
+ * Returns the number of connections reached (the ones whose loader ran).
  */
-async function runInvalidationRound(channel: string, partition: string): Promise<void> {
+async function runInvalidationRound(
+    channel: string,
+    partition: string,
+    recorder: TelemetrySpanRecorder,
+): Promise<number> {
     const kept = await revalidateGroup(channel, partition);
-    if (!kept) return;
-    await Promise.all(kept.map((conn) => pushSnapshot(conn)));
+    if (!kept) return 0;
+    await Promise.all(
+        kept.map(async (conn) => {
+            const span = recorder.span(`loader:${conn.moduleId}`);
+            const status = await pushSnapshot(conn);
+            span.end(status);
+        }),
+    );
+    return kept.length;
 }
 
 // ============================================
@@ -665,7 +722,7 @@ async function runInvalidationRound(channel: string, partition: string): Promise
  * instead of dying silently; a loader that returns a `Response` (a redirect
  * short-circuit) has no state to send.
  */
-export async function pushSnapshot(conn: ChannelConnection): Promise<void> {
+export async function pushSnapshot(conn: ChannelConnection): Promise<TelemetryStatus> {
     let value: unknown;
     try {
         value = await conn.loader({
@@ -680,10 +737,11 @@ export async function pushSnapshot(conn: ChannelConnection): Promise<void> {
                 message: err instanceof Error ? err.message : String(err),
             }),
         );
-        return;
+        return "error";
     }
-    if (value instanceof Response) return;
+    if (value instanceof Response) return "ok";
     await conn.send(SNAPSHOT_EVENT, JSON.stringify(value ?? null));
+    return "ok";
 }
 
 // ============================================
@@ -759,14 +817,36 @@ async function emitInvalidation(channel: string, ctx: ChannelScopeContext): Prom
     // log exists to show.
     const size = partition == null ? 0 : groups.get(channel)?.get(partition)?.size ?? 0;
     logEmit(channel, partition, "invalidate", size);
-    if (partition == null) return;
-    if (size === 0) return; // no subscribers: no-op, no error
 
-    if (coalesceMs <= 0) {
-        await runInvalidationRound(channel, partition);
+    // Every gesture is a trace of its own, with no request parent at all: this
+    // is the part of the framework that works outside the request cycle. The
+    // gestures that end up sharing a coalesced round all carry that round's
+    // re-execution spans.
+    const t = trace("emit", {
+        channel,
+        partition: partition ?? null,
+        mode: "invalidate",
+        connections: size,
+    });
+
+    if (partition == null) {
+        t.end({ status: "ok", connections: 0 });
         return;
     }
-    openWindow(channel, partition);
+    if (size === 0) {
+        // no subscribers: no-op, no error
+        t.end({ status: "ok", connections: 0 });
+        return;
+    }
+
+    if (coalesceMs <= 0) {
+        const recorder = spanRecorder();
+        const reached = await runInvalidationRound(channel, partition, recorder);
+        t.addSpans(recorder.spans);
+        t.end({ status: "ok", connections: reached });
+        return;
+    }
+    openWindow(channel, partition, t);
 }
 
 /**
@@ -826,20 +906,40 @@ async function emitSlice(
     const group = partition == null ? undefined : groups.get(channel)?.get(partition);
     const size = group?.size ?? 0;
     logEmit(channel, partition, "slice", size);
-    if (partition == null) return;
-    if (!group || size === 0) return;
+
+    const t = trace("emit", {
+        channel,
+        partition: partition ?? null,
+        mode: "slice",
+        connections: size,
+    });
+    if (partition == null) {
+        t.end({ status: "ok", connections: 0 });
+        return;
+    }
+    if (!group || size === 0) {
+        t.end({ status: "ok", connections: 0 });
+        return;
+    }
 
     const kept = await revalidateGroup(channel, partition);
-    if (!kept) return;
+    if (!kept) {
+        t.end({ status: "ok", connections: 0 });
+        return;
+    }
 
     // The slice belongs to one module's data shape: only the connections of
     // that module merge it. A layout and a page may share the channel name and
     // hold different shapes.
     const targets = kept.filter((conn) => conn.moduleId === moduleId);
-    if (targets.length === 0) return;
+    if (targets.length === 0) {
+        t.end({ status: "ok", connections: 0 });
+        return;
+    }
 
     const payload = JSON.stringify(slice);
     await Promise.all(targets.map((conn) => conn.send(SLICE_EVENT, payload)));
+    t.end({ status: "ok", connections: targets.length });
 }
 
 /**
@@ -1015,6 +1115,11 @@ export function registerChannelRoute(
     const handler = async (c: Context) => {
         const def = channelMap[channel]!;
 
+        // One trace per connection: `channel-connect` carries the connect phase
+        // — scope resolution plus the connect snapshot, as a child span of its
+        // own — and the same trace records the deliveries and the close line.
+        const t = trace("channel-connect", { route: path, module: moduleId, channel });
+
         // The connection declares the params of the URL the client is already
         // seeing; the server validates the shape against the module's path —
         // a key the path does not declare is an explicit rejection, never a
@@ -1025,6 +1130,7 @@ export function registerChannelRoute(
         );
         if (parsed.error) {
             console.error(`[velojs] channel "${channel}": rejecting subscription — ${parsed.error}`);
+            t.end({ status: "error" });
             return c.json({ error: "invalid-route-params", message: parsed.error }, 400);
         }
         const params = parsed.params;
@@ -1040,9 +1146,11 @@ export function registerChannelRoute(
             partition = await resolvePartition(def, { user: principal, params });
         } catch (err) {
             console.error(`[velojs] channel "${channel}" scope threw:`, err);
+            t.end({ status: "error" });
             return c.json({ error: "forbidden" }, 403);
         }
         if (partition == null) {
+            t.end({ status: "error" });
             return c.json({ error: "forbidden" }, 403);
         }
 
@@ -1082,11 +1190,16 @@ export function registerChannelRoute(
                 c,
                 params,
                 query,
+                telemetry: t,
                 send: (event, data) => {
                     if (disposed) return Promise.resolve();
                     const isDelivery =
                         event === SNAPSHOT_EVENT || event === SLICE_EVENT;
                     if (!isDelivery) return enqueue({ event, data });
+                    // The delivery line is stamped at enqueue: the close line
+                    // must total every delivery the connection made, even the
+                    // one that loses the race against a disconnect.
+                    if (conn.telemetry?.enabled) conn.telemetry.delivery(byteLength(data));
                     // A delivery is what the idle clock runs on: it is stamped
                     // when it hits the wire and the idle countdown restarts.
                     // A heartbeat comment never comes through here.
@@ -1105,6 +1218,9 @@ export function registerChannelRoute(
                 if (idleTimer !== null) clearTimeout(idleTimer);
                 if (heartbeat !== null) clearInterval(heartbeat);
                 resolveDone();
+                // The connection is over: the close line carries the total of
+                // deliveries and the lifetime of the connection.
+                conn.telemetry?.close();
                 // Out of the group — and, when this was the last connection,
                 // through the group's `onGroupClose` before the group is
                 // discarded. Any cause (disconnect, idle, revalidation) ends
@@ -1169,7 +1285,10 @@ export function registerChannelRoute(
             // server has already moved on. A reconnect is a new connection and
             // therefore a new snapshot — no extra refetch. The snapshot is a
             // delivery: it stamps `lastDeliveryAt` and restarts the idle clock.
-            await pushSnapshot(conn);
+            const snapshotSpan = t.span("snapshot");
+            const snapshotStatus = await pushSnapshot(conn);
+            snapshotSpan.end(snapshotStatus);
+            t.end({ status: snapshotStatus });
 
             await done;
         });

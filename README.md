@@ -872,6 +872,89 @@ surface) without advancing the fake timers through the window.
 
 ---
 
+## Telemetry
+
+The framework records its own bottlenecks — pages, `?_data=1` refetches,
+actions, endpoints, stream connects, socket setups, channel connects — plus
+every `emit()` gesture that runs outside the request cycle, as JSONL lines with
+duration, status, response bytes and child spans. Collection is transparent to
+the app code: no import, no wrapper, no change in a route module.
+
+### Activation: the destination is the trigger
+
+There is no on/off flag. `VELO_TELEMETRY_FILE` and/or `VELO_TELEMETRY_SINK_URL`
+present and non-empty turn the collection on; none of them — absent or empty —
+leaves the whole thing inert (no file, no event, no cost) in any environment,
+dev included. The framework never picks a path: there is no default file, and
+the values expand `~` and `$VAR`/`${VAR}`.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `VELO_TELEMETRY_FILE` | — | Destination file (append-only JSONL). Present and non-empty activates the file collection. Expands `~`/`$VAR`; no default path |
+| `VELO_TELEMETRY_SINK_URL` | — | Destination sink. Present and non-empty activates the HTTP collection: one `POST` per event |
+| `VELO_TELEMETRY_MAX_MB` | `10` | Rotation limit of the file, in MB. The only pruning mechanism |
+
+```bash
+# .env — the operator's destination, in production or in dev
+VELO_TELEMETRY_FILE=$DATA_DIR/telemetry.jsonl
+VELO_TELEMETRY_MAX_MB=10
+```
+
+### The event
+
+One JSON object per line. `route` is always the path **pattern** (`/:mes`),
+never the materialized URL; `bytes` is the response size where there is a body
+(pages, data, actions, endpoints) — time and weight travel together. Every line
+carries the trace id and its own timestamp.
+
+```json
+{
+  "trace": "m3k9x1-4-f8a2q7",
+  "ts": "2026-10-07T18:22:03.482Z",
+  "type": "page",
+  "route": "/:mes",
+  "module": "MesPage",
+  "status": "ok",
+  "duration": 45.2,
+  "bytes": 122880,
+  "spans": [
+    { "name": "loader:AppLayout", "start": 0.8, "duration": 3.1, "status": "ok" },
+    { "name": "loader:MesPage", "start": 1.2, "duration": 43.9, "status": "ok" },
+    { "name": "render", "start": 44.3, "duration": 3.5, "status": "ok" }
+  ]
+}
+```
+
+Types: `page`, `data`, `action`, `endpoint`, `stream-connect`, `socket-connect`,
+`channel-connect`, `emit`, `delivery`, `close` and `boot`. The `emit` trace has
+no request parent — in the invalidation mode each re-executed loader is a child
+span. A long connection (channel, stream, socket) writes one light `delivery`
+line per frame, with the cumulative ordinal and the frame's bytes, and a final
+`close` line with the total and the lifetime.
+
+### File, boot and rotation
+
+The first line of every active destination is the boot record: the app version,
+the environment, the **effective** destination and the rotation limit in force.
+The effective file carries an instance suffix — `telemetry.jsonl` becomes
+`telemetry.8123-host.jsonl` — so replicas pointing the same path write distinct
+files. The file rotates by size (`VELO_TELEMETRY_MAX_MB`, default 10):
+`<effective>.<n>` keeps the past, the effective path keeps the newest lines.
+
+### The CLI
+
+```bash
+velojs telemetry              # resolves VELO_TELEMETRY_FILE (env or .env), instance files included
+velojs telemetry --last 60m   # the last hour of the file
+velojs telemetry ./t.prod.jsonl
+```
+
+Ranks the JSONL by route, action and channel — count, errors, p50/p95 and
+volume in bytes — and prints the timeline. The full reference lives in
+[site/docs/22-telemetry.md](site/docs/22-telemetry.md).
+
+---
+
 ## Actions
 
 Server-side functions callable from the client via RPC.
@@ -1689,6 +1772,9 @@ Callbacks queue until the server starts. If called after startup, executes immed
 | `HOST` | — | Bind interface, in dev and production. Overrides `defineConfig`'s `hostname`; in dev an explicit `--host`/`server.host` still wins |
 | `NODE_ENV` | — | Set automatically by `velojs start`. Enables static file serving |
 | `STATIC_BASE_URL` | `""` | CDN/bucket prefix for static assets |
+| `VELO_TELEMETRY_FILE` | — | Telemetry destination file — present and non-empty activates the native collection (see [Telemetry](#telemetry)). Expands `~`/`$VAR` |
+| `VELO_TELEMETRY_SINK_URL` | — | Telemetry sink — present and non-empty also POSTs every event |
+| `VELO_TELEMETRY_MAX_MB` | `10` | Telemetry file rotation limit, in MB |
 
 ---
 
