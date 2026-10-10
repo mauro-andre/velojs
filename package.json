@@ -1,6 +1,6 @@
 {
     "name": "@mauroandre/velojs",
-    "version": "0.0.59",
+    "version": "0.0.60",
     "type": "module",
     "description": "Fullstack web framework built on Hono + Preact with Vite-powered AST transforms",
     "keywords": [
