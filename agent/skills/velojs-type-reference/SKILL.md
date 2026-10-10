@@ -139,5 +139,6 @@ interface VeloConfig {
     clientInit?: string;     // default: "client.tsx"
     port?: number;           // default: 3000 (the PORT env always wins)
     hostname?: string;       // bind interface, dev and production; the HOST env wins
+    serverOnly?: string[];   // glob patterns declaring server-only modules to the leak diagnostic
 }
 ```

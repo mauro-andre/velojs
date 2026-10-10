@@ -39,6 +39,27 @@ hard constraints, not style.
 
 Never pass a module id to `useLoader()` / `Loader()` yourself — the plugin injects it.
 
+## The server→client leak report
+
+`velojs build` (and `build --static`, `velojs dev`) prints a report of every **server module** the browser can reach — a module that touches a Node builtin in its own code (static import, re-export or `await import()`), or that matches a `serverOnly` pattern.
+The analysis reads the code **after** the client transforms (the table above describes what those remove), so a `loader`/`action_*`/`stream_*`/`socket_*`/`middlewares` importing server code where the framework strips it is silent by construction.
+
+What the warning means: the module named in the item reaches what ships to the browser; the chain lists every import from the client entry to it (file and line per link); `entry point (cut here)` marks the import where the chain pulls the first server module — that is where the cut happens.
+The report never blocks, rewrites, stubs or moves anything: the build finishes with success, the dev keeps serving, and cutting any edge is always your call.
+Two chains to the same module are two items — every cut point shows up.
+
+Code that touches **no** Node builtin is invisible to the analysis — the framework does not guess your app's domain. Declare it:
+
+```typescript
+veloPlugin({
+    serverOnly: ["src/fsm/**", "server/**"],
+});
+```
+
+Patterns are globs (`*`, `**`, `?`) matched against the module's file path relative to the project root, always with `/` as separator.
+The declaration feeds the diagnostic only — nothing is blocked or altered because of it.
+A server module with no builtin and no declaration generates no item: that limitation is craved, and the declaration is how you lift it.
+
 ## Sharing a layout's data with its children
 
 `Loader()` is the importable handle for a module's loader data; `useLoader()` is the

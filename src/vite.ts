@@ -14,6 +14,7 @@ import _generate from "@babel/generator";
 import * as t from "@babel/types";
 
 import { buildGraph } from "./graph.js";
+import { analyzeClientLeaks, formatLeakReport, type LeakReport } from "./leak-diagnostic.js";
 
 // Workaround para ESM — handle both CJS-wrapped and direct ESM exports
 const traverse = typeof _traverse === "function"
@@ -1061,6 +1062,173 @@ const VIRTUAL_CLIENT_ENTRY = "virtual:velo/client-entry";
 const RESOLVED_VIRTUAL_SERVER = "\0" + VIRTUAL_SERVER_ENTRY;
 const RESOLVED_VIRTUAL_CLIENT = "\0" + VIRTUAL_CLIENT_ENTRY;
 
+// The framework subpath the client entry imports — shared so the leak
+// diagnostic walks exactly what the generated entry pulls.
+const CLIENT_FRAMEWORK_IMPORT = "@mauroandre/velojs/client";
+
+// ============================================
+// CLIENT TRANSFORM PIPELINE (shared with the leak diagnostic)
+// ============================================
+
+export interface ModuleTransformOptions {
+    /** Absolute module id (the Vite module id). */
+    id: string;
+    /** Absolute app directory (velo:transform's scope). */
+    appDir: string;
+    /** Whether this is the SSR/server pass. */
+    isSSR: boolean;
+    /** Routes file name inside appDir (default "routes.tsx"). */
+    routesFile?: string | undefined;
+    /** Route path info (metadata injection only — never changes imports). */
+    pathInfo?: PathInfo | undefined;
+}
+
+export interface ModuleTransformResult {
+    code: string;
+    moduleId: string;
+}
+
+/** The moduleId velo:transform derives for a module (appDir-relative, no ext). */
+export function moduleIdFor(appDir: string, id: string): string {
+    return path
+        .relative(appDir, id)
+        .replace(/\.(tsx?|jsx?)$/, "")
+        .replace(/\\/g, "/");
+}
+
+/**
+ * The exact module transform velo:transform applies — one pipeline, two users:
+ * the build itself and the server->client leak diagnostic (which must see what
+ * travels, never a reprint that could diverge). Returns null when the module is
+ * out of scope or no transformation fired; the build then ships the source
+ * untouched.
+ */
+export function transformModuleCode(
+    code: string,
+    options: ModuleTransformOptions
+): ModuleTransformResult | null {
+    const { id, appDir, isSSR } = options;
+    const routesFile = options.routesFile ?? "routes.tsx";
+
+    // Ignora virtual modules
+    if (id.startsWith("\0")) return null;
+
+    // Ignora arquivos dentro de .velojs/
+    if (id.includes("/.velojs/")) return null;
+
+    // Ignora arquivos que não são tsx/ts
+    if (!id.endsWith(".tsx") && !id.endsWith(".ts")) return null;
+
+    // Ignora arquivos fora do diretório da aplicação
+    if (!id.startsWith(appDir)) return null;
+
+    let transformedCode = code;
+    let hasTransformations = false;
+
+    // Verifica padrões no código
+    const hasMiddlewares = /middlewares:\s*\[/.test(code);
+    const hasComponent = /export\s+(const|function)\s+Component/.test(
+        code
+    );
+    const hasLoader = /export\s+(const|function)\s+loader/.test(code);
+    const hasAction = /export\s+const\s+action_\w+/.test(code);
+    const hasStream = /export\s+const\s+stream_\w+/.test(code);
+    const hasSocket = /export\s+const\s+socket_\w+/.test(code);
+    const hasLoaderCall = /\bLoader\s*</.test(code) || /\bLoader\s*\(/.test(code);
+    const hasUseLoaderCall = /\buseLoader\s*</.test(code) || /\buseLoader\s*\(/.test(code);
+    const hasEndpointHandler = /\bhandler\s*:/.test(code);
+
+    const moduleId = moduleIdFor(appDir, id);
+    const pathInfo = options.pathInfo;
+
+    // Routes file path (used to scope the endpoint strip)
+    const routesFilePath = path.join(appDir, routesFile);
+
+    // 5. Remover middlewares e imports (client only)
+    if (!isSSR && hasMiddlewares) {
+        transformedCode = removeMiddlewares(transformedCode);
+        hasTransformations = true;
+    }
+
+    // 5.5. Remover EndpointRoutes do routes.tsx (client only)
+    // Scoped to routes.tsx because that's where endpoints are declared
+    // — stripping `handler:` anywhere else would be wrong.
+    if (!isSSR && hasEndpointHandler && id === routesFilePath) {
+        transformedCode = removeEndpointRoutes(transformedCode);
+        hasTransformations = true;
+    }
+
+    // Se tem Component, loader, action, stream, socket, ou chamadas de Loader/useLoader, aplica transformações
+    if (hasComponent || hasLoader || hasAction || hasStream || hasSocket || hasLoaderCall || hasUseLoaderCall) {
+        // 1. Injeta metadata.moduleId, metadata.fullPath e metadata.path
+        transformedCode = injectMetadata(transformedCode, moduleId, pathInfo?.fullPath, pathInfo?.path);
+
+        // 2. Transformar Loader e useLoader
+        transformedCode = transformLoaderFunctions(transformedCode, moduleId);
+
+        // 3. Transformar actions em fetch stubs (client only)
+        if (!isSSR) {
+            transformedCode = transformActionsForClient(
+                transformedCode,
+                moduleId
+            );
+        }
+
+        // 3.5. Transformar streams em stubs (client only)
+        if (!isSSR && hasStream) {
+            transformedCode = transformStreamsForClient(
+                transformedCode,
+                moduleId
+            );
+        }
+
+        // 3.6. Transformar sockets em stubs (client only)
+        if (!isSSR && hasSocket) {
+            transformedCode = transformSocketsForClient(
+                transformedCode,
+                moduleId
+            );
+        }
+
+        // 4. Remover loaders (client only)
+        if (!isSSR) {
+            transformedCode = removeLoaders(transformedCode);
+        }
+
+        // 4.5. Prune imports orphaned by the strips above. Rolldown
+        // (vite 8) no longer tree-shakes these, so a server-only helper
+        // imported top-level would leak its whole service (+ native
+        // .node deps) into the client bundle. See pruneClientOnlyImports.
+        if (!isSSR) {
+            transformedCode = pruneClientOnlyImports(transformedCode);
+        }
+
+        hasTransformations = true;
+    }
+
+    if (!hasTransformations) return null;
+
+    return { code: transformedCode, moduleId };
+}
+
+/**
+ * The client entry's import specifiers — the same list the generated
+ * `virtual:velo/client-entry` module imports. Shared so the leak diagnostic
+ * starts its walk at exactly what the browser loads.
+ */
+export function clientEntryModulePaths(
+    appDir: string,
+    veloConfig: VeloConfig
+): { clientInit: string; routes: string; framework: string } {
+    const routesFile = veloConfig.routesFile ?? "routes.tsx";
+    const clientInit = veloConfig.clientInit ?? "client.tsx";
+    return {
+        clientInit: path.join(appDir, clientInit).replace(/\.tsx?$/, ".js"),
+        routes: path.join(appDir, routesFile).replace(/\.tsx?$/, ".js"),
+        framework: CLIENT_FRAMEWORK_IMPORT,
+    };
+}
+
 // ============================================
 // VITE PLUGIN - TRANSFORM (internal)
 // ============================================
@@ -1156,12 +1324,10 @@ function veloTransformPlugin(veloConfig: VeloConfig, appDirectory: string): Plug
         load(id) {
             const routesFile = veloConfig.routesFile ?? "routes.tsx";
             const serverInit = veloConfig.serverInit ?? "server.tsx";
-            const clientInit = veloConfig.clientInit ?? "client.tsx";
 
             // Paths relativos ao appDir
             const routesPath = path.join(appDir, routesFile).replace(/\.tsx?$/, ".js");
             const serverInitPath = path.join(appDir, serverInit).replace(/\.tsx?$/, ".js");
-            const clientInitPath = path.join(appDir, clientInit).replace(/\.tsx?$/, ".js");
 
             if (id === RESOLVED_VIRTUAL_SERVER) {
                 // The app's live-loader channel map (`app/channels.ts`) is a
@@ -1189,10 +1355,11 @@ export default await startServer({ routes, port: __VELO_CONFIG_PORT__, hostname:
             }
 
             if (id === RESOLVED_VIRTUAL_CLIENT) {
+                const entry = clientEntryModulePaths(appDir, veloConfig);
                 return `
-import "${clientInitPath}";
-import routes from "${routesPath}";
-import { startClient } from "@mauroandre/velojs/client";
+import "${entry.clientInit}";
+import routes from "${entry.routes}";
+import { startClient } from "${entry.framework}";
 
 startClient({ routes });
 `;
@@ -1216,27 +1383,9 @@ startClient({ routes });
             // Ignora arquivos fora do diretório da aplicação
             if (!id.startsWith(appDir)) return null;
 
-            let transformedCode = code;
-            let hasTransformations = false;
-
-            // Verifica padrões no código
-            const hasMiddlewares = /middlewares:\s*\[/.test(code);
-            const hasComponent = /export\s+(const|function)\s+Component/.test(
-                code
-            );
             const hasLoader = /export\s+(const|function)\s+loader/.test(code);
-            const hasAction = /export\s+const\s+action_\w+/.test(code);
-            const hasStream = /export\s+const\s+stream_\w+/.test(code);
-            const hasSocket = /export\s+const\s+socket_\w+/.test(code);
-            const hasLoaderCall = /\bLoader\s*</.test(code) || /\bLoader\s*\(/.test(code);
-            const hasUseLoaderCall = /\buseLoader\s*</.test(code) || /\buseLoader\s*\(/.test(code);
-            const hasEndpointHandler = /\bhandler\s*:/.test(code);
             const hasChannelsDecl = /export\s+(const|let|var)\s+channels\b/.test(code);
-
-            const moduleId = path
-                .relative(appDir, id)
-                .replace(/\.(tsx?|jsx?)$/, "")
-                .replace(/\\/g, "/");
+            const moduleId = moduleIdFor(appDir, id);
 
             // 0. Live loader guards — erro explícito, nunca silêncio. A module
             // that declares `channels` must have a `loader` to synchronize and
@@ -1275,80 +1424,15 @@ startClient({ routes });
                 }
             }
 
-            // Routes file path (used to scope the endpoint strip)
-            const routesFilePath = path.join(appDir, routesFile);
+            const result = transformModuleCode(code, {
+                id,
+                appDir,
+                isSSR,
+                routesFile,
+                pathInfo: pathInfoMap.get(moduleId),
+            });
 
-            // 5. Remover middlewares e imports (client only)
-            if (!isSSR && hasMiddlewares) {
-                transformedCode = removeMiddlewares(transformedCode);
-                hasTransformations = true;
-            }
-
-            // 5.5. Remover EndpointRoutes do routes.tsx (client only)
-            // Scoped to routes.tsx because that's where endpoints are declared
-            // — stripping `handler:` anywhere else would be wrong.
-            if (!isSSR && hasEndpointHandler && id === routesFilePath) {
-                transformedCode = removeEndpointRoutes(transformedCode);
-                hasTransformations = true;
-            }
-
-            // Se tem Component, loader, action, stream, socket, ou chamadas de Loader/useLoader, aplica transformações
-            if (hasComponent || hasLoader || hasAction || hasStream || hasSocket || hasLoaderCall || hasUseLoaderCall) {
-                // Busca pathInfo no Map
-                const pathInfo = pathInfoMap.get(moduleId);
-
-                // 1. Injeta metadata.moduleId, metadata.fullPath e metadata.path
-                transformedCode = injectMetadata(transformedCode, moduleId, pathInfo?.fullPath, pathInfo?.path);
-
-                // 2. Transformar Loader e useLoader
-                transformedCode = transformLoaderFunctions(transformedCode, moduleId);
-
-                // 3. Transformar actions em fetch stubs (client only)
-                if (!isSSR) {
-                    transformedCode = transformActionsForClient(
-                        transformedCode,
-                        moduleId
-                    );
-                }
-
-                // 3.5. Transformar streams em stubs (client only)
-                if (!isSSR && hasStream) {
-                    transformedCode = transformStreamsForClient(
-                        transformedCode,
-                        moduleId
-                    );
-                }
-
-                // 3.6. Transformar sockets em stubs (client only)
-                if (!isSSR && hasSocket) {
-                    transformedCode = transformSocketsForClient(
-                        transformedCode,
-                        moduleId
-                    );
-                }
-
-                // 4. Remover loaders (client only)
-                if (!isSSR) {
-                    transformedCode = removeLoaders(transformedCode);
-                }
-
-                // 4.5. Prune imports orphaned by the strips above. Rolldown
-                // (vite 8) no longer tree-shakes these, so a server-only helper
-                // imported top-level would leak its whole service (+ native
-                // .node deps) into the client bundle. See pruneClientOnlyImports.
-                if (!isSSR) {
-                    transformedCode = pruneClientOnlyImports(transformedCode);
-                }
-
-                hasTransformations = true;
-            }
-
-            if (!hasTransformations) return null;
-
-            return {
-                code: transformedCode,
-                map: null,
-            };
+            return result ? { code: result.code, map: null } : null;
         },
     };
 }
@@ -1603,6 +1687,72 @@ export function devServerExcludeFor(veloConfig: VeloConfig): (string | RegExp)[]
 }
 
 // ============================================
+// VITE PLUGIN - SERVER->CLIENT LEAK DIAGNOSTIC (internal)
+// ============================================
+
+/**
+ * Prints the server->client leak diagnostic on the terminal: at the end of the
+ * client build (also `build --static`), and in dev when the server comes up
+ * plus on every file change that shifts what travels to the client. Read-only:
+ * nothing is blocked, rewritten or moved — the light, never the hand.
+ */
+function veloLeakPlugin(veloConfig: VeloConfig, appDirectory: string): Plugin {
+    let root = "";
+    let mode = "";
+    let appDir = "";
+    let lastSignature: string | null = null;
+    let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+    const cache = new Map<string, import("./leak-diagnostic.js").CachedModule>();
+
+    function analyze(): LeakReport {
+        const entry = clientEntryModulePaths(appDir, veloConfig);
+        return analyzeClientLeaks({
+            rootDir: root,
+            appDir,
+            routesFile: veloConfig.routesFile,
+            entrySpecs: [entry.clientInit, entry.routes, entry.framework],
+            serverOnly: veloConfig.serverOnly,
+            cache,
+        });
+    }
+
+    return {
+        name: "velo:leak-diagnostic",
+
+        configResolved(resolvedConfig) {
+            root = resolvedConfig.root;
+            mode = resolvedConfig.mode;
+            appDir = path.resolve(root, appDirectory);
+        },
+
+        closeBundle() {
+            // Build: one report at the end of what travels to the client. The
+            // server build (`--mode server`) is out of scope by design.
+            if (mode === "server") return;
+            console.log(formatLeakReport(analyze()));
+        },
+
+        configureServer(server) {
+            // Dev: the full report when the server comes up — no navigation
+            // needed — and re-emitted whenever a change shifts what travels.
+            const first = analyze();
+            lastSignature = first.signature;
+            console.log(formatLeakReport(first));
+
+            server.watcher.on("all", (_event, file) => {
+                if (debounceTimer) clearTimeout(debounceTimer);
+                debounceTimer = setTimeout(() => {
+                    const report = analyze();
+                    if (report.signature === lastSignature) return;
+                    lastSignature = report.signature;
+                    console.log(formatLeakReport(report));
+                }, 500);
+            });
+        },
+    };
+}
+
+// ============================================
 // MAIN EXPORT
 // ============================================
 
@@ -1615,6 +1765,7 @@ export function veloPlugin(config?: VeloConfig): PluginOption[] {
         veloTransformPlugin(veloConfig, appDirectory),
         veloStaticUrlPlugin(),
         veloGraphPlugin(veloConfig, appDirectory),
+        veloLeakPlugin(veloConfig, appDirectory),
         preact(),
         devServer({
             entry: VIRTUAL_SERVER_ENTRY,

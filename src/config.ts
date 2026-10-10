@@ -46,6 +46,15 @@ export interface VeloConfig {
      * @hono/vite-dev-server, não os substituem.
      */
     devServerExclude?: (string | RegExp)[];
+
+    /**
+     * Padrões de glob (`*`, `**`, `?`) que declaram módulos só de servidor ao
+     * diagnóstico de vazamento server->client, casados contra o caminho do
+     * arquivo do módulo relativo à raiz do projeto, com `/` como separador
+     * (ex.: `serverOnly: ["src/fsm/**", "server/**"]`). Serve só ao
+     * diagnóstico — nada é bloqueado ou alterado por causa da declaração.
+     */
+    serverOnly?: string[];
 }
 
 export function defineConfig(config: VeloConfig): VeloConfig {

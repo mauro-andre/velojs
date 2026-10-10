@@ -170,6 +170,7 @@ veloPlugin({
     serverInit: "server.tsx",   // default
     clientInit: "client.tsx",   // default
     hostname: "127.0.0.1",      // bind interface, dev and production (the HOST env wins)
+    serverOnly: ["server/**"],  // declares server-only modules to the leak diagnostic
 });
 ```
 
@@ -1780,13 +1781,15 @@ Callbacks queue until the server starts. If called after startup, executes immed
 
 ## Vite Plugin Architecture
 
-`veloPlugin()` returns 6 plugins:
+`veloPlugin()` returns 8 plugins:
 
 | Plugin | Purpose |
 |--------|---------|
 | `velo:config` | Build config (client/server modes, aliases, defines) |
 | `velo:transform` | AST transforms (metadata injection, action stubs, loader removal) |
 | `velo:static-url` | Rewrites CSS `url(/path)` to `url(STATIC_BASE_URL/path)` at build time |
+| `velo:graph` | Generates `.velojs/graph.json` (route tree + dependency graph) on build and dev |
+| `velo:leak-diagnostic` | Prints the server→client leak report on build and dev (read-only) |
 | `@preact/preset-vite` | Preact JSX support |
 | `@hono/vite-dev-server` | Dev server with SSR |
 | `velo:ws-bridge` | Exposes Vite's HTTP server for WebSocket handlers in dev mode |
@@ -1828,6 +1831,55 @@ velojs build
 ### Hot Reload
 
 When `routes.tsx` changes, the plugin rebuilds the fullPath map and triggers a full page reload (not partial HMR).
+
+### Server→Client Leak Diagnostic
+
+What ships to the browser is checked on every `velojs build` (including `build --static`) and `velojs dev`: the terminal prints a report of every server module the client entry can reach — a leak of the server→client boundary.
+
+A **server module** is a module that touches a Node builtin in its own code — static import, re-export or `await import()`, by any import path — or that matches a `serverOnly` pattern declared in the plugin config.
+A **leak** is a server module reachable from what the browser loads, following static and dynamic imports.
+The analysis reads the code *after* the client transforms — the same ones the build applies (loaders, actions, streams, sockets, middlewares and endpoints stripped, orphaned imports pruned) — so the normal VeloJS shape (a `loader` importing server code) is silent by construction: what the framework removes never travels.
+
+Each leak in the report brings:
+
+- the leaked module and what qualifies it as server (the Node builtin touched, or the `serverOnly` pattern matched);
+- the full import chain from the client entry to it — file and line at every link;
+- the **entry point** — the import where the chain pulls the first server module, marked `entry point (cut here)`: exactly where the cut happens.
+
+```text
+[velojs] server->client leak analysis: 1 leak(s) in what ships to the client.
+
+1) app/server-side.ts
+   server because: imports Node builtin "node:fs"
+   import chain from the client entry:
+     virtual:velo/client-entry (generated) -> app/routes.tsx
+     app/routes.tsx:3 -> app/pages/Home.tsx
+     app/pages/Home.tsx:6 -> app/server-side.ts  <- entry point (cut here)
+
+The report is read-only: nothing is blocked or rewritten; the cut is yours.
+```
+
+Two chains to the same module are two items — every cut point shows up — and the list is stable between runs.
+When there is nothing to report, one line says so (`0 leaks — what ships to the client is clean.`), so silence is distinguishable from the analysis not running.
+In dev the report appears when the server comes up (no navigation needed) and is re-emitted whenever a file change shifts what travels to the client — an import added stitches a new path into the next report, an import removed takes the leak out of it.
+
+The report is the light, never the hand: nothing is blocked, rewritten, stubbed or moved, `await import()` included; the build finishes with success, the dev keeps serving, and the decision to cut any edge is entirely yours.
+
+#### Declaring server-only code: `serverOnly`
+
+A module that touches no Node builtin is invisible to the analysis — the framework does not guess your app's domain.
+Declare it:
+
+```typescript
+veloPlugin({
+    serverOnly: ["src/fsm/**", "server/**"],
+});
+```
+
+Patterns are globs (`*`, `**`, `?`) matched against the module's file path relative to the project root, always with `/` as separator.
+The declaration feeds the diagnostic only — nothing is blocked or altered because of it.
+
+**Limitation (craved):** server code that touches no Node builtin and matches no `serverOnly` pattern generates no item; that is what the declaration is for.
 
 ---
 
@@ -1986,6 +2038,7 @@ interface VeloConfig {
     clientInit?: string;     // default: "client.tsx"
     port?: number;           // default: 3000; the PORT env wins
     hostname?: string;       // bind interface, dev and production; the HOST env wins
+    serverOnly?: string[];   // glob patterns declaring server-only modules to the leak diagnostic
 }
 ```
 
