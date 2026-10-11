@@ -26,7 +26,7 @@
  * so this file can run in parallel with the rest of the suite.
  */
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { spawnSync, spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import net from "node:net";
@@ -40,19 +40,29 @@ const SRC = path.join(WORK, "src");
 const APP = path.join(WORK, "app");
 const PACKS = path.join(WORK, "packs");
 
-const run = (cmd: string, args: string[], cwd: string, env?: NodeJS.ProcessEnv) => {
-    const result = spawnSync(cmd, args, {
-        cwd,
-        stdio: "pipe",
-        timeout: 420000,
-        env: { ...process.env, NODE_ENV: "production", ...env },
+const run = (cmd: string, args: string[], cwd: string, env?: NodeJS.ProcessEnv) =>
+    new Promise<{ status: number | null; stdout: string; stderr: string }>((resolve) => {
+        // Async on purpose: a synchronous spawn of a 30–60s build pins the
+        // vitest worker's event loop and the RPC heartbeats time out
+        // (`Timeout calling "onTaskUpdate"`) — the run fails with every test
+        // green. The child does the waiting; the worker stays responsive.
+        const child = spawn(cmd, args, {
+            cwd,
+            env: { ...process.env, NODE_ENV: "production", ...env },
+            stdio: ["ignore", "pipe", "pipe"],
+        });
+        let stdout = "";
+        let stderr = "";
+        child.stdout.on("data", (chunk) => (stdout += chunk.toString()));
+        child.stderr.on("data", (chunk) => (stderr += chunk.toString()));
+        const timer = setTimeout(() => child.kill("SIGKILL"), 420000);
+        const done = (status: number | null, extraErr = "") => {
+            clearTimeout(timer);
+            resolve({ status, stdout, stderr: stderr + extraErr });
+        };
+        child.on("error", (error) => done(-1, String(error)));
+        child.on("close", (code) => done(code));
     });
-    return {
-        status: result.status,
-        stdout: result.stdout?.toString() ?? "",
-        stderr: result.stderr?.toString() ?? "",
-    };
-};
 
 /** Copies the repo source (minus generated/installed trees) into the scratch dir. */
 function copyFeatureSource(to: string) {
@@ -71,14 +81,14 @@ function copyFeatureSource(to: string) {
 }
 
 /** Extracts `git archive HEAD` — the tree without the feature — into the scratch dir. */
-function extractBaselineSource(to: string) {
+async function extractBaselineSource(to: string) {
     const archive = path.join(WORK, "baseline.tar");
-    const archived = run("git", ["archive", "--format=tar", "-o", archive, "HEAD"], VELOJS_ROOT);
+    const archived = await run("git", ["archive", "--format=tar", "-o", archive, "HEAD"], VELOJS_ROOT);
     if (archived.status !== 0) {
         throw new Error(`git archive HEAD failed:\n${archived.stdout}\n${archived.stderr}`);
     }
     fs.mkdirSync(to, { recursive: true });
-    const extracted = run("tar", ["-xf", archive, "-C", to], WORK);
+    const extracted = await run("tar", ["-xf", archive, "-C", to], WORK);
     if (extracted.status !== 0) {
         throw new Error(`tar extract failed:\n${extracted.stdout}\n${extracted.stderr}`);
     }
@@ -103,16 +113,16 @@ export function formatLeakReport(_report?: unknown): string {
 }
 
 /** Builds the framework at the scratch path and packs it; returns the tarball. */
-function buildAndPack(tag: string): string {
+async function buildAndPack(tag: string): Promise<string> {
     fs.symlinkSync(path.join(VELOJS_ROOT, "node_modules"), path.join(SRC, "node_modules"), "dir");
     const packsDir = path.join(PACKS, tag);
     fs.mkdirSync(packsDir, { recursive: true });
 
-    const build = run("npm", ["run", "build"], SRC);
+    const build = await run("npm", ["run", "build"], SRC);
     if (build.status !== 0) {
         throw new Error(`npm run build failed (${tag}):\n${build.stdout}\n${build.stderr}`);
     }
-    const pack = run("npm", ["pack", "--silent", "--pack-destination", packsDir], SRC);
+    const pack = await run("npm", ["pack", "--silent", "--pack-destination", packsDir], SRC);
     if (pack.status !== 0) {
         throw new Error(`npm pack failed (${tag}):\n${pack.stdout}\n${pack.stderr}`);
     }
@@ -193,7 +203,7 @@ export const sep = () => path.sep;
 `,
 };
 
-function createApp(tarball: string) {
+async function createApp(tarball: string) {
     fs.rmSync(APP, { recursive: true, force: true });
     fs.mkdirSync(path.join(APP, "app/pages"), { recursive: true });
     for (const [rel, content] of Object.entries(APP_FILES)) {
@@ -212,7 +222,7 @@ function createApp(tarball: string) {
     if (fixtureVite) pkg.overrides = { vite: `^${fixtureVite}.0.0` };
     fs.writeFileSync(path.join(APP, "package.json"), JSON.stringify(pkg));
 
-    const install = run("npm", ["install", "--no-audit", "--no-fund"], APP);
+    const install = await run("npm", ["install", "--no-audit", "--no-fund"], APP);
     if (install.status !== 0) {
         throw new Error(`npm install failed:\n${install.stdout}\n${install.stderr}`);
     }
@@ -251,15 +261,15 @@ function freePort(): Promise<number> {
 let featureTgz = "";
 let dev: ChildProcessWithoutNullStreams | null = null;
 
-beforeAll(() => {
+beforeAll(async () => {
     fs.rmSync(WORK, { recursive: true, force: true });
     fs.mkdirSync(WORK, { recursive: true });
 
     // The feature side first — C1/C7 run against it.
     fs.rmSync(SRC, { recursive: true, force: true });
     copyFeatureSource(SRC);
-    featureTgz = buildAndPack("feature");
-    createApp(featureTgz);
+    featureTgz = await buildAndPack("feature");
+    await createApp(featureTgz);
 }, 600000);
 
 afterAll(() => {
@@ -270,9 +280,9 @@ afterAll(() => {
 describe("velojs build prints the leak report and succeeds (C1)", () => {
     let buildOut = "";
 
-    beforeAll(() => {
+    beforeAll(async () => {
         fs.rmSync(path.join(APP, "dist"), { recursive: true, force: true });
-        const result = run("npx", ["velojs", "build"], APP);
+        const result = await run("npx", ["velojs", "build"], APP);
         buildOut = result.stdout + result.stderr;
         if (result.status !== 0) {
             throw new Error(`velojs build failed (status ${result.status}):\n${buildOut}`);
@@ -315,9 +325,9 @@ describe("velojs build prints the leak report and succeeds (C1)", () => {
 describe("velojs build --static prints the same report and succeeds (C1)", () => {
     let buildOut = "";
 
-    beforeAll(() => {
+    beforeAll(async () => {
         fs.rmSync(path.join(APP, "dist"), { recursive: true, force: true });
-        const result = run("npx", ["velojs", "build", "--static"], APP);
+        const result = await run("npx", ["velojs", "build", "--static"], APP);
         buildOut = result.stdout + result.stderr;
         if (result.status !== 0) {
             throw new Error(`velojs build --static failed (status ${result.status}):\n${buildOut}`);
@@ -335,28 +345,28 @@ describe("velojs build --static prints the same report and succeeds (C1)", () =>
 describe("read-only against the baseline tree without the feature (C6)", () => {
     const HASH = "leakbaselinehash";
 
-    function buildSide(tarball: string): { artifacts: Map<string, string>; out: string } {
-        createApp(tarball);
+    async function buildSide(tarball: string): Promise<{ artifacts: Map<string, string>; out: string }> {
+        await createApp(tarball);
         fs.rmSync(path.join(APP, "dist"), { recursive: true, force: true });
         // The client build runs directly with the build hash fixed in the env —
         // `velojs build` would overwrite it on every execution.
-        const built = run("npx", ["vite", "build"], APP, { VELO_BUILD_HASH: HASH });
+        const built = await run("npx", ["vite", "build"], APP, { VELO_BUILD_HASH: HASH });
         if (built.status !== 0) {
             throw new Error(`vite build failed:\n${built.stdout}\n${built.stderr}`);
         }
         return { artifacts: clientArtifacts(), out: built.stdout + built.stderr };
     }
 
-    it("client artifacts are byte-identical (hash) to the pre-feature build", () => {
+    it("client artifacts are byte-identical (hash) to the pre-feature build", async () => {
         // Baseline: the tree without the feature, same layout, same hash.
         fs.rmSync(SRC, { recursive: true, force: true });
-        extractBaselineSource(SRC);
-        const baseline = buildSide(buildAndPack("baseline"));
+        await extractBaselineSource(SRC);
+        const baseline = await buildSide(await buildAndPack("baseline"));
 
         // Feature: the same build in the tree with the diagnostic.
         fs.rmSync(SRC, { recursive: true, force: true });
         copyFeatureSource(SRC);
-        const feature = buildSide(buildAndPack("c6-feature"));
+        const feature = await buildSide(await buildAndPack("c6-feature"));
 
         // The analysis ran on the feature side — the light is on while the
         // artifacts stay untouched.
