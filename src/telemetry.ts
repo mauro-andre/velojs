@@ -2,8 +2,8 @@
  * Native telemetry — boundary traces, first-class JSONL (client-safe core).
  *
  * The framework owns a finite set of bottlenecks (page SSR, `?_data=1` refetch,
- * action, declarative endpoint, stream connect, socket setup, channel connect)
- * plus the emit chain that runs outside any request. This module turns each of
+ * action, declarative endpoint, stream connect, socket setup, channel connect,
+ * live action connect) plus the emit chain that runs outside any request. This module turns each of
  * them into one JSONL event with duration, status, response bytes, child spans
  * and — on long connections — one delivery line per frame delivered and a final
  * close line. The file is the production artifact; `velojs telemetry` ranks it.
@@ -36,6 +36,7 @@ export type TelemetryEventType =
     | "stream-connect"
     | "socket-connect"
     | "channel-connect"
+    | "live-action-connect"
     | "emit"
     | "delivery"
     | "close";

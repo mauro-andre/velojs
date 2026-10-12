@@ -29,6 +29,12 @@ import {
 
 export type { Freshness } from "./live-loader.js";
 
+export { useLiveAction } from "./live-action.js";
+export type {
+    LiveActionStub,
+    LiveActionHandle,
+} from "./live-action.js";
+
 /**
  * What `Loader()`/`useLoader()` return. `freshness` is the page-level state of
  * the live loader: `"live"` (connected), `"stale"` (connection closed,

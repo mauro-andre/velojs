@@ -203,7 +203,11 @@ export function transformLoaderFunctions(code: string, moduleId: string): string
 // TRANSFORMAÇÃO 3: Actions → Fetch stubs (client only)
 // ============================================
 
-export function transformActionsForClient(code: string, moduleId: string): string {
+export function transformActionsForClient(
+    code: string,
+    moduleId: string,
+    liveNames?: ReadonlySet<string> | undefined
+): string {
     const ast = parse(code, {
         sourceType: "module",
         plugins: ["typescript", "jsx"],
@@ -238,6 +242,28 @@ export function transformActionsForClient(code: string, moduleId: string): strin
 
             // Ajusta os parâmetros para o client
             adjustParamsForClient(init, params);
+
+            // A live action carries its subscription address on the stub — the
+            // same `__path` ruler as the socket stubs — so `useLiveAction`
+            // derives the `/_live` URL from the action itself.
+            if (liveNames?.has(actionName)) {
+                declarator.init = t.callExpression(t.identifier("Object.assign"), [
+                    init,
+                    t.objectExpression([
+                        t.objectProperty(
+                            t.identifier("__isVeloLiveAction"),
+                            t.booleanLiteral(true)
+                        ),
+                        t.objectProperty(
+                            t.identifier("__path"),
+                            t.stringLiteral(`/_live/${moduleId}/${actionName}`)
+                        ),
+                    ]),
+                ]);
+                // The stub object has a different shape — drop the declarator
+                // annotation, if any (the socket transform does the same).
+                declarator.id.typeAnnotation = null;
+            }
         },
     });
 
@@ -1054,6 +1080,77 @@ function channelMapFiles(appDir: string): string[] {
 }
 
 // ============================================
+// LIVE ACTIONS — liveActions convention guards and stub address
+// ============================================
+
+/**
+ * Actions declared live by a module's `liveActions` export — `null` when the
+ * module does not declare the convention.
+ *
+ * The canonical form is the object literal `{ actionName: [channel, …] }` (the
+ * key WITHOUT the `action_` prefix, the value an array of channel-name
+ * literals); anything else is left alone — the registration guard on the
+ * server side is the backstop for runtime-computed declarations.
+ */
+export function declaredLiveActions(code: string): Record<string, string[]> | null {
+    const ast = parse(code, {
+        sourceType: "module",
+        plugins: ["typescript", "jsx"],
+    });
+
+    let found: Record<string, string[]> | null = null;
+
+    traverse(ast, {
+        ExportNamedDeclaration(nodePath) {
+            if (found) return;
+            const declaration = nodePath.node.declaration;
+            if (!t.isVariableDeclaration(declaration)) return;
+
+            for (const declarator of declaration.declarations) {
+                if (!t.isIdentifier(declarator.id, { name: "liveActions" })) continue;
+                let init = declarator.init;
+                if (
+                    init &&
+                    (t.isTSSatisfiesExpression(init) || t.isTSAsExpression(init))
+                ) {
+                    init = init.expression;
+                }
+                if (!t.isObjectExpression(init)) continue;
+
+                const map: Record<string, string[]> = {};
+                for (const prop of init.properties) {
+                    if (!t.isObjectProperty(prop) || prop.computed) continue;
+                    const name = t.isIdentifier(prop.key)
+                        ? prop.key.name
+                        : t.isStringLiteral(prop.key)
+                            ? prop.key.value
+                            : null;
+                    if (name === null) continue;
+                    let value = prop.value;
+                    if (
+                        value &&
+                        (t.isTSSatisfiesExpression(value) || t.isTSAsExpression(value))
+                    ) {
+                        value = value.expression;
+                    }
+                    if (!t.isArrayExpression(value)) continue;
+                    const channels: string[] = [];
+                    for (const element of value.elements) {
+                        // Only literal names can be validated against the app
+                        // map; anything else is left to the server guard.
+                        if (t.isStringLiteral(element)) channels.push(element.value);
+                    }
+                    map[name] = channels;
+                }
+                found = map;
+            }
+        },
+    });
+
+    return found;
+}
+
+// ============================================
 // VIRTUAL MODULE IDs
 // ============================================
 
@@ -1141,6 +1238,13 @@ export function transformModuleCode(
     const moduleId = moduleIdFor(appDir, id);
     const pathInfo = options.pathInfo;
 
+    // The actions the module declares live (`liveActions`), for the stub
+    // address — read from the source, the same declaration the guards check.
+    const liveActions = /export\s+(const|let|var)\s+liveActions\b/.test(code)
+        ? declaredLiveActions(code)
+        : null;
+    const liveNames = liveActions ? new Set(Object.keys(liveActions)) : undefined;
+
     // Routes file path (used to scope the endpoint strip)
     const routesFilePath = path.join(appDir, routesFile);
 
@@ -1170,7 +1274,8 @@ export function transformModuleCode(
         if (!isSSR) {
             transformedCode = transformActionsForClient(
                 transformedCode,
-                moduleId
+                moduleId,
+                liveNames
             );
         }
 
@@ -1258,6 +1363,9 @@ function veloTransformPlugin(veloConfig: VeloConfig, appDirectory: string): Plug
     // inert there, and the warning is what keeps that from being discovered in
     // production.
     const warnedStatic = new Set<string>();
+    // Live actions get their own once-per-(module, action) set: the static
+    // warning names the action, and a module may declare several.
+    const warnedStaticLive = new Set<string>();
 
     return {
         name: "velo:transform",
@@ -1420,6 +1528,54 @@ startClient({ routes });
                             )}) — inert in a static build: there is no SSE server, ` +
                             `so no connection is opened and freshness stays "live".`
                         );
+                    }
+                }
+            }
+
+            // 0.5 Live action guards — the same ruler, for the tab-facing twin:
+            // a `liveActions` entry must name an action the module exports and
+            // channels the app map knows. Both are dev/build errors naming
+            // module, action and channel; the silent line is a module OUTSIDE
+            // the conventions (untransformed), where nothing fires at all.
+            if (/export\s+(const|let|var)\s+liveActions\b/.test(code)) {
+                const declared = declaredLiveActions(code);
+                if (declared) {
+                    for (const [actionName, channels] of Object.entries(declared)) {
+                        if (!new RegExp(`export\\s+const\\s+action_${actionName}\\b`).test(code)) {
+                            throw new Error(
+                                `[velojs] "${moduleId}" declares liveActions.${actionName} ` +
+                                `but the module has no \`export const action_${actionName}\` — ` +
+                                `there is nothing to synchronize. Add the action or remove ` +
+                                `the entry.`
+                            );
+                        }
+                        const known = channelNames();
+                        const unknown = channels.filter((name) => !known.has(name));
+                        if (unknown.length > 0) {
+                            throw new Error(
+                                `[velojs] "${moduleId}" liveActions.${actionName} declares ` +
+                                `channel(s) ${unknown
+                                    .map((n) => `"${n}"`)
+                                    .join(", ")} with no entry in app/channels.ts — ` +
+                                `add the partition resolver for each name (a typo or a ` +
+                                `rename would otherwise be a silent no-op).`
+                            );
+                        }
+                        if (process.env.VELO_STATIC) {
+                            const key = `${moduleId}#${actionName}`;
+                            if (!warnedStaticLive.has(key)) {
+                                warnedStaticLive.add(key);
+                                console.warn(
+                                    `[velojs] "${moduleId}" liveActions.${actionName} ` +
+                                    `(channels: ${channels.join(", ")}) — inert in a static ` +
+                                    `build: there is no SSE server, the hook opens no ` +
+                                    `connection and returns data undefined with ` +
+                                    `freshness "error" (the load really failed — the ` +
+                                    `contrast with a channel, which stays "live", is ` +
+                                    `deliberate).`
+                                );
+                            }
+                        }
                     }
                 }
             }

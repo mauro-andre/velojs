@@ -28,6 +28,7 @@ import {
     veloPlugin,
 } from "../src/vite.js";
 import { createTestApp } from "../src/testing/index.js";
+import { emit } from "../src/channels.js";
 import { useParams, useQuery, usePathname } from "../src/hooks.js";
 import type { RouteModule } from "../src/types.js";
 
@@ -77,6 +78,10 @@ const RULE = {
     untransformedFile: "a page in `.jsx` / `.js`, or any page outside `appDirectory`",
     channelsOutsideConventions:
         "`export const channels = [...]` in a `.jsx` / `.js` page, or any page outside `appDirectory`",
+    liveActionSideEffect:
+        "a live action with a side effect (an action listed in `liveActions` that mutates anything)",
+    liveActionsOutsideConventions:
+        "`export const liveActions = {...}` in a `.jsx` / `.js` page, or any page outside `appDirectory`",
     rootWithoutHead: "a root layout that doesn't render a literal `<head>`",
 } as const;
 
@@ -312,6 +317,22 @@ export const channels = ["qualquerCanal"];`;
             ).toBeNull();
         },
     );
+
+    ruleTest(
+        RULE.liveActionsOutsideConventions,
+        "a page outside the conventions never reaches the liveActions guards — the declaration is inert, with no error",
+        () => {
+            const LIVE_PAGE = `export const Component = () => null;
+export const action_abrirFicha = async ({ body }: any) => ({});
+export const liveActions = { abrirFicha: ["qualquerCanal"] };`;
+            expect(
+                transformPlugin().transform(LIVE_PAGE, "/proj/app/Home.jsx", {}),
+            ).toBeNull();
+            expect(
+                transformPlugin().transform(LIVE_PAGE, "/proj/src/Home.tsx", {}),
+            ).toBeNull();
+        },
+    );
 });
 
 // ============================================
@@ -446,6 +467,50 @@ describe("anti-pattern: root layout without a <head>", () => {
             expect(res.status).toBe(200); // looks perfectly fine
             const html = await res.text();
             expect(html).not.toContain("__PAGE_DATA__");
+            await app.close();
+        },
+    );
+});
+
+// ============================================
+// A live action with a side effect
+// ============================================
+
+describe("anti-pattern: a live action with a side effect", () => {
+    ruleTest(
+        RULE.liveActionSideEffect,
+        "the re-execution at every emit repeats the effect — nothing breaks, the effect just multiplies",
+        async () => {
+            // The side effect: an INSERT, an email — anything the action does to
+            // the world besides reading. A live action re-executes at every
+            // signal of its channels, so every emit repeats it.
+            let rows = 0;
+            const mod: any = {
+                Component: () => null,
+                metadata: { moduleId: "expenses/Sheet", fullPath: "/expenses" },
+                action_abrir: async () => {
+                    rows += 1;
+                    return { rows };
+                },
+                liveActions: { abrir: ["teamExpenses"] },
+            };
+            const app = await createTestApp({
+                routes: [{ path: "/expenses", module: mod as RouteModule }],
+                channels: { teamExpenses: { scope: () => "all" } },
+            });
+
+            const sub = await app.liveAction(mod, "abrir", { args: {} });
+            expect(await sub.next({ timeoutMs: 1000 })).toEqual({ rows: 1 }); // connect — fine
+
+            await emit("teamExpenses", {});
+            await sub.next({ timeoutMs: 1000 });
+            await emit("teamExpenses", {});
+            await sub.next({ timeoutMs: 1000 });
+
+            // Two signals nobody asked for: the world changed three times.
+            expect(rows).toBe(3);
+
+            await sub.close();
             await app.close();
         },
     );

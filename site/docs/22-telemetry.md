@@ -4,7 +4,7 @@ description: "Native telemetry: the framework records its own boundaries — the
 
 # Telemetry
 
-The framework knows its own bottlenecks — they are finite: a page SSR (with the loaders of the hierarchy), a `?_data=1` refetch, an action, a declarative endpoint, a stream connect, a socket setup, a channel connect. It also knows the part that runs **outside any request**: when `emit()` invalidates a channel, the loader re-executes on an already-open connection, with no new request involved. Native telemetry turns each of those executions into one JSON line — duration, status, response bytes, child spans — and each long connection into one light line per delivery plus a final line when it closes.
+The framework knows its own bottlenecks — they are finite: a page SSR (with the loaders of the hierarchy), a `?_data=1` refetch, an action, a declarative endpoint, a stream connect, a socket setup, a channel connect, a live action connect. It also knows the part that runs **outside any request**: when `emit()` invalidates a channel, the loader (or the live action) re-executes on an already-open connection, with no new request involved. Native telemetry turns each of those executions into one JSON line — duration, status, response bytes, child spans — and each long connection into one light line per delivery plus a final line when it closes.
 
 What this buys you: **which route is slow, how big its response is, and why**. A page trace names every loader that ran and how long each took; an emit trace names the channel, the partition and how many connections re-executed. The file is plain JSONL in an operator-chosen path — no dev overlay, no dashboard inside the app, nothing to attack in production.
 
@@ -43,6 +43,7 @@ Each execution in one of the framework's bottlenecks produces a trace (type → 
 | `stream-connect` | A `stream_*` / standalone SSE connect | `route`, `module`, `name`, `channel`, duration, status |
 | `socket-connect` | A `socket_*` upgrade | `route`, `module`, `name`, duration, status |
 | `channel-connect` | A live-loader channel connect | `route`, `module`, `channel`, duration, status, the `snapshot` span of the connect snapshot |
+| `live-action-connect` | A live action subscription (`useLiveAction`) | `route`, `module`, `name` (never a `channel`), duration, status, the `snapshot` span of the connect snapshot — plus its `delivery`/`close` lines, told from a loader's by the `name` they carry |
 | `emit` | Every `emit()` gesture | `channel`, `partition`, `mode` (`invalidate` / `slice`), `connections` reached, duration; in the invalidation mode, one child span per loader re-execution per connection |
 | `delivery` | Every frame a long connection delivers | `channel`/`route`/`module`, the cumulative ordinal (`deliveries`), `bytes` of the frame |
 | `close` | The end of a long connection | `channel`/`route`/`module`, the total of `deliveries`, the connection's lifetime as `duration` |
@@ -174,6 +175,10 @@ By action
 By channel
   key                      count  errors     p50      p95     bytes
   teamExpenses                52       0   12.7ms   20.1ms    1.3KB
+
+By live action
+  key                      count  errors     p50      p95     bytes
+  expenses/abrirExpense      18       0    8.9ms   14.0ms    2.4KB
 ```
 
 ## What is not here yet

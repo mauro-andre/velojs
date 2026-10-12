@@ -53,6 +53,7 @@ export interface TelemetryReport {
     routes: RankRow[];
     actions: RankRow[];
     channels: RankRow[];
+    liveActions: RankRow[];
     timeline: TimelineEntry[];
 }
 
@@ -279,6 +280,16 @@ const actionKey = (event: TelemetryEvent): string =>
 
 const isChannelTrace = (event: TelemetryEvent): boolean => typeof event.channel === "string";
 
+/**
+ * The lines of a live action subscription: the connect trace (which carries
+ * `module` and `name`, never a `channel`) plus its delivery and close lines —
+ * the `name` field is what tells them from a loader connection's lines.
+ */
+const isLiveActionTrace = (event: TelemetryEvent): boolean =>
+    event.type === "live-action-connect" ||
+    ((event.type === "delivery" || event.type === "close") &&
+        typeof event.name === "string");
+
 function labelOf(event: TelemetryEvent): string {
     switch (event.type) {
         case "page":
@@ -287,11 +298,19 @@ function labelOf(event: TelemetryEvent): string {
             return `${event.method ? `${event.method} ` : ""}${event.route ?? "(no route)"}`;
         case "action":
             return actionKey(event);
+        case "live-action-connect":
+            return `${actionKey(event)} (live)`;
         case "emit":
             return `${event.channel ?? "?"} (${event.mode ?? "?"}${event.connections !== undefined ? `, ${event.connections} conn` : ""})`;
         case "delivery":
+            if (event.channel === undefined && event.name !== undefined) {
+                return `${actionKey(event)} #${event.deliveries ?? "?"}`;
+            }
             return `${event.channel ?? "?"} #${event.deliveries ?? "?"}`;
         case "close":
+            if (event.channel === undefined && event.name !== undefined) {
+                return `${actionKey(event)} ${event.deliveries ?? 0} deliveries`;
+            }
             return `${event.channel ?? "?"} ${event.deliveries ?? 0} deliveries`;
         case "stream-connect":
             return `${event.route ?? "?"}${event.channel ? ` [${event.channel}]` : ""}`;
@@ -314,6 +333,7 @@ export function buildTelemetryReport(files: string[], events: TelemetryEvent[]):
         routes: rankRows(events, isRouteTrace, routeKey),
         actions: rankRows(events, (event) => event.type === "action", actionKey),
         channels: rankRows(events, isChannelTrace, (event) => event.channel!),
+        liveActions: rankRows(events, isLiveActionTrace, actionKey),
         timeline: events.map((event) => ({
             ts: event.ts ?? "",
             type: event.type,
@@ -414,6 +434,8 @@ export function formatTelemetryReport(
     lines.push("");
     lines.push(...renderRank("By channel", report.channels));
     lines.push("");
+    lines.push(...renderRank("By live action", report.liveActions));
+    lines.push("");
     lines.push(...renderTimeline(report.timeline));
     return lines.join("\n");
 }
@@ -433,7 +455,7 @@ function formatDurationLabel(ms: number): string {
 const USAGE = `Usage: velojs telemetry [path] [--last <duration>]
 
 Ranks the JSONL written by the native telemetry (count, errors, p50/p95,
-bytes) by route, action and channel, and prints the timeline.
+bytes) by route, action, channel and live action, and prints the timeline.
 
   path            JSONL file copied from production (or a directory of them).
                   Without it, VELO_TELEMETRY_FILE from the environment or the

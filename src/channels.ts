@@ -7,6 +7,14 @@
  * family as `/_action` and `/_event` — which inherits the middlewares of the
  * module's route node and serves the module's loader as a stream of snapshots.
  *
+ * The tab-facing twin is the live action: a module declares
+ * `liveActions = { actionName: [channel, …] }` and the framework derives
+ * `GET /_live/{moduleId}/{actionName}` — a subscription whose args travel in
+ * `?_args=` and whose source is the action itself (a parameterized read,
+ * re-executed with those args). The subscription enters the SAME groups by
+ * (channel, partition): one `emit` by name wakes the loader connections and
+ * the live subscriptions of the partition, each re-executing its own source.
+ *
  * The app owns the partition policy in `app/channels.ts`, a name → resolver map:
  *
  * ```ts
@@ -15,7 +23,8 @@
  * };
  * ```
  *
- * On subscribe the resolver receives `{ user, params }`: `user` is the
+ * On subscribe the resolver receives `{ user, params }` (a loader connection)
+ * or `{ user, args }` (a live action subscription): `user` is the
  * materialized principal (`c.get("user")`, the house key — `undefined` when the
  * app does not materialize one, so a public channel ignores it and an
  * authenticated one returns `null`, which denies the subscription with 403) and
@@ -58,7 +67,7 @@
 
 import type { Context, Hono, MiddlewareHandler } from "hono";
 import { DEFAULT_HEARTBEAT_MS } from "./events.js";
-import type { LoaderArgs, RouteModule } from "./types.js";
+import type { ActionArgs, LoaderArgs, RouteModule } from "./types.js";
 import {
     byteLength,
     spanRecorder,
@@ -91,6 +100,12 @@ export type ChannelScopeResult = string | null | undefined;
 export interface ChannelScopeContext {
     user?: any;
     params?: Record<string, any>;
+    /**
+     * The declared arguments of a **live action** subscription (`kind: "live"`).
+     * The tab-facing twin of `params`: the address the subscription itself
+     * declared, not something the route declares.
+     */
+    args?: Record<string, any> | undefined;
 }
 
 /**
@@ -102,15 +117,28 @@ export interface ChannelScopeContext {
  * partitioned by principal, declared in a module with `:params`, mixes
  * resources in the same group and the hook's params are the first connection's
  * — arbitrary for the rest; such a channel must not consume them here.
+ *
+ * `args` is the live-action half of the same address: when the connection that
+ * opened the group is a live action subscription, they are the args that
+ * subscription declared (with the same arbitrariness caveat when the partition
+ * does not derive from them).
  */
 export interface ChannelGroupOpenContext {
     partition: string;
     params: Record<string, string>;
+    /** The declared args of the connection that opened the group (live actions). */
+    args?: Record<string, unknown> | undefined;
 }
 
-/** What `onGroupClose` receives: the partition key of the group being torn down. */
+/**
+ * What `onGroupClose` receives: the partition key of the group being torn
+ * down and, when the group was opened by a live action subscription, the args
+ * of that connection — the same fields `onGroupOpen` saw.
+ */
 export interface ChannelGroupCloseContext {
     partition: string;
+    /** The declared args of the connection that opened the group (live actions). */
+    args?: Record<string, unknown> | undefined;
 }
 
 /**
@@ -257,6 +285,7 @@ export function registerChannels(
     // still in flight (they belong to the map being replaced).
     cancelPendingWindows();
     groupOpens.clear();
+    groupOpenAddress.clear();
 }
 
 /** The currently registered channel map (read-only use). */
@@ -280,12 +309,30 @@ export interface ChannelConnection {
     partition: string;
     moduleId: string;
     /**
+     * Which surface the connection feeds: `"loader"` (the page's live-loader
+     * connection — the default) or `"live"` (a live action subscription, the
+     * tab-facing twin).
+     */
+    kind?: "loader" | "live";
+    /**
      * The principal materialized at subscribe (`c.get("user")`), captured for
      * the partition revalidation of every emit — the scope re-runs against it.
      */
     principal: unknown;
-    loader: (args: LoaderArgs) => Promise<unknown>;
-    /** The subscribing request's context — the loader re-runs against it. */
+    /** The module's loader — the data source of a `"loader"` connection. */
+    loader?: (args: LoaderArgs) => Promise<unknown>;
+    /** The live action — the data source of a `"live"` connection. */
+    action?: (args: ActionArgs<any>) => Promise<unknown>;
+    /** The action name without the `action_` prefix (`"live"` connections). */
+    actionName?: string | undefined;
+    /** The subscription's declared args (`"live"` connections) — the tab's address. */
+    args?: Record<string, unknown> | undefined;
+    /**
+     * Identifies one live action subscription across the N group entries it
+     * holds (one per declared channel) — the inspector's key.
+     */
+    liveId?: string | undefined;
+    /** The subscribing request's context — the loader/action re-runs against it. */
     c: Context;
     params: Record<string, string>;
     query: Record<string, string>;
@@ -418,24 +465,44 @@ export interface ChannelInspectWindow {
     partition: string;
 }
 
+/** One live action subscription, as the inspector reports it. */
+export interface ChannelInspectLiveAction {
+    /** The route module holding the action (`metadata.moduleId`). */
+    moduleId: string;
+    /** The action name, without the `action_` prefix. */
+    action: string;
+    /** Every (channel, partition) group the subscription entered. */
+    channels: { channel: string; partition: string }[];
+    /** The args the subscription declared — its address. */
+    args: Record<string, unknown> | null;
+    /** ISO timestamp of the subscription's last delivery; `null` when none yet. */
+    lastDeliveryAt: string | null;
+}
+
 /** The full live state of the channel registry, as `inspectChannels()` sees it. */
 export interface ChannelInspectReport {
     channels: ChannelInspectChannel[];
     /** Open coalescing windows, per (channel, partition). */
     openCoalesceWindows: ChannelInspectWindow[];
+    /** The live action subscriptions, per (moduleId, action, args). */
+    liveActions: ChannelInspectLiveAction[];
     totalConnections: number;
 }
 
 /**
  * Server-side snapshot of the live channels: per channel, the groups
  * identified by (moduleId, partition key), each with its connection count and
- * the timestamp of its last delivery; the coalescing windows still open; and
- * the grand totals. Always available — the app decides how (and with what
- * guard) to expose it; the dev server exposes it as `GET /_channel-inspect`.
+ * the timestamp of its last delivery; the coalescing windows still open; the
+ * live action subscriptions (module, action, args and the groups they hold);
+ * and the grand totals — where each live subscription counts once, however
+ * many channel groups it entered. Always available — the app decides how (and
+ * with what guard) to expose it; the dev server exposes it as
+ * `GET /_channel-inspect`.
  */
 export function inspectChannels(): ChannelInspectReport {
     const channels: ChannelInspectChannel[] = [];
     let totalConnections = 0;
+    const liveSeen = new Map<string, ChannelInspectLiveAction>();
 
     for (const [channel, byPartition] of groups) {
         const reportGroups: ChannelInspectGroup[] = [];
@@ -452,6 +519,31 @@ export function inspectChannels(): ChannelInspectReport {
                     entry.last = conn.lastDeliveryAt;
                 }
                 byModule.set(conn.moduleId, entry);
+
+                // The live-action half of the report: one entry per
+                // subscription (its N group entries fold under its liveId).
+                if (conn.kind === "live" && conn.liveId) {
+                    let live = liveSeen.get(conn.liveId);
+                    if (!live) {
+                        live = {
+                            moduleId: conn.moduleId,
+                            action: conn.actionName ?? "(anonymous)",
+                            channels: [],
+                            args: conn.args ? { ...conn.args } : null,
+                            lastDeliveryAt: null,
+                        };
+                        liveSeen.set(conn.liveId, live);
+                    }
+                    live.channels.push({ channel, partition });
+                    if (conn.lastDeliveryAt !== undefined) {
+                        const iso = new Date(conn.lastDeliveryAt).toISOString();
+                        if (live.lastDeliveryAt === null || iso > live.lastDeliveryAt) {
+                            live.lastDeliveryAt = iso;
+                        }
+                    }
+                } else if (conn.kind !== "live") {
+                    totalConnections += 1;
+                }
             }
             for (const [moduleId, entry] of byModule) {
                 reportGroups.push({
@@ -467,15 +559,23 @@ export function inspectChannels(): ChannelInspectReport {
             groups: reportGroups,
             connections: byPartitionSize(byPartition),
         });
-        totalConnections += byPartitionSize(byPartition);
     }
+
+    // Each live subscription is one connection (one SSE stream), however many
+    // groups its declared channels put it in.
+    totalConnections += liveSeen.size;
 
     const openCoalesceWindows: ChannelInspectWindow[] = [];
     for (const window of windows.values()) {
         openCoalesceWindows.push({ channel: window.channel, partition: window.partition });
     }
 
-    return { channels, openCoalesceWindows, totalConnections };
+    return {
+        channels,
+        openCoalesceWindows,
+        liveActions: [...liveSeen.values()],
+        totalConnections,
+    };
 }
 
 function byPartitionSize(byPartition: Map<string, Set<ChannelConnection>>): number {
@@ -529,6 +629,18 @@ function removeConnection(conn: ChannelConnection): boolean {
 // ============================================
 
 /**
+ * The address of the connection that opened a group — what `onGroupOpen`
+ * receives (and what `onGroupClose` sees again when the group empties).
+ */
+interface GroupOpenAddress {
+    params: Record<string, string>;
+    args?: Record<string, unknown> | undefined;
+}
+
+/** groupKey → the address of the connection that opened that group. */
+const groupOpenAddress = new Map<string, GroupOpenAddress>();
+
+/**
  * Fires `onGroupOpen` for a group that just received its first connection, and
  * keeps the promise until it resolves: that is what "marked open" means — a
  * second connection entering meanwhile joins the open group and never fires
@@ -542,15 +654,17 @@ function removeConnection(conn: ChannelConnection): boolean {
 function openGroup(
     channel: string,
     partition: string,
-    params: Record<string, string>,
+    address: GroupOpenAddress,
 ): Promise<void> {
     const key = groupKey(channel, partition);
     const hook = channelMap[channel]?.onGroupOpen;
 
+    groupOpenAddress.set(key, address);
+
     const pending = (async () => {
         if (typeof hook !== "function") return;
         try {
-            await hook({ partition, params });
+            await hook({ partition, params: address.params, args: address.args });
         } catch (err) {
             console.error(
                 `[velojs] channel "${channel}" onGroupOpen failed for partition "${partition}":`,
@@ -591,9 +705,13 @@ async function leaveGroup(conn: ChannelConnection): Promise<void> {
     }
 
     const hook = channelMap[conn.channel]?.onGroupClose;
+    // The address of the connection that opened the group — `onGroupClose`
+    // sees the same fields `onGroupOpen` saw (the args of a live action group
+    // included). Dropped once the group is really gone.
+    const address = groupOpenAddress.get(key) ?? { params: conn.params };
     if (typeof hook === "function") {
         try {
-            await hook({ partition: conn.partition });
+            await hook({ partition: conn.partition, args: address.args });
         } catch (err) {
             console.error(
                 `[velojs] channel "${conn.channel}" onGroupClose failed for partition ` +
@@ -607,16 +725,24 @@ async function leaveGroup(conn: ChannelConnection): Promise<void> {
 
     // The group may have gained connections while the close hook was running
     // (they joined a group that was still occupied). They are the group now:
-    // the source is armed for them, with the params of the first one.
+    // the source is armed for them, with the address of the first one.
     const survivors = groups.get(conn.channel)?.get(conn.partition);
     const first = survivors ? [...survivors][0] : undefined;
-    if (first) await openGroup(conn.channel, conn.partition, first.params);
+    if (first) {
+        await openGroup(conn.channel, conn.partition, {
+            params: first.params,
+            args: first.args,
+        });
+    } else {
+        groupOpenAddress.delete(key);
+    }
 }
 
 /** Test-only. Drops every live connection, group and open window. */
 export function __resetChannels(): void {
     groups.clear();
     groupOpens.clear();
+    groupOpenAddress.clear();
     cancelPendingWindows();
 }
 
@@ -661,10 +787,7 @@ async function revalidateGroup(
     for (const conn of [...set]) {
         let next: ChannelScopeResult;
         try {
-            next = await resolvePartition(def, {
-                user: conn.principal,
-                params: conn.params,
-            });
+            next = await resolvePartition(def, connectionScopeCtx(conn));
         } catch (err) {
             // A scope that throws on re-derivation cannot vouch for the
             // partition: the connection is dropped, never silently kept.
@@ -679,6 +802,18 @@ async function revalidateGroup(
     }
 
     return kept.length > 0 ? kept : null;
+}
+
+/**
+ * The scope ctx a connection re-derives its partition with: `{ user, params }`
+ * for a loader connection, `{ user, args }` for a live action subscription —
+ * the fields captured at subscribe, the same address the scope first saw.
+ */
+function connectionScopeCtx(conn: ChannelConnection): ChannelScopeContext {
+    if (conn.kind === "live") {
+        return { user: conn.principal, args: conn.args };
+    }
+    return { user: conn.principal, params: conn.params };
 }
 
 /**
@@ -697,7 +832,7 @@ async function runInvalidationRound(
     if (!kept) return 0;
     await Promise.all(
         kept.map(async (conn) => {
-            const span = recorder.span(`loader:${conn.moduleId}`);
+            const span = recorder.span(connectionSpanName(conn));
             const status = await pushSnapshot(conn);
             span.end(status);
         }),
@@ -705,12 +840,50 @@ async function runInvalidationRound(
     return kept.length;
 }
 
+/**
+ * The re-execution span of a connection: `loader:{moduleId}` for a page
+ * connection, `action:{moduleId}/{name}` for a live action subscription — the
+ * ranking tells one surface from the other.
+ */
+function connectionSpanName(conn: ChannelConnection): string {
+    if (conn.kind === "live") {
+        return `action:${conn.moduleId}/${conn.actionName ?? "anonymous"}`;
+    }
+    return `loader:${conn.moduleId}`;
+}
+
 // ============================================
 // SNAPSHOT
 // ============================================
 
 /**
- * Executes the connection's loader with the connection's own principal and
+ * Runs the connection's data source with the connection's own captured
+ * address: the loader with `{ params, query, c }` (a page connection), the
+ * action with `{ body: args, params, query, c }` (a live subscription — the
+ * same `ActionArgs` ruler as the common call, with `body` carrying the args
+ * declared in the subscription).
+ */
+async function runConnection(conn: ChannelConnection): Promise<unknown> {
+    if (conn.kind === "live") {
+        if (typeof conn.action !== "function") {
+            throw new Error("[velojs] live action connection has no action");
+        }
+        return conn.action({
+            body: conn.args ?? {},
+            params: conn.params,
+            query: conn.query,
+            c: conn.c,
+        });
+    }
+    if (typeof conn.loader !== "function") {
+        throw new Error("[velojs] channel connection has no loader");
+    }
+    return conn.loader({ params: conn.params, query: conn.query, c: conn.c });
+}
+
+/**
+ * Executes the connection's data source (the loader of a page connection, the
+ * action of a live subscription) with the connection's own principal and
  * pushes the result as a snapshot. Per-connection execution (rather than one
  * execution per partition) is deliberate: every subscriber always receives the
  * snapshot computed with its own scope, which makes the homogeneous-partition
@@ -718,18 +891,14 @@ async function runInvalidationRound(
  * amortizes is the number of *rounds*, not the executions inside one — a single
  * computation serving the whole partition is a later slice.
  *
- * A loader that throws reports the failure on the connection (`error` event)
- * instead of dying silently; a loader that returns a `Response` (a redirect
+ * A source that throws reports the failure on the connection (`error` event)
+ * instead of dying silently; a source that returns a `Response` (a redirect
  * short-circuit) has no state to send.
  */
 export async function pushSnapshot(conn: ChannelConnection): Promise<TelemetryStatus> {
     let value: unknown;
     try {
-        value = await conn.loader({
-            params: conn.params,
-            query: conn.query,
-            c: conn.c,
-        });
+        value = await runConnection(conn);
     } catch (err) {
         await conn.send(
             CHANNEL_ERROR_EVENT,
@@ -930,8 +1099,12 @@ async function emitSlice(
 
     // The slice belongs to one module's data shape: only the connections of
     // that module merge it. A layout and a page may share the channel name and
-    // hold different shapes.
-    const targets = kept.filter((conn) => conn.moduleId === moduleId);
+    // hold different shapes — and a live action subscription of the same
+    // module has the ACTION's shape, not the loader's, so it is not a slice
+    // target (a slice addressed to a live action is a later slice).
+    const targets = kept.filter(
+        (conn) => conn.moduleId === moduleId && conn.kind !== "live",
+    );
     if (targets.length === 0) {
         t.end({ status: "ok", connections: 0 });
         return;
@@ -1279,7 +1452,7 @@ export function registerChannelRoute(
                 const unref = (heartbeat as unknown as { unref?: () => void }).unref;
                 if (typeof unref === "function") unref.call(heartbeat);
             }
-            if (opened) await openGroup(channel, partition, params);
+            if (opened) await openGroup(channel, partition, { params });
 
             // Snapshot on connect: the pane never shows the SSR value while the
             // server has already moved on. A reconnect is a new connection and
@@ -1298,6 +1471,326 @@ export function registerChannelRoute(
         // kill. `streamSSE` writes `no-cache`; the channel answer demands the
         // stronger `no-store`. (The heartbeat comment keeps the proxy from
         // buffering or closing the idle stream — documented operation note.)
+        const headers = new Headers(response.headers);
+        headers.set("Cache-Control", "no-store");
+        return new Response(response.body, {
+            status: response.status,
+            statusText: response.statusText,
+            headers,
+        });
+    };
+
+    if (middlewares.length > 0) {
+        app.on(["GET"], [path], ...middlewares, handler);
+    } else {
+        app.on(["GET"], [path], handler);
+    }
+}
+
+// ============================================
+// LIVE ACTIONS — the tab-facing twin of the channel route
+// ============================================
+
+/** Query key carrying the subscription's declared args. */
+export const LIVE_ARGS_QUERY = "_args";
+
+/**
+ * The serialized-args ceiling of a live action subscription, in bytes. Args
+ * travel on the URL — the ceiling keeps the address an address, not a payload;
+ * a bigger read wants an action call plus channels on the page.
+ */
+export const LIVE_ARGS_MAX_BYTES = 4096;
+
+/**
+ * Parses and validates the `?_args=` payload of a live action subscription.
+ *
+ * The client declares the args of the tab it opened; they are the subscription's
+ * identity (a change reconnects) and the `body` of every re-execution. An
+ * absent payload is the empty object — a live action may take no arguments.
+ */
+export function parseLiveArgsQuery(
+    raw: string | undefined | null,
+): { args: Record<string, unknown>; error: string | null } {
+    if (raw === undefined || raw === null || raw === "") {
+        return { args: {}, error: null };
+    }
+
+    let parsed: unknown;
+    try {
+        parsed = JSON.parse(raw);
+    } catch {
+        return { args: {}, error: `the ?${LIVE_ARGS_QUERY}= payload is not valid JSON` };
+    }
+
+    if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+        return {
+            args: {},
+            error: `the ?${LIVE_ARGS_QUERY}= payload must be an object of the action's arguments`,
+        };
+    }
+
+    return { args: parsed as Record<string, unknown>, error: null };
+}
+
+/** Counter of live subscriptions opened by this process (their inspector id). */
+let liveSubscriptionSeq = 0;
+
+/**
+ * Registers the internal SSE route of one declared live action:
+ * `GET /_live/{moduleId}/{actionName}`, inheriting the route node's
+ * middlewares — the subscription is guarded exactly like the action call and
+ * the page are.
+ *
+ * The action runs once on subscribe (the snapshot of connection is the whole
+ * loading gesture — no initial POST exists) and once per emit in any of the
+ * declared channels, always with the args declared in the subscription as
+ * `body`. The subscription enters the groups of every declared channel: an
+ * emit in any one delivers.
+ *
+ * Guards are loud: an action that does not exist in the module, or a channel
+ * with no entry in `app/channels.ts`, is an explicit error — never a silent
+ * inert route. Args above `LIVE_ARGS_MAX_BYTES` reject the subscription with
+ * 400, naming the action and the limit; a scope that resolves to nothing (or
+ * throws) denies it with 403.
+ */
+export function registerLiveActionRoute(
+    app: Hono,
+    path: string,
+    actionName: string,
+    channels: readonly string[],
+    module: RouteModule,
+    moduleId: string,
+    middlewares: MiddlewareHandler[],
+): void {
+    const action = (module as unknown as Record<string, unknown>)[`action_${actionName}`];
+    if (typeof action !== "function") {
+        throw new Error(
+            `[velojs] module "${moduleId}" declares liveActions.${actionName} but has no ` +
+            `\`export const action_${actionName}\` — there is nothing to synchronize. ` +
+            `Add the action or remove the entry.`,
+        );
+    }
+    for (const channel of channels) {
+        if (!channelMap[channel]) {
+            throw new Error(
+                `[velojs] module "${moduleId}" liveActions.${actionName} declares channel ` +
+                `"${channel}" with no entry in app/channels.ts — add the partition ` +
+                `resolver for "${channel}".`,
+            );
+        }
+    }
+
+    const handler = async (c: Context) => {
+        // One trace per subscription: `live-action-connect` carries the connect
+        // phase — the scopes, the group opens and the connect snapshot — and
+        // the same trace records every delivery and the close line. Its fields
+        // (module, name — never a channel) are what keeps it apart from a
+        // loader's `channel-connect` in the report.
+        const t = trace("live-action-connect", { route: path, module: moduleId, name: actionName });
+
+        // The declared args are the subscription's address: parsed as an
+        // object, guarded by size. A malformed or oversized payload rejects the
+        // subscription with 400, naming the action — never a silent no-op.
+        const parsed = parseLiveArgsQuery(c.req.query(LIVE_ARGS_QUERY));
+        if (parsed.error) {
+            console.error(
+                `[velojs] live action "${moduleId}/${actionName}": rejecting subscription — ` +
+                parsed.error,
+            );
+            t.end({ status: "error" });
+            return c.json({ error: "invalid-args", message: parsed.error }, 400);
+        }
+        const args = parsed.args;
+        const serializedArgs = JSON.stringify(args);
+        if (byteLength(serializedArgs) > LIVE_ARGS_MAX_BYTES) {
+            const message =
+                `[velojs] live action "${moduleId}/${actionName}": the serialized args are ` +
+                `${byteLength(serializedArgs)} bytes — the limit is ${LIVE_ARGS_MAX_BYTES}. ` +
+                `Pass less data (an id, not the document) — the args are the tab's address.`;
+            console.error(message);
+            t.end({ status: "error" });
+            return c.json(
+                { error: "args-too-large", message, limit: LIVE_ARGS_MAX_BYTES },
+                400,
+            );
+        }
+
+        // Every declared channel must resolve a partition for this principal
+        // with these args: the subscription enters all their groups, and any
+        // scope denying (or throwing) denies the whole subscription.
+        const principal = contextVariable(c, "user");
+        const targets: { channel: string; partition: string }[] = [];
+        for (const channel of channels) {
+            const def = channelMap[channel]!;
+            let partition: string | null | undefined;
+            try {
+                partition = await resolvePartition(def, { user: principal, args });
+            } catch (err) {
+                console.error(`[velojs] channel "${channel}" scope threw:`, err);
+                t.end({ status: "error" });
+                return c.json({ error: "forbidden" }, 403);
+            }
+            if (partition == null) {
+                t.end({ status: "error" });
+                return c.json({ error: "forbidden" }, 403);
+            }
+            targets.push({ channel, partition });
+        }
+
+        const { streamSSE } = await import("hono/streaming");
+
+        // The query delivered to the re-executed action is the connection's
+        // own minus the internal `_args` key — it is protocol transport, not
+        // action data.
+        const query: Record<string, string> = {};
+        for (const [key, value] of Object.entries(c.req.query())) {
+            if (key === LIVE_ARGS_QUERY) continue;
+            query[key] = value;
+        }
+
+        const response = await streamSSE(c, async (sse) => {
+            let disposed = false;
+            let resolveDone: () => void = () => {};
+            const done = new Promise<void>((resolve) => {
+                resolveDone = resolve;
+            });
+
+            // Serialize writes: a burst of emits must not interleave mid-event,
+            // and a dead subscription is logged, never silenced. A raw string is
+            // the heartbeat comment — no event on the wire, no delivery clock.
+            const enqueue = createChannelWriteChain(
+                `${moduleId}/${actionName}`,
+                (payload) =>
+                    typeof payload === "string"
+                        ? sse.write(payload)
+                        : sse.writeSSE(payload),
+            );
+
+            liveSubscriptionSeq += 1;
+            const liveId = `live-${liveSubscriptionSeq}`;
+
+            /**
+             * The subscription is ONE stream with N group entries (one per
+             * declared channel). Every entry shares the send/terminate below:
+             * a delivery writes once, and any cause of death (disconnect, idle,
+             * partition revalidation in ANY of the channels) ends the whole
+             * subscription — a tab cannot be half alive.
+             */
+            const entries: ChannelConnection[] = targets.map(({ channel, partition }) => ({
+                channel,
+                partition,
+                moduleId,
+                kind: "live" as const,
+                principal,
+                action: action as (args: ActionArgs<any>) => Promise<unknown>,
+                actionName,
+                args,
+                liveId,
+                c,
+                params: {},
+                query,
+                telemetry: t,
+                send: (event, data) => send(event, data),
+                terminate: (reason) => terminateSubscription(reason),
+            }));
+
+            const send = (event: string, data: string): Promise<void> => {
+                if (disposed) return Promise.resolve();
+                const isDelivery = event === SNAPSHOT_EVENT;
+                if (!isDelivery) return enqueue({ event, data });
+                // Stamped at enqueue, like the loader connection: the close
+                // line totals every delivery, even one racing a disconnect.
+                if (t.enabled) t.delivery(byteLength(data));
+                return enqueue({ event, data }).then(() => {
+                    if (disposed) return;
+                    const now = Date.now();
+                    for (const entry of entries) entry.lastDeliveryAt = now;
+                    armIdle();
+                });
+            };
+
+            const cleanup = (): void => {
+                if (disposed) return;
+                disposed = true;
+                if (idleTimer !== null) clearTimeout(idleTimer);
+                if (heartbeat !== null) clearInterval(heartbeat);
+                resolveDone();
+                // The subscription is over: the close line carries the total of
+                // deliveries and its lifetime.
+                t.close();
+                // Out of every group it entered — and, for each one it empties,
+                // through the group's `onGroupClose` before it is discarded.
+                for (const entry of entries) void leaveGroup(entry);
+            };
+
+            /**
+             * Ends the subscription from the server side: the client sees the
+             * `close` event (and the stream end) and follows the normal flow —
+             * no retry, no silent resubscription on a partition it left.
+             */
+            const terminateSubscription = async (
+                reason: string = "partition",
+            ): Promise<void> => {
+                if (disposed) return;
+                await send(CHANNEL_CLOSE_EVENT, JSON.stringify({ reason }));
+                cleanup();
+            };
+
+            // ---------- Idle timeout (no delivery ⇒ close) ----------
+            let idleTimer: ReturnType<typeof setTimeout> | null = null;
+            const armIdle = (): void => {
+                if (idleMs <= 0 || disposed) return;
+                if (idleTimer !== null) clearTimeout(idleTimer);
+                idleTimer = setTimeout(() => {
+                    idleTimer = null;
+                    void terminateSubscription("idle");
+                }, idleMs);
+                const unref = (idleTimer as { unref?: () => void }).unref;
+                if (typeof unref === "function") unref.call(idleTimer);
+            };
+
+            // ---------- Heartbeat (transport, never a delivery) ----------
+            let heartbeat: ReturnType<typeof setInterval> | null = null;
+            if (heartbeatMs > 0) {
+                heartbeat = setInterval(() => {
+                    if (disposed) return;
+                    void enqueue(": ping\n\n");
+                }, heartbeatMs);
+            }
+
+            // Registered before the connect snapshot so an emit that lands in
+            // between still reaches this subscription. A group this
+            // subscription opens fires `onGroupOpen` with the subscription's
+            // own args, awaited before the snapshot.
+            sse.onAbort(cleanup);
+            armIdle();
+            if (heartbeat !== null) {
+                const unref = (heartbeat as unknown as { unref?: () => void }).unref;
+                if (typeof unref === "function") unref.call(heartbeat);
+            }
+            for (const entry of entries) {
+                const opened = addConnection(entry);
+                if (opened) {
+                    await openGroup(entry.channel, entry.partition, {
+                        params: {},
+                        args,
+                    });
+                }
+            }
+
+            // Snapshot on connection: the action executed once with the
+            // declared args — the loading gesture of the tab. A remount is a
+            // new subscription and therefore a new snapshot — no extra refetch.
+            const snapshotSpan = t.span("snapshot");
+            const snapshotStatus = await pushSnapshot(entries[0]!);
+            snapshotSpan.end(snapshotStatus);
+            t.end({ status: snapshotStatus });
+
+            await done;
+        });
+
+        // The same ruler as the channel answer: a cached live value is exactly
+        // the illusion this surface exists to kill.
         const headers = new Headers(response.headers);
         headers.set("Cache-Control", "no-store");
         return new Response(response.body, {

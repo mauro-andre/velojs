@@ -33,6 +33,18 @@ export interface RouteModule {
      * dev/build error. Requires an entry per name in `app/channels.ts`.
      */
     channels?: readonly string[];
+    /**
+     * Live actions — the tab-facing twin of `channels`. The key is the action
+     * name WITHOUT the `action_` prefix (the same form as the
+     * `/_action/{moduleId}/{name}` path); the value is the list of channel
+     * names — a `useLiveAction(action, args)` subscription enters the groups
+     * of all of them, so an `emit` in any one re-executes the action with the
+     * subscription's own args and pushes the fresh value. Requires the action
+     * to exist in the module and an entry per channel in `app/channels.ts`.
+     * A live action is, by contract, a parameterized read: re-executing it
+     * must be side-effect free.
+     */
+    liveActions?: Readonly<Record<string, readonly string[]>>;
     staticPaths?: () => Promise<Record<string, string>[]>;
     metadata?: Metadata;
     [key: `action_${string}`]: (args: ActionArgs<any>) => Promise<any>;

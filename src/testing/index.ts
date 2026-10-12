@@ -35,6 +35,7 @@ export type {
     LoaderRequestOptions,
     SubscribeOptions,
     ChannelSubscribeOptions,
+    LiveActionSubscribeOptions,
     NextOptions,
     MockContextOptions,
     Cookies,

@@ -35,6 +35,8 @@ hard constraints, not style.
 | `c.req.param(...)` or `params.x` inside `action_*`, `stream_*`, `socket_*` | actions: read it from `body`. streams/sockets: send `?channel=` from the client and read `query.channel` | these register at **static** paths (`/_action/{moduleId}/{name}`, `/_event/…`, `/_socket/…`) — the page's `:params` are not in scope → always `{}` / `undefined` |
 | a page in `.jsx` / `.js`, or any page outside `appDirectory` | `.tsx` inside `app/` | **zero transforms**: no metadata, no stubs, loader ships to the client |
 | `export const channels = [...]` in a `.jsx` / `.js` page, or any page outside `appDirectory` | `.tsx` inside `app/` | **zero transforms**: the channel guards never run, so the channel is inert — no route, no connection, no error |
+| a live action with a side effect (an action listed in `liveActions` that mutates anything) | a **parameterized read** in `liveActions`; the tab's mutations stay one-shot actions | the server re-executes a live action at every `emit` of its channels — **the side effect repeats** (duplicate rows, duplicate emails, double writes) |
+| `export const liveActions = {...}` in a `.jsx` / `.js` page, or any page outside `appDirectory` | `.tsx` inside `app/` | **zero transforms**: the live-action guards never run, so the declaration is inert — no `/_live` route, no connection, no error |
 | a root layout that doesn't render a literal `<head>` | `isRoot` component renders `<html><head>…</head><body>{children}</body></html>` | `__PAGE_DATA__` is injected by replacing `</head>` → **every loader hydrates `null`** and refetches |
 
 Never pass a module id to `useLoader()` / `Loader()` yourself — the plugin injects it.
@@ -300,6 +302,66 @@ the module.
 Do not turn on a channel where a post-action `refetch()` suffices, and do not
 use `stream_*` for a value that is simply replaced.
 
+## A tab value that must follow the server: `liveActions` + `useLiveAction`
+
+A tab is not a route: it is client state (persisted, restored on refresh) whose
+content loads at open time from an action with its own args. When that content
+is a value that must track server state over time, the action declares
+interest in living — the tab-facing twin of the live loader, same channels,
+same `emit()`, addressed by the call's own args:
+
+```tsx
+// app/expenses/Expenses.tsx
+export const action_abrirExpense = async ({ body }: ActionArgs<{ id: number }>) => {
+    const { expenseSheet } = await import("./expenses.service.js");
+    return expenseSheet(body.id);            // a parameterized read — ONLY
+};
+export const liveActions = { abrirExpense: ["expenseSheet"] };
+```
+
+```tsx
+// the tab component — one per open tab
+import { useLiveAction } from "@mauroandre/velojs/hooks";
+import { action_abrirExpense } from "../expenses/Expenses.js";
+
+const { data, loading, freshness } = useLiveAction(action_abrirExpense, { id });
+```
+
+```ts
+// the same emit() — the producer addresses the partition by args
+await emit("expenseSheet", { args: { id: 7 } });
+```
+
+The contract, in short:
+
+- A live action is a **parameterized read**. The server re-executes it with the
+  subscription's own args at every `emit()` of its declared channels — a
+  mutation there repeats its effect on every signal. The tab's mutations stay
+  one-shot actions; the tab updates through the channel.
+- The connect snapshot **is** the loading gesture: the action runs once on
+  subscribe, there is no initial POST. The re-execution receives the same
+  `ActionArgs`, with `body` carrying the declared args.
+- The scope ctx gains `args` (additively): a subscription resolves its
+  partition with `{ user, args }`; a loader connection keeps `{ user, params }`.
+  A channel declared by both ends has one scope and one partition — the
+  canonical form: `scope: ({ params, args }) => "expense:" + (args?.id ?? params?.id)`
+  — and one `emit` by name updates the page and the tab, each with its own data.
+- The subscription's life is the mount (unmount closes, remount reborn with
+  the current state), the args are the identity (a change reconnects), and
+  `freshness` (`"live"`/`"stale"`/`"error"`, same 60s silence detector) belongs
+  to the subscription — it never touches the page's aggregate.
+- Serialized args above **4096 bytes** reject the subscription with 400 — the
+  args are an address (an id), not a payload. `liveActions` naming an action
+  the module does not export, or a channel missing from `app/channels.ts`,
+  fails dev and build naming module, action and channel.
+- In `velojs build --static` there is no server to run the action: the build
+  warns naming module and action, and the hook returns `data` undefined with
+  `freshness` `"error"` — the load really failed (a channel, in contrast,
+  stays `"live"`: deliberate).
+- Test it with `app.liveAction(Module, "abrirExpense", { args: { id: 7 } })` —
+  `next()` (the connect snapshot first), `nextEvent()` (`snapshot`/`error`),
+  `close()`, `status` (403/400 guards), all deterministic like `app.channel`.
+
 ## A stream/socket `channel` is untrusted client input
 
 `useEventStream(s, { channel })` and `useSocket(s, { channel })` put the channel on the
@@ -373,6 +435,7 @@ API from this file — it is deliberately incomplete.
 | `<Scripts />`, assets, favicon | `scripts-component` |
 | SSE, live/progress/streaming data | `event-streams` |
 | A page value that must track server state (`loader` + `channels`) | `live-loader` |
+| A tab value that must track server state (`liveActions` + `useLiveAction`) | `live-actions` |
 | WebSockets, bidirectional realtime | `sockets` |
 | `addRoutes`, `onServer`, ports, server lifecycle | `server-api` |
 | The build, transforms, `veloPlugin` options | `vite-plugin` |

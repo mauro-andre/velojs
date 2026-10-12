@@ -190,3 +190,35 @@ Both imports compile to the **same URL**: `POST /_action/admin/Layout/logout`. M
 ### Why this works
 
 The Vite plugin replaces the action body with a `fetch()` call to its registered URL **during compile time**, using the `moduleId` of the file where the export lives. Imports in other files just reuse that compiled stub — they never change the URL.
+
+## The action that lives — when the portrait ages
+
+An action is, by default, a one-shot gesture: the client calls, the server
+executes, the value returns. When the content it carries is a **value that
+tracks server state over time** — the tab of an expense sheet that grows line
+by line, the card whose phase changes on its own — the portrait ages minutes
+after opening. The way out is declaring interest in living ([live
+actions](/docs/23-live-actions), the tab-facing twin of the action):
+
+```tsx
+// app/expenses/Expenses.tsx
+export const action_abrirExpense = async ({ body }: ActionArgs<{ id: number }>) => {
+    const { expenseSheet } = await import("./expenses.service.js");
+    return expenseSheet(body.id);          // a parameterized read — ONLY
+};
+export const liveActions = { abrirExpense: ["expenseSheet"] };
+```
+
+```tsx
+import { useLiveAction } from "@mauroandre/velojs/hooks";
+
+const { data, loading, freshness } = useLiveAction(action_abrirExpense, { id });
+```
+
+The lifecycle changes hands: what loads the tab is no longer the POST call but
+the **subscription** (`GET /_live/{moduleId}/{actionName}?_args=`) — the
+connect snapshot is the action executed once, and every `emit()` of its
+declared channels re-executes it with the same args. The contract is rigid: a
+live action is a **parameterized read** — a side effect in it is a usage error
+(the re-execution would repeat the effect); the mutation the user makes inside
+the tab keeps being a common action, and the tab updates through the channel.

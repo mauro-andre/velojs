@@ -13,6 +13,7 @@ VeloJS provides a set of hooks that work identically on both server (SSR) and cl
 | `useLoader<T>(deps?)` | `{ data, loading, refetch }` | Page data with SSR + SPA support |
 | `Loader<T>()` | `{ data, loading }` | Module-level SSR-only data |
 | `useEventStream<T, S>(stream, opts?)` | `{ data, snapshot, closed, error }` | Real-time SSE stream subscription |
+| `useLiveAction<T>(action, args)` | `{ data, loading, freshness }` | A live action's value, tracking server state (a tab) |
 | `useParams<T>()` | `T` | URL parameters (`:id`, etc) |
 | `useQuery<T>()` | `T` | Query string parameters |
 | `useNavigate()` | `navigate(path)` | Programmatic navigation |
@@ -81,6 +82,31 @@ const { data, snapshot, closed, error } = useEventStream(stream, {
 ```
 
 The hook handles `EventSource` lifecycle automatically: opens on mount, closes on unmount, re-opens when `channel` changes. See [Event Streams](/docs/event-streams) for the full guide.
+
+## useLiveAction
+
+Subscribes to a **live action** — the tab-facing twin of the live loader. The
+hook receives the action itself (its client stub carries the subscription
+address) and the args; the connect snapshot is the whole loading gesture, and
+every `emit()` of the action's declared channels re-executes it server-side
+and replaces `data` whole:
+
+```tsx
+import { useLiveAction } from "@mauroandre/velojs/hooks";
+import { action_abrirExpense } from "../expenses/Expenses.js";
+
+function ExpenseTab({ id }: { id: number }) {
+    const { data, loading, freshness } = useLiveAction(action_abrirExpense, { id });
+    if (loading.value) return <div class="tab-loading" />;
+    return <article class={freshness.value}>Total: {data.value?.total}</article>;
+}
+```
+
+The life is the mount (unmount closes the subscription, remount reopens it
+with the current state) and the args are the identity (a change reconnects).
+`freshness` is the subscription's own `"live"` / `"stale"` / `"error"` signal —
+never the page's aggregate. On SSR the hook does not connect (`data` null,
+`loading` true). See [Live actions](/docs/live-actions) for the full contract.
 
 ## touch
 

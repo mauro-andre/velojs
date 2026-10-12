@@ -115,6 +115,18 @@ export interface ChannelSubscribeOptions extends SubscribeOptions {
     params?: Params;
 }
 
+/**
+ * Options of a live action subscription.
+ *
+ * `args` are the arguments the subscription declares — the same ones the hook
+ * serializes into `?_args=`. They are the subscription's identity and the
+ * `body` of every (re-)execution; the size guard and the scope run for real.
+ */
+export interface LiveActionSubscribeOptions extends SubscribeOptions {
+    /** The action's declared args (serialized into `?_args=`). */
+    args?: Record<string, unknown>;
+}
+
 export interface NextOptions {
     /** Reject if no event arrives within this many ms. */
     timeoutMs: number;
@@ -183,9 +195,13 @@ export interface TestChannelSubscription<T = any> extends TestSubscription<T, T>
     nextEvent(opts: NextOptions): Promise<ChannelEvent<T>>;
 }
 
-/** One channel arrival: a whole snapshot or a slice to be merged. */
+/**
+ * One channel arrival: a whole snapshot, a slice to be merged, or a reported
+ * failure of the source (a live action subscription receives `{ message }` —
+ * its last valid value stays in place on the client).
+ */
 export interface ChannelEvent<T = any> {
-    type: "snapshot" | "slice";
+    type: "snapshot" | "slice" | "error";
     data: T;
 }
 
@@ -284,6 +300,38 @@ export interface TestApp {
         module: ChannelModuleRef,
         name: string,
         opts?: ChannelSubscribeOptions
+    ): Promise<TestChannelSubscription<T>>;
+
+    // Live actions
+    /**
+     * Open a live action subscription — the server-side twin of
+     * `useLiveAction(action, args)`.
+     *
+     * The module may be the imported route module (its `metadata.moduleId` is
+     * read) or a moduleId string; `name` is the action name WITHOUT the
+     * `action_` prefix. Cookies (and therefore the principal) come from the
+     * options or from `app.as(user)`; the route node's middlewares run for
+     * real, so an unauthenticated subscription is denied exactly as in
+     * production. `opts.args` are the declared arguments — serialized into
+     * `?_args=`, validated by the size guard and consumed by the scope.
+     *
+     * `next()` delivers the payloads in arrival order (the connect snapshot
+     * first — it is the loading gesture); `nextEvent()` discriminates the
+     * arrival (`{ type: "snapshot" | "error", data }`); `close()` ends the
+     * subscription.
+     *
+     * ```ts
+     * const sub = await app.as({ id: 1 }).liveAction(Project, "abrirFicha", { args: { id: 7 } });
+     * expect(await sub.next({ timeoutMs: 1000 })).toEqual({ nome: "Site" });  // connect
+     *
+     * await emit("fichaProjeto", { args: { id: 7 } });
+     * expect(await sub.next({ timeoutMs: 1000 })).toEqual({ nome: "Site", fase: "review" });
+     * ```
+     */
+    liveAction<T = any>(
+        module: ChannelModuleRef,
+        name: string,
+        opts?: LiveActionSubscribeOptions
     ): Promise<TestChannelSubscription<T>>;
 
     // Sockets

@@ -873,6 +873,134 @@ surface) without advancing the fake timers through the window.
 
 ---
 
+## Live actions
+
+The live loader keeps a **page** value faithful to server state. The newer
+apps are tab UIs (the VSCode shape): the page is the hull and every content
+opens in a tab — client state, not a route — loaded at open time by an action
+with its own arguments. When that content is a value that must **track server
+state over time** (an expense sheet that grows line by line, a card whose
+phase changes on its own), the action declares interest in living: the
+tab-facing twin of the live loader, addressed by the call's own args — the
+same `channels` map, the same `emit()`, zero polling.
+
+```tsx
+// app/expenses/Expenses.tsx — the page module (the tab hull)
+export const action_abrirExpense = async ({ body }: ActionArgs<{ id: number }>) => {
+    const { expenseSheet } = await import("./expenses.service.js");
+    return expenseSheet(body.id);          // a parameterized read
+};
+
+// The opt-in: key = action name without `action_`, value = channel names.
+export const liveActions = { abrirExpense: ["expenseSheet"] };
+```
+
+```tsx
+// the tab component — one per open tab
+import { useLiveAction } from "@mauroandre/velojs/hooks";
+import { action_abrirExpense } from "../expenses/Expenses.js";
+
+function ExpenseTab({ id }: { id: number }) {
+    const { data, loading, freshness } = useLiveAction(action_abrirExpense, { id });
+    return <article class={freshness.value}>{data.value?.total}</article>;
+}
+```
+
+```ts
+// the same emit() — no second mechanism was born
+import { emit } from "@mauroandre/velojs/server";
+
+await emit("expenseSheet", { args: { id: 7 } });
+```
+
+### What happens
+
+- The framework derives `GET /_live/{moduleId}/{actionName}` (the same family
+  as `/_action` and `/_channel`), inheriting the route node's `middlewares` —
+  the subscription is guarded exactly like the action call and the page are.
+- `useLiveAction(action, args)` opens one SSE connection per subscription with
+  the args in `?_args=`. The **connect snapshot is the loading gesture**: the
+  action executed once with the declared args — there is no initial POST, and
+  the tab never shows a value the server does not stand behind.
+- Every `emit()` in any declared channel re-executes the action with the
+  subscription's own args and pushes the fresh value, which **replaces**
+  `data` whole (no merge). An action that throws marks `freshness` `"error"`
+  and keeps the last valid value — a failure never blanks the tab.
+- The subscription's life is the mount: the tab unmounts and the connection
+  closes (nothing arrives afterwards; being the last of the group,
+  `onGroupClose` disarms the source). It remounts and is born again with a
+  snapshot of the current state — reopening is indistinguishable from never
+  having closed. Changing the args reconnects: they are the identity.
+- `freshness` is the subscription's own `"live"` / `"stale"` / `"error"`
+  signal (the same 60s silence detector as the live loader's) and never
+  touches the page aggregate — a stale tab does not stale the page, and the
+  other way around. On SSR the hook does not connect (`data` null,
+  `loading` true); in a static build the load really failed: no connection,
+  `data` undefined, `freshness` `"error"`.
+
+### The contract and the partition
+
+A live action is, by contract, a **parameterized read** — the server
+re-executes it at every signal, so a mutation with a side effect in a live
+action is a usage error (the re-execution would repeat the effect). The
+mutation the user makes inside the tab keeps being a common one-shot action;
+the tab updates through the channel. The re-execution receives the same
+`ActionArgs` of the common call, with `body` carrying the declared args.
+
+The scope ctx gains `args`, additively: a subscription resolves its partition
+with `{ user, args }`, a loader connection with `{ user, params }` as before.
+A channel declared by both ends has one scope and one partition — the
+canonical form (carved so no reader invents their own):
+
+```ts
+// app/channels.ts — one emit("expenseSheet", { args: { id: 7 } }) updates
+// the page (/expenses/:id, partitioned by params) and the tab (by args)
+export const channels = {
+    expenseSheet: {
+        scope: ({ params, args }) => "expense:" + (args?.id ?? params?.id),
+    },
+};
+```
+
+`null`, `undefined` or a `throw` from the scope denies the subscription with
+403, loudly; `onGroupOpen`/`onGroupClose` receive the args of the connection
+that opened the group; and the transport rules are the live loader's,
+inherited (heartbeat comment, idle timeout, coalescing, partition
+revalidation, `no-store`) — no periodic request exists anywhere.
+
+### Guards
+
+- `liveActions` naming an action the module does not export, or a channel with
+  no entry in `app/channels.ts`: error in the dev server and in the build,
+  naming module, action and channel.
+- Serialized args above **4096 bytes**: rejected with **400**, naming the
+  action and the limit — the args are the tab's address, not a payload.
+- `velojs build --static` with a module declaring `liveActions`: the build
+  warns naming module and action.
+
+### Testing a live action
+
+```ts
+const sub = await app
+    .as({ id: 1, teamId: 7 })
+    .liveAction(Expenses, "abrirExpense", { args: { id: 7 } });
+expect(await sub.next({ timeoutMs: 1000 })).toEqual({ total: 880 });   // connect
+
+await emit("expenseSheet", { args: { id: 7 } });
+expect(await sub.next({ timeoutMs: 1000 })).toEqual({ total: 940 });
+
+await sub.close();   // the tab closed: the group empties, onGroupClose fires
+```
+
+`next()` delivers the payloads in arrival order (the connect snapshot first);
+`nextEvent()` discriminates `{ type: "snapshot" | "error", data }`; `status`
+reads the guards (403 denied, 400 oversized args). The subscription and every
+delivery are traced as their own telemetry boundary (`live-action-connect`,
+ranked by `velojs telemetry` in `By live action`), and `inspectChannels()`
+lists the live subscriptions next to the loader groups.
+
+---
+
 ## Telemetry
 
 The framework records its own bottlenecks — pages, `?_data=1` refetches,

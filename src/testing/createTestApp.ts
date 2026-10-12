@@ -24,6 +24,7 @@ import type {
     LoaderRequestOptions,
     SubscribeOptions,
     ChannelSubscribeOptions,
+    LiveActionSubscribeOptions,
     MockContextOptions,
     CreateTestAppOptions,
     ChannelModuleRef,
@@ -387,6 +388,39 @@ function buildTestAppApi(
             });
         },
 
+        async liveAction<T = any>(
+            module: ChannelModuleRef,
+            name: string,
+            o: LiveActionSubscribeOptions = {}
+        ): Promise<TestChannelSubscription<T>> {
+            const moduleId = typeof module === "string"
+                ? module
+                : module?.metadata?.moduleId;
+            if (!moduleId) throwNoLiveActionModuleId(module);
+            // The declared args travel in `?_args=`, exactly as the client hook
+            // sends them — the size guard, the scopes and the middlewares all
+            // run for real.
+            const argsQuery = o.args !== undefined
+                ? { _args: JSON.stringify(o.args) }
+                : {};
+            const response = await streamingRequest(
+                "GET",
+                `/_live/${moduleId}/${name}`,
+                {
+                    ...o,
+                    query: { ...(o.query ?? {}), ...argsQuery },
+                }
+            );
+            // Snapshots are the payloads (`next()`); a server-reported failure
+            // is an arrival for `nextEvent()` only — an error is not a payload.
+            return await buildSubscription<T, T>({
+                response,
+                snapshotEvents: true,
+                channelEvents: true,
+                liveEvents: true,
+            });
+        },
+
         async socket(
             handlerInput: SocketHandler | SocketStub | { __path: string } | string,
             o: SocketTestOptions = {}
@@ -436,8 +470,9 @@ function buildTestAppApi(
                 }) as unknown as T;
             };
 
-            // `channel(module, name, opts)` has three arguments — its own wrapper
-            // instead of shoehorning it into the two-argument shape.
+            // `channel(module, name, opts)` and `liveAction(module, name, opts)`
+            // have three arguments — their own wrapper instead of shoehorning
+            // them into the two-argument shape.
             const wrapChannel = (method: typeof api.channel): typeof api.channel => {
                 return (async (module: any, name: string, o: any = {}) => {
                     const cookies = await getCookies();
@@ -446,6 +481,16 @@ function buildTestAppApi(
                         cookies: { ...cookies, ...(o?.cookies ?? {}) },
                     });
                 }) as unknown as typeof api.channel;
+            };
+
+            const wrapLiveAction = (method: typeof api.liveAction): typeof api.liveAction => {
+                return (async (module: any, name: string, o: any = {}) => {
+                    const cookies = await getCookies();
+                    return await method.call(api, module, name, {
+                        ...o,
+                        cookies: { ...cookies, ...(o?.cookies ?? {}) },
+                    });
+                }) as unknown as typeof api.liveAction;
             };
 
             const sub: TestApp = {
@@ -461,6 +506,7 @@ function buildTestAppApi(
                 loader: wrap(api.loader),
                 subscribe: wrap(api.subscribe),
                 channel: wrapChannel(api.channel),
+                liveAction: wrapLiveAction(api.liveAction),
                 socket: wrap(api.socket),
                 sessionCookies: api.sessionCookies,
                 as: api.as, // chaining .as.as works — last wins
@@ -526,6 +572,15 @@ function throwNoChannelModuleId(module: ChannelModuleRef): never {
     const seen = typeof module === "string" ? module : "(a module without metadata)";
     throw new Error(
         "[velojs/testing] channel(module, name) needs the module's metadata.moduleId " +
+            `— got ${seen}. Pass the imported route module (the Vite plugin injects the ` +
+            "metadata) or the moduleId string."
+    );
+}
+
+function throwNoLiveActionModuleId(module: ChannelModuleRef): never {
+    const seen = typeof module === "string" ? module : "(a module without metadata)";
+    throw new Error(
+        "[velojs/testing] liveAction(module, name) needs the module's metadata.moduleId " +
             `— got ${seen}. Pass the imported route module (the Vite plugin injects the ` +
             "metadata) or the moduleId string."
     );

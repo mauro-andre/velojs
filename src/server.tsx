@@ -9,7 +9,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { getAppContext } from "./app-context.js";
 import { flushPendingStreamRoutes, registerStreamHandler } from "./events.js";
 import { registerSocketRoutes, injectWebSocketServer, abortAllSocketSessions } from "./sockets.js";
-import { inspectChannels, registerChannelRoute } from "./channels.js";
+import { inspectChannels, registerChannelRoute, registerLiveActionRoute } from "./channels.js";
 import {
     jsonBytes,
     responseBytes,
@@ -42,6 +42,7 @@ export type {
     ChannelInspectGroup,
     ChannelInspectChannel,
     ChannelInspectWindow,
+    ChannelInspectLiveAction,
     ChannelInspectReport,
 } from "./channels.js";
 
@@ -579,6 +580,46 @@ const registerChannelRoutes = (
 };
 
 // ============================================
+// REGISTER LIVE ACTION ROUTES - Live actions (liveActions) por módulo
+// ============================================
+
+const registerLiveActionRoutes = (
+    app: Hono,
+    nodes: RouteNode[],
+    parentMiddlewares: MiddlewareHandler[] = []
+) => {
+    for (const node of nodes) {
+        const moduleId = node.module?.metadata?.moduleId;
+        // Acumula middlewares: pai → filho (mesma herança das páginas/actions)
+        const currentMiddlewares = [
+            ...parentMiddlewares,
+            ...(node.middlewares || []),
+        ];
+
+        if (node.module && moduleId) {
+            const liveActions = node.module.liveActions;
+            if (liveActions && typeof liveActions === "object") {
+                for (const [actionName, channels] of Object.entries(liveActions)) {
+                    registerLiveActionRoute(
+                        app,
+                        `/_live/${moduleId}/${actionName}`,
+                        actionName,
+                        channels,
+                        node.module,
+                        moduleId,
+                        currentMiddlewares
+                    );
+                }
+            }
+        }
+
+        if (node.children) {
+            registerLiveActionRoutes(app, node.children, currentMiddlewares);
+        }
+    }
+};
+
+// ============================================
 // REGISTER ENDPOINT ROUTES - Declarative HTTP endpoints (EndpointRoute)
 // ============================================
 
@@ -767,6 +808,9 @@ export const createApp = async (routes: AppRoutes): Promise<Hono> => {
 
     // Channel routes (live loader, SSE) — convenção channels por módulo
     registerChannelRoutes(app, routes);
+
+    // Live action routes (live tabs, SSE) — convenção liveActions por módulo
+    registerLiveActionRoutes(app, routes);
 
     // Dev-only inspector: the map of live channels and partitions is internal
     // information — it never ships in a production build. An app that wants

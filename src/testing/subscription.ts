@@ -76,6 +76,13 @@ interface BuildSubscriptionOptions {
      * "slice", data }`. `next()` keeps the slice-1 contract: the raw `data`.
      */
     channelEvents?: boolean;
+    /**
+     * Live-action mode: a server-reported `error` event (the source failed) is
+     * recorded discriminated in `nextEvent()` as `{ type: "error", data }` and
+     * does NOT enter `events`/`next()` — an error is not a payload. Snapshots
+     * keep the `channelEvents` behavior.
+     */
+    liveEvents?: boolean;
 }
 
 export async function buildSubscription<TEvent, TSnapshot>(
@@ -84,7 +91,7 @@ export async function buildSubscription<TEvent, TSnapshot>(
     /** Next arrival discriminated by the mode that delivered it. */
     nextEvent(opts: NextOptions): Promise<ChannelEvent<TEvent>>;
 }> {
-    const { response, snapshotEvents = false, channelEvents = false } = opts;
+    const { response, snapshotEvents = false, channelEvents = false, liveEvents = false } = opts;
     const status = response.status;
     const events: TEvent[] = [];
     const typed: ChannelEvent<TEvent>[] = [];
@@ -167,6 +174,25 @@ export async function buildSubscription<TEvent, TSnapshot>(
                                     if (w) w.resolve(event);
                                 }
                             }
+                            continue;
+                        }
+                        if (liveEvents && sse.event === "error") {
+                            // A server-reported failure of the source: an
+                            // arrival for `nextEvent()` (the test asserts the
+                            // error), never a payload for `next()`.
+                            let parsed: unknown;
+                            try {
+                                parsed = JSON.parse(sse.data);
+                            } catch {
+                                parsed = { message: sse.data };
+                            }
+                            const event: ChannelEvent<TEvent> = {
+                                type: "error",
+                                data: parsed as TEvent,
+                            };
+                            typed.push(event);
+                            const w = eventWaiters.shift();
+                            if (w) w.resolve(event);
                             continue;
                         }
                         if (sse.event === "close") {
