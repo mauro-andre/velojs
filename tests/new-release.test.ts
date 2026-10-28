@@ -10,6 +10,13 @@
  *
  * What the fakes cannot prove is npm's and GitHub's own behaviour; they prove
  * the script's decisions, order of operations and payloads.
+ *
+ * The contract under test: gates → `npm stage publish` → GitHub release →
+ * the script ENDS with the version staged. The promotion to public is a human
+ * step outside the script — no OTP is read from the terminal and no
+ * `npm stage approve` is ever called. The fake npm still knows how to answer
+ * `approve` on purpose: an accidental call lands in the recorded log and fails
+ * the no-approve assertions — the absence is proven, not assumed.
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
@@ -25,7 +32,6 @@ const REPO_SLUG = "mauro-andre/velojs";
 const VERSION = "1.2.3";
 const STAGE_ID = "0f9a0e4e-3b3c-4c3a-9c0f-2f6d5a1b7c8d";
 const RESUMED_STAGE_ID = "11111111-1111-4111-8111-111111111111";
-const OTP = "654321";
 
 const REAL_GIT = execFileSync("bash", ["-c", "command -v git"], { encoding: "utf8" }).trim();
 
@@ -54,8 +60,6 @@ interface Scenario {
     releaseExists?: boolean;
     /** The fake npm fails this exact invocation (e.g. "run typecheck"). */
     failGate?: string;
-    /** The fake npm stage approve fails, as a rejected or expired OTP does. */
-    approveFails?: boolean;
     /** Extra environment variables for the run (the environment wins over .env). */
     processEnv?: Record<string, string>;
 }
@@ -69,6 +73,8 @@ interface Harness {
     releasePost(): Record<string, unknown> | null;
     /** Every call that left the checkout: npm and the GitHub API. */
     remoteCalls(): string[];
+    /** Whether the fake registry serves the version as public. */
+    isPublished(): boolean;
 }
 
 const gitEnv = {
@@ -125,10 +131,9 @@ case "$1" in
                 exit 0
                 ;;
             approve)
-                if [ -f "$state/approve-fails" ]; then
-                    printf 'npm error code EOTP\\nnpm error This operation requires a one-time password\\n' >&2
-                    exit 1
-                fi
+                # Answered on purpose: the contract says the script NEVER calls
+                # it — an accidental call lands in the recorded log, fails the
+                # no-approve assertions and would publish the version.
                 printf '%s' "$FAKE_VERSION" > "$state/published"
                 printf 'Staged package %s approved and published successfully.\\n' "$3"
                 exit 0
@@ -278,9 +283,6 @@ function createHarness(scenario: Scenario = {}): Harness {
     if (scenario.releaseExists) {
         fs.writeFileSync(path.join(stateDir, "release"), '{"tag_name":"' + version + '"}');
     }
-    if (scenario.approveFails) {
-        fs.writeFileSync(path.join(stateDir, "approve-fails"), "1");
-    }
 
     const envForRun: NodeJS.ProcessEnv = {
         ...process.env,
@@ -333,6 +335,9 @@ function createHarness(scenario: Scenario = {}): Harness {
         remoteCalls() {
             return calls().filter((call) => call.startsWith("npm ") || call.startsWith("curl "));
         },
+        isPublished() {
+            return fs.existsSync(path.join(stateDir, "published"));
+        },
     };
 }
 
@@ -357,11 +362,6 @@ afterEach(() => {
 /** Index of the first recorded call containing `needle`, -1 when absent. */
 function indexOfCall(h: Harness, needle: string): number {
     return h.calls().findIndex((call) => call.includes(needle));
-}
-
-/** Index of the last recorded call containing `needle`, -1 when absent. */
-function lastIndexOfCall(h: Harness, needle: string): number {
-    return h.calls().reduce((last, call, index) => (call.includes(needle) ? index : last), -1);
 }
 
 // ============================================
@@ -393,6 +393,12 @@ describe("release script delivery", () => {
             .split("\n")
             .map((line) => line.trim());
         expect(ignored).toContain(".env");
+
+        // The promotion is documented as a human step outside the script — the
+        // old wording described the script that used to approve by itself.
+        expect(example).toMatch(/human step outside/i);
+        expect(example).toMatch(/npm stage approve/);
+        expect(example).not.toMatch(/approves or rejects/);
     });
 });
 
@@ -466,13 +472,14 @@ describe("release script guards", () => {
 });
 
 // ============================================
-// Full flow — gates, stage, approve, verify, release
+// Full flow — gates, stage, release, staged ending
 // ============================================
 
 describe("release script full flow", () => {
-    it("runs the gates, stages, approves with the OTP and creates the release", () => {
+    it("runs the gates, stages, creates the release and ends staged — no OTP, no approve", () => {
         const h = start();
-        const result = h.run(`${OTP}\n`);
+        // Stdin is empty on purpose: the script must not wait for an OTP.
+        const result = h.run();
 
         expect(result.status).toBe(0);
 
@@ -482,20 +489,18 @@ describe("release script full flow", () => {
         const test = indexOfCall(h, "npm test");
         const build = indexOfCall(h, "npm run build");
         const stage = indexOfCall(h, "npm stage publish --access public");
-        const approve = indexOfCall(h, "npm stage approve");
         expect(ci).toBeGreaterThanOrEqual(0);
         expect(ci).toBeLessThan(typecheck);
         expect(typecheck).toBeLessThan(test);
         expect(test).toBeLessThan(build);
         expect(build).toBeLessThan(stage);
-        expect(stage).toBeLessThan(approve);
 
-        // The approve carries the stage id of the version in question, and the
-        // verification of the published version comes after it.
-        const approveCall = h.calls().find((call) => call.includes("npm stage approve"));
-        expect(approveCall).toContain(STAGE_ID);
-        expect(approveCall).toContain(`--otp ${OTP}`);
-        expect(lastIndexOfCall(h, "npm view")).toBeGreaterThan(approve);
+        // The approve absence is proven strongly: the fake npm still answers
+        // `approve` (the call would be recorded), and nothing did. The fake's
+        // approve is also the only thing that publishes — nothing ran it, so
+        // the version ended the run staged, not public.
+        expect(h.calls().some((call) => call.includes("npm stage approve"))).toBe(false);
+        expect(h.isPublished()).toBe(false);
 
         // The release is created through the API, never by a local push.
         expect(h.releasePost()).toEqual({
@@ -505,37 +510,30 @@ describe("release script full flow", () => {
             body: VERSION,
         });
         expect(h.calls().some((call) => /^git (push|tag)\b/.test(call))).toBe(false);
-
-        expect(result.stdout).toMatch(new RegExp(`Done: ${PACKAGE_NAME}@${VERSION}`));
     }, 30_000);
 
-    it("never echoes or logs the typed OTP", () => {
+    it("ends staged, printing the pending stage id and the human ways to promote it", () => {
         const h = start();
-        const result = h.run(`${OTP}\n`);
+        const result = h.run();
 
         expect(result.status).toBe(0);
-        expect(result.stdout).not.toContain(OTP);
-        expect(result.stderr).not.toContain(OTP);
+        expect(h.isPublished()).toBe(false);
+
+        // The pending stage id of THIS version, both human ways to approve —
+        // the CLI and the npmjs.com platform — and the state made explicit.
+        expect(result.stdout).toContain(STAGE_ID);
+        expect(result.stdout).toContain(`npm stage approve ${STAGE_ID} --otp <code>`);
+        expect(result.stdout).toMatch(/npmjs\.com/);
+        expect(result.stdout).toMatch(/not public yet/i);
     }, 30_000);
 
     it("aborts before staging when a quality gate fails", () => {
         const h = start({ failGate: "run typecheck" });
-        const result = h.run(`${OTP}\n`);
+        const result = h.run();
 
         expect(result.status).not.toBe(0);
         expect(result.stderr).toMatch(/quality gate 'npm run typecheck' failed/);
         expect(indexOfCall(h, "npm stage publish")).toBe(-1);
-        expect(h.releasePost()).toBeNull();
-    });
-
-    it("leaves the version unpublished and prints the manual commands when the approve fails", () => {
-        const h = start({ approveFails: true });
-        const result = h.run(`${OTP}\n`);
-
-        expect(result.status).not.toBe(0);
-        expect(result.stderr).toMatch(/npm stage list @mauroandre\/velojs/);
-        expect(result.stderr).toContain(`npm stage approve ${STAGE_ID} --otp <code>`);
-        expect(result.stderr).toContain(`npm stage reject ${STAGE_ID}`);
         expect(h.releasePost()).toBeNull();
     });
 
@@ -544,7 +542,7 @@ describe("release script full flow", () => {
             env: "NPM_TOKEN=fake-npm-token\n",
             processEnv: { GITHUB_TOKEN: "fake-github-token" },
         });
-        const result = h.run(`${OTP}\n`);
+        const result = h.run();
 
         expect(result.status).toBe(0);
         expect(h.releasePost()).not.toBeNull();
@@ -556,9 +554,9 @@ describe("release script full flow", () => {
 // ============================================
 
 describe("release script resume", () => {
-    it("resumes at the approve when the version is already staged", () => {
+    it("resumes without repackaging when the version is staged and the release is missing", () => {
         const h = start({ stagedVersion: VERSION });
-        const result = h.run(`${OTP}\n`);
+        const result = h.run();
 
         expect(result.status).toBe(0);
 
@@ -566,16 +564,37 @@ describe("release script resume", () => {
         expect(indexOfCall(h, "npm ci")).toBe(-1);
         expect(indexOfCall(h, "npm run build")).toBe(-1);
         expect(indexOfCall(h, "npm stage publish")).toBe(-1);
+        expect(h.calls().some((call) => call.includes("npm stage approve"))).toBe(false);
 
-        // The pending stage is the one approved.
-        const approveCall = h.calls().find((call) => call.includes("npm stage approve"));
-        expect(approveCall).toContain(RESUMED_STAGE_ID);
+        // The pending stage is reported by id, with the human ways to promote.
+        expect(result.stdout).toContain(RESUMED_STAGE_ID);
+        expect(result.stdout).toContain(`npm stage approve ${RESUMED_STAGE_ID} --otp <code>`);
+        expect(result.stdout).toMatch(/not public yet/i);
+
+        // The missing release is the one thing still worth doing.
         expect(h.releasePost()).not.toBeNull();
+    });
+
+    it("recreates nothing when the version is staged and the release exists", () => {
+        const h = start({ stagedVersion: VERSION, releaseExists: true });
+        const result = h.run();
+
+        expect(result.status).toBe(0);
+
+        expect(indexOfCall(h, "npm ci")).toBe(-1);
+        expect(indexOfCall(h, "npm stage publish")).toBe(-1);
+        expect(h.calls().some((call) => call.includes("npm stage approve"))).toBe(false);
+        expect(h.calls().some((call) => call.includes("POST"))).toBe(false);
+        expect(h.releasePost()).toBeNull();
+
+        // Still reports the pending stage and how to promote it by hand.
+        expect(result.stdout).toContain(RESUMED_STAGE_ID);
+        expect(result.stdout).toContain(`npm stage approve ${RESUMED_STAGE_ID} --otp <code>`);
     });
 
     it("ignores a pending stage of another version and packages this one", () => {
         const h = start({ stagedVersion: "9.9.9" });
-        const result = h.run(`${OTP}\n`);
+        const result = h.run();
 
         expect(result.status).toBe(0);
 
@@ -583,15 +602,16 @@ describe("release script resume", () => {
         expect(indexOfCall(h, "npm ci")).toBeGreaterThanOrEqual(0);
         expect(indexOfCall(h, "npm run build")).toBeGreaterThanOrEqual(0);
         expect(indexOfCall(h, "npm stage publish")).toBeGreaterThanOrEqual(0);
+        expect(h.calls().some((call) => call.includes("npm stage approve"))).toBe(false);
 
-        const approveCall = h.calls().find((call) => call.includes("npm stage approve"));
-        expect(approveCall).toContain(STAGE_ID);
-        expect(approveCall).not.toContain(RESUMED_STAGE_ID);
-    });
+        // The staged ending reports THIS version's stage, never the other one's.
+        expect(result.stdout).toContain(STAGE_ID);
+        expect(result.stdout).not.toContain(RESUMED_STAGE_ID);
+    }, 30_000);
 
     it("creates only the release when the version is already published", () => {
         const h = start({ published: true });
-        const result = h.run(`${OTP}\n`);
+        const result = h.run();
 
         expect(result.status).toBe(0);
         expect(indexOfCall(h, "npm ci")).toBe(-1);
@@ -606,7 +626,7 @@ describe("release script resume", () => {
 
     it("does nothing when the version is published and the release exists", () => {
         const h = start({ published: true, releaseExists: true });
-        const result = h.run(`${OTP}\n`);
+        const result = h.run();
 
         expect(result.status).toBe(0);
         expect(result.stdout).toMatch(new RegExp(`Nothing to do: ${PACKAGE_NAME}@${VERSION}`));

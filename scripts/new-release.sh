@@ -1,18 +1,20 @@
 #!/usr/bin/env bash
 #
-# Cut a release from this checkout: quality gates, staged publish on npm, 2FA
-# approve, then tag + release on GitHub.
+# Cut a release from this checkout: quality gates, staged publish on npm, then
+# tag + release on GitHub — and that is where this script ends.
 #
 # The version is always the one in package.json — a single source, never derived
 # from a tag. Before acting the script reconciles the npm registry against the
 # GitHub releases and continues from whatever phase is still missing, so a run
-# that failed at the 2FA approve or at the release call can be finished by
-# running it again.
+# that failed at the release call can be finished by running it again.
 #
 # npm no longer accepts a token that bypasses 2FA for a direct publish, so the
-# tarball goes up with `npm stage publish` (the token only forwards it) and a
-# maintainer promotes it with `npm stage approve --otp`, typed here — the only
-# step that makes the version public.
+# tarball goes up with `npm stage publish` (the token only forwards it). The
+# promotion to public is a human step OUTSIDE this script: the maintainer
+# approves the staged version on npmjs.com or with
+# `npm stage approve <stage-id> --otp <code>`. This script never reads an OTP
+# and never approves anything — when it exits successfully the version is
+# staged, not public.
 #
 # Credentials come from the gitignored .env at the repo root (see .env.example):
 #   NPM_TOKEN    granular token, "Read and write (stage only)" on the package
@@ -25,11 +27,6 @@ set -euo pipefail
 
 readonly GITHUB_API="https://api.github.com"
 readonly NPM_REGISTRY_HOST="registry.npmjs.org"
-
-# Verifying a fresh publish: the registry can take a moment to serve the
-# version that the approve just published, so retry before calling it a failure.
-readonly VERIFY_ATTEMPTS=10
-readonly VERIFY_DELAY_SECONDS=6
 
 log() { printf '%s\n' "$*"; }
 phase() { printf '\n==> %s\n' "$*"; }
@@ -147,7 +144,7 @@ github_post() {
 # makes the tarball ship a fresh dist/ — `npm publish` alone would pack whatever
 # build was already on disk.
 quality_gates() {
-    phase "[2/6] Quality gates (the same order as the CI workflow)"
+    phase "[2/4] Quality gates (the same order as the CI workflow)"
     run_gate npm ci
     run_gate npm run typecheck
     run_gate npm test
@@ -162,7 +159,7 @@ run_gate() {
 # `npm stage publish` runs the prepack hook (regenerating agent/skills/) and
 # uploads the tarball as a staged version: visible to maintainers, not public.
 stage_version() {
-    phase "[3/6] Stage the tarball on the npm registry"
+    phase "[3/4] Stage the tarball on the npm registry"
     ensure_npmrc
     log "\$ npm stage publish --access public"
     npm stage publish --access public --userconfig="$NPMRC_FILE" \
@@ -188,60 +185,12 @@ staged_id_for_version() {
     ' "$VERSION" || die "could not parse the staged versions returned by npm."
 }
 
-approve_stage() {
-    local stage_id="$1" otp=""
-    phase "[4/6] Approve the staged package with 2FA"
-    printf 'Enter the npm 2FA code for %s: ' "$VERSION" >&2
-    # `-s` keeps the code out of the echo. A code arriving without a trailing
-    # newline still lands in $otp, so only an empty read is a failure.
-    IFS= read -r -s otp || true
-    printf '\n' >&2
-    otp="${otp//[[:space:]]/}"
-    if [ -z "$otp" ]; then
-        die "no 2FA code was read from the terminal — the staged package is still pending."
-    fi
-
-    ensure_npmrc
-    log "\$ npm stage approve $stage_id --otp ******"
-    # stdin from /dev/null: with no TTY npm cannot re-prompt for the code, so a
-    # wrong or expired one fails here instead of leaving the script waiting.
-    if ! npm stage approve "$stage_id" --otp "$otp" --userconfig="$NPMRC_FILE" < /dev/null; then
-        printf '\nERROR: the approve failed — %s@%s is NOT published.\n' "$PKG_NAME" "$VERSION" >&2
-        printf 'The staged package is still pending. Finish or discard it by hand:\n\n' >&2
-        printf '  npm stage list %s\n' "$PKG_NAME" >&2
-        printf '  npm stage approve %s --otp <code>\n' "$stage_id" >&2
-        printf '  npm stage reject %s\n\n' "$stage_id" >&2
-        printf 'Running this script again resumes at the approve.\n' >&2
-        exit 1
-    fi
-    log "The staged package was approved — $VERSION is public now."
-}
-
-verify_published() {
-    local attempt output
-    phase "[5/6] Verify the published version"
-    for attempt in $(seq 1 "$VERIFY_ATTEMPTS"); do
-        # `--prefer-online`: the packument read before the approve is already
-        # cached, and this one must not answer from that cache.
-        output="$(npm view "$PKG_NAME@$VERSION" version --prefer-online 2>/dev/null || true)"
-        if [ "$output" = "$VERSION" ]; then
-            log "The registry serves $PKG_NAME@$VERSION as published."
-            return 0
-        fi
-        if [ "$attempt" -lt "$VERIFY_ATTEMPTS" ]; then
-            log "The registry does not serve $VERSION yet (attempt $attempt/$VERIFY_ATTEMPTS) — retrying in ${VERIFY_DELAY_SECONDS}s."
-            sleep "$VERIFY_DELAY_SECONDS"
-        fi
-    done
-    die "the registry still does not serve $PKG_NAME@$VERSION — the approve went through, so run the script again to create the GitHub release."
-}
-
 # The releases API creates the tag itself at target_commitish — no local tag and
 # no push of branch or tag. The body is the version alone: release notes are a
 # decision for later.
 create_github_release() {
     local sha payload url
-    phase "[6/6] Tag and release on GitHub"
+    phase "[4/4] Tag and release on GitHub"
     sha="$(git rev-parse HEAD)"
     payload="$(node -e '
         process.stdout.write(JSON.stringify({
@@ -284,7 +233,7 @@ if [ -z "$REPO_SLUG" ]; then
     die "could not derive the GitHub repository from package.json (repository.url)."
 fi
 
-phase "[1/6] Guards"
+phase "[1/4] Guards"
 
 # --- credentials -----------------------------------------------------------
 ENV_FILE="$REPO_ROOT/.env"
@@ -383,8 +332,8 @@ if [ "$PUBLISHED" = 0 ]; then
     fi
 fi
 
-# Published with no release: only the GitHub phase is missing. Staged: skip the
-# gates and the packing, go straight to the approve — never pack a second time.
+# Staged: skip the gates and the packing — never pack a second time. Only a
+# version that is neither published nor staged gets the full run.
 if [ "$PUBLISHED" = 0 ] && [ -z "$STAGE_ID" ]; then
     quality_gates
     stage_version
@@ -394,12 +343,31 @@ if [ "$PUBLISHED" = 0 ] && [ -z "$STAGE_ID" ]; then
     fi
 fi
 
-if [ "$PUBLISHED" = 0 ]; then
-    approve_stage "$STAGE_ID"
-    verify_published
+# The GitHub release is the last automated step: it points at the commit even
+# while the npm version is still staged. Never remade when it already exists.
+if [ "$RELEASE_EXISTS" = 0 ]; then
+    create_github_release
 fi
 
-create_github_release
+# ---------------------------------------------------------------------------
+# Ending
+# ---------------------------------------------------------------------------
 
+if [ "$PUBLISHED" = 1 ]; then
+    log ""
+    log "Done: $PKG_NAME@$VERSION is public on npm and released on GitHub."
+    exit 0
+fi
+
+# The staged ending: everything this script can do is done — making the version
+# public is the maintainer's move, on the npm platform or with the CLI.
 log ""
-log "Done: $PKG_NAME@$VERSION is on the npm registry and released on GitHub."
+log "Done for this script: $PKG_NAME@$VERSION is staged (stage id $STAGE_ID) and released on GitHub — it is NOT public yet."
+log ""
+log "Promote it by hand — the approval is the only step that makes the version public:"
+log "    npm stage approve $STAGE_ID --otp <code>"
+log "or review and approve the staged version on npmjs.com:"
+log "    https://www.npmjs.com/package/$PKG_NAME"
+log ""
+log "To find the stage id again:  npm stage list $PKG_NAME"
+log "To discard the stage instead: npm stage reject $STAGE_ID"
