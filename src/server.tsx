@@ -50,12 +50,41 @@ export type {
 // ASYNC LOCAL STORAGE - Dados isolados por request
 // ============================================
 
-export const serverDataStorage = new AsyncLocalStorage<
-    Record<string, unknown>
->();
+// A client-reachable module importing this subpath drags the server module
+// into the client bundle, where `node:async_hooks` is a bundler stub (a
+// non-constructor binding, or a browser-external that throws on use). The
+// module-level init is guarded: evaluating it there must not throw — a throw
+// at evaluation kills the app's entire client graph silently. Without a
+// working constructor the init stays inert instead: storage is null and
+// `globalThis.__veloServerData` never gains an instance; every reader
+// (hooks.tsx) is already null-safe. On real Node nothing changes.
+function createServerDataStorage(): AsyncLocalStorage<Record<string, unknown>> | null {
+    try {
+        return new AsyncLocalStorage<Record<string, unknown>>();
+    } catch {
+        return null;
+    }
+}
+
+export const serverDataStorage = createServerDataStorage();
 
 // Expõe via globalThis para hooks.tsx acessar sem importar node:async_hooks
 (globalThis as any).__veloServerData = serverDataStorage;
+
+/**
+ * The request-isolation storage, proven present. Null only exists in a client
+ * bundle — where no request ever runs — so this throws legibly (never
+ * silently) if the impossible happens on a real server.
+ */
+function requireServerDataStorage(): AsyncLocalStorage<Record<string, unknown>> {
+    if (!serverDataStorage) {
+        throw new Error(
+            "[velojs] request isolation is unavailable: AsyncLocalStorage could not be constructed. " +
+                "This path only runs on a real server, where node:async_hooks is always present."
+        );
+    }
+    return serverDataStorage;
+}
 
 // ============================================
 // ON-SERVER HOOK - Access the underlying HTTP server
@@ -166,7 +195,7 @@ const renderPage = (
     const renderSpan = t.span("render");
     try {
         const path = c.req.path;
-        let html = serverDataStorage.run(
+        let html = requireServerDataStorage().run(
             (data as Record<string, unknown>) ?? {},
             () => {
                 return preactRender(<Router ssrPath={path}>{Component}</Router>);

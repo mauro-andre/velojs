@@ -2017,6 +2017,8 @@ VeloJS uses Node's `AsyncLocalStorage` to isolate data per request. Each SSR ren
 
 Hooks (`useParams`, `useQuery`, `usePathname`, `Loader`, `useLoader`) access this storage on the server via `globalThis.__veloServerData`.
 
+The module-level init is guarded: evaluating the server module in a browser bundle — where a client-reachable import of `/server` drags it in and `node:async_hooks` arrives as a bundler stub — never throws at evaluation. Without a working constructor the init stays inert (`serverDataStorage` is `null`, `globalThis.__veloServerData` gains no instance) and the null-safe readers carry on, so the client graph survives the accident; the leak analysis still names the import — the cut is yours. On real Node nothing changes.
+
 ---
 
 ## Testing

@@ -1,7 +1,8 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import type { ComponentChildren } from "preact";
 import { serveStatic } from "@hono/node-server/serve-static";
-import { createApp } from "../src/server.js";
+import { AsyncLocalStorage as RealAsyncLocalStorage } from "node:async_hooks";
+import { createApp, serverDataStorage } from "../src/server.js";
 import type { AppRoutes } from "../src/types.js";
 
 const Root = {
@@ -254,5 +255,81 @@ describe("createApp — statusCode + 404", () => {
         const res = await app.fetch(new Request("http://localhost/assets/app.js"));
         expect(res.status).toBe(404);
         expect(await res.text()).not.toContain("home page");
+    });
+});
+
+// ============================================
+// MODULE EVALUATION IN A BROWSER BUNDLE — the init must not throw
+// ============================================
+
+// A client-reachable module importing the `/server` subpath drags the whole
+// server module into the client bundle. There `node:async_hooks` is not the
+// Node builtin: the bundler delivers a stub, and evaluating the module must
+// not throw — a throw at evaluation kills the app's entire client graph (no
+// handler attaches, every form submits natively, nothing reaches the user).
+// The init stays inert instead: no storage, `globalThis.__veloServerData`
+// never gains an instance, and the null-safe readers in hooks.tsx carry on.
+// Both stub shapes below are the ones real bundles deliver.
+describe("server module evaluation in a browser bundle", () => {
+    const realGlobal = () => (globalThis as Record<string, unknown>).__veloServerData;
+
+    /** Evaluates src/server.tsx against the stubbed `node:async_hooks`. */
+    async function evaluateWithStub(
+        stub: () => Record<string, unknown>
+    ): Promise<typeof import("../src/server.js")> {
+        vi.doMock("node:async_hooks", stub);
+        vi.resetModules();
+        return (await import("../src/server.js")) as typeof import("../src/server.js");
+    }
+
+    const restore = () => {
+        vi.doUnmock("node:async_hooks");
+        vi.resetModules();
+    };
+
+    it("on real Node, the storage is an instance and the global gains it", () => {
+        // The baseline the guard must preserve: server-side, nothing changes.
+        expect(serverDataStorage).toBeInstanceOf(RealAsyncLocalStorage);
+        expect(realGlobal()).toBe(serverDataStorage);
+    });
+
+    it("does not throw when the stub has no constructor — the init stays inert", async () => {
+        // The stub shape seen in production: `new AsyncLocalStorage(...)` over
+        // a binding that is not a constructor ("AsyncLocalStorage is not a
+        // constructor", thrown at module evaluation in the browser).
+        const saved = realGlobal();
+        let observedGlobal: unknown = "__not_observed__";
+        try {
+            const server = await evaluateWithStub(() => ({ AsyncLocalStorage: undefined }));
+            observedGlobal = realGlobal();
+            expect(server.serverDataStorage).toBeNull();
+        } finally {
+            restore();
+            (globalThis as Record<string, unknown>).__veloServerData = saved;
+        }
+        expect(observedGlobal).toBeNull();
+    });
+
+    it("does not throw when the stub throws on use — the Vite browser-external", async () => {
+        // The other stub shape: the browser-external proxy, which throws when
+        // the builtin is reached inside the `new` expression. In the bundle the
+        // access happens inside the construction — the guard must absorb it.
+        const saved = realGlobal();
+        let observedGlobal: unknown = "__not_observed__";
+        try {
+            const server = await evaluateWithStub(() => ({
+                AsyncLocalStorage: function AsyncLocalStorage() {
+                    throw new Error(
+                        'Module "node:async_hooks" has been externalized for browser compatibility, cannot access "AsyncLocalStorage".'
+                    );
+                },
+            }));
+            observedGlobal = realGlobal();
+            expect(server.serverDataStorage).toBeNull();
+        } finally {
+            restore();
+            (globalThis as Record<string, unknown>).__veloServerData = saved;
+        }
+        expect(observedGlobal).toBeNull();
     });
 });

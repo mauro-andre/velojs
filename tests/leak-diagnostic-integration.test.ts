@@ -38,6 +38,7 @@ const WORK = "/tmp/velojs-leak-integration";
 // Shared by both sides of the byte comparison — the same layout every time.
 const SRC = path.join(WORK, "src");
 const APP = path.join(WORK, "app");
+const APP_GUARD = path.join(WORK, "app-guard");
 const PACKS = path.join(WORK, "packs");
 
 const run = (cmd: string, args: string[], cwd: string, env?: NodeJS.ProcessEnv) =>
@@ -203,11 +204,11 @@ export const sep = () => path.sep;
 `,
 };
 
-async function createApp(tarball: string) {
-    fs.rmSync(APP, { recursive: true, force: true });
-    fs.mkdirSync(path.join(APP, "app/pages"), { recursive: true });
-    for (const [rel, content] of Object.entries(APP_FILES)) {
-        fs.writeFileSync(path.join(APP, rel), content);
+async function createApp(tarball: string, dir = APP, files: Record<string, string> = APP_FILES) {
+    fs.rmSync(dir, { recursive: true, force: true });
+    for (const [rel, content] of Object.entries(files)) {
+        fs.mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true });
+        fs.writeFileSync(path.join(dir, rel), content);
     }
 
     // VELO_FIXTURE_VITE ("7" | "8") forces the vite major via npm overrides so
@@ -220,9 +221,9 @@ async function createApp(tarball: string) {
         dependencies: { "@mauroandre/velojs": `file:${tarball}` },
     };
     if (fixtureVite) pkg.overrides = { vite: `^${fixtureVite}.0.0` };
-    fs.writeFileSync(path.join(APP, "package.json"), JSON.stringify(pkg));
+    fs.writeFileSync(path.join(dir, "package.json"), JSON.stringify(pkg));
 
-    const install = await run("npm", ["install", "--no-audit", "--no-fund"], APP);
+    const install = await run("npm", ["install", "--no-audit", "--no-fund"], dir);
     if (install.status !== 0) {
         throw new Error(`npm install failed:\n${install.stdout}\n${install.stderr}`);
     }
@@ -503,4 +504,119 @@ describe("velojs dev re-emits the report without navigation (C7)", () => {
         expect(slice).toContain('server because: imports Node builtin "node:path"');
         expect(slice).toMatch(/app\/pages\/Home\.tsx:\d+ -> app\/extra-server\.ts/);
     }, 180000);
+});
+
+// ============================================
+// REGRESSION GUARD — framework modules in node_modules are seen
+// ============================================
+
+// The analyzer resolves bare specifiers through the installed package's
+// exports and walks INTO node_modules — including the framework's own dist.
+// A leak whose chain crosses the installed framework must be reported with
+// the framework module as the target and the full chain from the client
+// entry, in both reach forms (static through a common module, dynamic via
+// `await import()`). This behavior is correct today and unguarded: this
+// suite is the guard, born green by construction. The report stays read-only
+// — the build completes with the leak present.
+const APP_GUARD_FILES: Record<string, string> = {
+    "vite.config.ts": APP_FILES["vite.config.ts"]!,
+    "tsconfig.json": APP_FILES["tsconfig.json"]!,
+    "app/client.tsx": APP_FILES["app/client.tsx"]!,
+    "app/server.tsx": APP_FILES["app/server.tsx"]!,
+    "app/client-root.tsx": APP_FILES["app/client-root.tsx"]!,
+    "app/routes.tsx": `import type { AppRoutes } from "@mauroandre/velojs";
+import * as Root from "./client-root.js";
+import * as Home from "./pages/Home.js";
+
+export default [
+    {
+        module: Root,
+        isRoot: true,
+        children: [{ path: "/", module: Home }],
+    },
+] satisfies AppRoutes;
+`,
+    // Static form: a common module the page reaches imports the `/server`
+    // subpath and uses it in code that survives the client transform.
+    "app/lib/server-ref.ts": `import { serverDataStorage } from "@mauroandre/velojs/server";
+
+export const storageAlive = () => serverDataStorage !== null;
+`,
+    // Dynamic form: `await import()` of the same subpath, used client-side.
+    "app/pages/Home.tsx": `import { storageAlive } from "../lib/server-ref.js";
+
+export const loader = async () => ({ ok: true });
+
+export const openServerModule = () => import("@mauroandre/velojs/server");
+
+export const Component = () => {
+    return (
+        <button onClick={() => openServerModule()}>{String(storageAlive())}</button>
+    );
+};
+`,
+};
+
+describe("leak analysis guards the installed framework itself (regression guard)", () => {
+    let buildOut = "";
+
+    /** The report's leak items, one block per numbered entry. */
+    const leakItems = () => buildOut.split(/\n\n(?=\d+\) )/).slice(1);
+
+    beforeAll(async () => {
+        await createApp(featureTgz, APP_GUARD, APP_GUARD_FILES);
+        const result = await run("npx", ["velojs", "build"], APP_GUARD);
+        buildOut = result.stdout + result.stderr;
+        if (result.status !== 0) {
+            throw new Error(`velojs build failed (status ${result.status}):\n${buildOut}`);
+        }
+    }, 420000);
+
+    it("the build completes with the leak present — the report is printed, nothing is blocked", () => {
+        expect(buildOut).toMatch(/server->client leak analysis: \d+ leak\(s\)/);
+    });
+
+    it("lists the installed framework module as a leak target, with its Node builtin", () => {
+        const frameworkItems = leakItems().filter((item) =>
+            /^\d+\) node_modules\/@mauroandre\/velojs\/dist\/server\.js$/.test(item.split("\n")[0]!)
+        );
+        expect(frameworkItems.length).toBeGreaterThan(0);
+        // The bundled dist pulls more Node builtins than async_hooks — the
+        // singular/plural phrasing follows the count; async_hooks must be among them.
+        expect(frameworkItems[0]).toMatch(/server because: imports Node builtins? .*"node:async_hooks"/);
+    });
+
+    it("static form: full chain from the client entry through the common module", () => {
+        const item = leakItems().find(
+            (block) =>
+                block.includes("-> app/lib/server-ref.ts") &&
+                /app\/lib\/server-ref\.ts:\d+ -> node_modules\/@mauroandre\/velojs\/dist\/server\.js/.test(
+                    block
+                )
+        );
+        expect(item).toBeDefined();
+        expect(item).toContain("virtual:velo/client-entry (generated) -> app/routes.tsx");
+        expect(item).toMatch(/app\/routes\.tsx:\d+ -> app\/pages\/Home\.tsx/);
+        expect(item).toMatch(/app\/pages\/Home\.tsx:\d+ -> app\/lib\/server-ref\.ts/);
+        expect(item).toMatch(
+            /app\/lib\/server-ref\.ts:\d+ -> node_modules\/@mauroandre\/velojs\/dist\/server\.js +<- entry point \(cut here\)/
+        );
+    });
+
+    it("dynamic form: `await import()` of the subpath is followed and reported", () => {
+        const item = leakItems().find((block) =>
+            /app\/pages\/Home\.tsx:(\d+) -> node_modules\/@mauroandre\/velojs\/dist\/server\.js/.test(
+                block
+            )
+        );
+        expect(item).toBeDefined();
+        const match = item!.match(
+            /app\/pages\/Home\.tsx:(\d+) -> node_modules\/@mauroandre\/velojs\/dist\/server\.js/
+        );
+        const line = fs
+            .readFileSync(path.join(APP_GUARD, "app/pages/Home.tsx"), "utf-8")
+            .split("\n")[Number(match![1]) - 1]!;
+        expect(line).toContain("import(");
+        expect(line).toContain("@mauroandre/velojs/server");
+    });
 });

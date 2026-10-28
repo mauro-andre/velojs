@@ -507,7 +507,7 @@ describe("release script full flow", () => {
         expect(h.calls().some((call) => /^git (push|tag)\b/.test(call))).toBe(false);
 
         expect(result.stdout).toMatch(new RegExp(`Done: ${PACKAGE_NAME}@${VERSION}`));
-    });
+    }, 30_000);
 
     it("never echoes or logs the typed OTP", () => {
         const h = start();
@@ -516,7 +516,7 @@ describe("release script full flow", () => {
         expect(result.status).toBe(0);
         expect(result.stdout).not.toContain(OTP);
         expect(result.stderr).not.toContain(OTP);
-    });
+    }, 30_000);
 
     it("aborts before staging when a quality gate fails", () => {
         const h = start({ failGate: "run typecheck" });

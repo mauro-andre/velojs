@@ -136,3 +136,5 @@ When you edit `routes.tsx`, the plugin detects the change, rebuilds the path map
 VeloJS uses Node's `AsyncLocalStorage` to isolate data per request. Each SSR render runs in its own storage context, so concurrent requests never leak data between each other.
 
 This is why hooks like `useParams()`, `useQuery()`, and `Loader()` work correctly on the server — they read from the current request's storage, not from a global variable.
+
+The init is guarded: if the server module ever ends up evaluated in a browser bundle (a client-reachable import of `/server` dragging it in), the stubbed `node:async_hooks` has no constructor — the init stays inert instead of throwing at evaluation, and the client graph survives the accident. The leak analysis still names the import; the cut is yours.
