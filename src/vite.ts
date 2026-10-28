@@ -1648,9 +1648,16 @@ function veloConfigPlugin(veloConfig: VeloConfig): Plugin {
                 userConfig.server?.allowedHosts ??
                 (isBroadBind ? true : undefined);
 
-            // In server build, read the client manifest to get hashed asset filenames
+            // In server build, read the client manifest to get hashed asset filenames.
+            // The CSS is a LIST: every stylesheet the sync entry graph reaches
+            // (main + theme + …) becomes its own <link> — the vite build classic
+            // behavior. With cssCodeSplit disabled the single css asset is NOT
+            // listed on the manifest entry, so the emit itself is the source:
+            // every css the framework emits as client.[hash].css at the root of
+            // dist/client. A dead "client.css" fallback never again — the names
+            // referenced are exactly the names written to disk.
             let clientJs = "client.js";
-            let clientCss = "client.css";
+            let clientCss: string[] = [];
             if (isServer) {
                 try {
                     const manifestPath = path.resolve(process.cwd(), "dist/client/.vite/manifest.json");
@@ -1658,15 +1665,31 @@ function veloConfigPlugin(veloConfig: VeloConfig): Plugin {
                     const entry = manifest[VIRTUAL_CLIENT_ENTRY];
                     if (entry) {
                         clientJs = entry.file || clientJs;
-                        if (entry.css?.[0]) clientCss = entry.css[0];
+                        if (Array.isArray(entry.css)) {
+                            clientCss = entry.css.filter((f: unknown): f is string => typeof f === "string");
+                        }
                     }
                 } catch {}
+                if (clientCss.length === 0 && userConfig.build?.cssCodeSplit === false) {
+                    try {
+                        const clientDist = path.resolve(process.cwd(), "dist/client");
+                        clientCss = fs.readdirSync(clientDist)
+                            .filter((f) => f.startsWith("client.") && f.endsWith(".css"))
+                            .sort();
+                    } catch {}
+                }
             }
+
+            // Public base for every emitted asset reference: STATIC_BASE_URL
+            // (CDN/bucket, absolute or path prefix) wins; the static build
+            // serves the client from the /client folder of the emit; otherwise
+            // "/" (same origin as the app).
+            const publicBase = process.env.STATIC_BASE_URL || (isStatic ? "/client" : "");
 
             const config: UserConfig = {
                 define: {
                     "process.env.NODE_ENV": JSON.stringify(isDev ? "development" : "production"),
-                    "process.env.STATIC_BASE_URL": JSON.stringify(process.env.STATIC_BASE_URL || (isStatic ? "/client" : "")),
+                    "process.env.STATIC_BASE_URL": JSON.stringify(publicBase),
                     "__VELO_STATIC__": JSON.stringify(isStatic),
                     "__VELO_BUILD_HASH__": JSON.stringify(process.env.VELO_BUILD_HASH || Date.now().toString(36)),
                     "__VELO_CLIENT_JS__": JSON.stringify(clientJs),
@@ -1707,7 +1730,30 @@ function veloConfigPlugin(veloConfig: VeloConfig): Plugin {
                     },
                 };
             } else if (!isDev) {
-                // Client production build
+                // Client production build. Css that only async chunks reach
+                // travels as a string inside the chunk JS, loaded by the
+                // runtime at navigation time — the official render point for
+                // those references is experimental.renderBuiltUrl, so every
+                // css path the runtime may inject comes out ABSOLUTE (public
+                // base prefixed): a page-relative string would resolve against
+                // the current route (/stacks/x + "client.x.css" → 404).
+                // A renderBuiltUrl declared by the project composes first and
+                // always wins — the framework only fills in what it left as-is.
+                const userRender = userConfig.experimental?.renderBuiltUrl;
+                config.experimental = {
+                    ...userConfig.experimental,
+                    renderBuiltUrl(url, options) {
+                        const settled = userRender
+                            ? userRender(url, options as Parameters<NonNullable<typeof userRender>>[1])
+                            : url;
+                        if (settled !== url) return settled;
+                        const cssName = /^\.?\/?client\.[a-zA-Z0-9_-]+\.css$/.exec(url);
+                        if (options.hostType === "js" && cssName) {
+                            return `${publicBase}/${cssName[0].replace(/^\.?\/?/, "")}`;
+                        }
+                        return url;
+                    },
+                };
                 config.build = {
                     manifest: true,
                     outDir: "dist/client",

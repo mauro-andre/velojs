@@ -1638,8 +1638,11 @@ export const Component = ({ children }) => (
 ```html
 <link rel="icon" href="/favicon.ico" type="image/x-icon" />
 <link rel="stylesheet" href="/client.a1b2c3.css" />
+<link rel="stylesheet" href="/client.d4e5f6.css" />
 <script type="module" src="/client.x9y8z7.js"></script>
 ```
+
+One `<link>` per stylesheet of the sync entry graph — the build reads the whole css list from the client manifest (main, theme, …), so the page's full visual identity ships on first paint, no configuration needed. Css that only async chunks reach travels inside the chunk JS as an **absolute** path (public base respected) and is loaded by the runtime on navigation — it never resolves against the current route. With `build: { cssCodeSplit: false }` in the app's `vite.config.ts`, the single emitted stylesheet is linked exactly as emitted (hashed name) — no copy step, no unhashed 404s.
 
 Asset filenames include a content hash for cache busting. The hash changes only when the file content changes.
 
@@ -1901,6 +1904,7 @@ Callbacks queue until the server starts. If called after startup, executes immed
 | `HOST` | — | Bind interface, in dev and production. Overrides `defineConfig`'s `hostname`; in dev an explicit `--host`/`server.host` still wins |
 | `NODE_ENV` | — | Set automatically by `velojs start`. Enables static file serving |
 | `STATIC_BASE_URL` | `""` | CDN/bucket prefix for static assets |
+| `VELO_BUILD_HASH` | timestamp | Build hash baked into the client bundle and data responses. Fix it in the environment and consecutive builds with identical source emit identical asset names (reproducible builds); absent, each `velojs build` gets a fresh timestamp — the versioning valve between deploys |
 | `VELO_TELEMETRY_FILE` | — | Telemetry destination file — present and non-empty activates the native collection (see [Telemetry](#telemetry)). Expands `~`/`$VAR` |
 | `VELO_TELEMETRY_SINK_URL` | — | Telemetry sink — present and non-empty also POSTs every event |
 | `VELO_TELEMETRY_MAX_MB` | `10` | Telemetry file rotation limit, in MB |
@@ -2240,6 +2244,10 @@ VeloJS has built-in cache management for zero-downtime deployments:
 ### Content-hashed assets
 
 JS and CSS files are generated with content hashes (`client.a1b2c3.js`). When the content changes, the hash changes, and browsers automatically fetch the new version. Unchanged assets stay cached indefinitely.
+
+### Reproducible builds
+
+The build hash defaults to a fresh timestamp per `velojs build`, so every deploy ships uniquely named assets — the versioning valve between deploys. Fixing `VELO_BUILD_HASH` in the environment pins the input: consecutive builds from identical source emit **identical asset names** (JS and CSS), so rebuilding the same commit reproduces the same files. Set it on your CI when you want `diff`-able, cache-friendly artifact stores.
 
 ### HTML no-cache
 

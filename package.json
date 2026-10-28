@@ -35,7 +35,8 @@
         "prepack": "npm run build:agent",
         "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.test.json",
         "test": "vitest run",
-        "test:watch": "vitest"
+        "test:watch": "vitest",
+        "test:resumo": "vitest list --json > tests/resumo.json"
     },
     "main": "./dist/index.js",
     "types": "./dist/index.d.ts",

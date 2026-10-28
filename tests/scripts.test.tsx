@@ -20,7 +20,9 @@ describe("Scripts", () => {
         const link = container.querySelector('link[rel="stylesheet"]');
         const script = container.querySelector('script[type="module"]');
 
-        expect(link?.getAttribute("href")).toBe("/client.css");
+        // No css list from the build → NO stylesheet link (the old "client.css"
+        // fallback pointed at a file the emit never wrote — a dead link).
+        expect(link).toBeNull();
         expect(script?.getAttribute("src")).toBe("/client.js");
     });
 
@@ -32,7 +34,7 @@ describe("Scripts", () => {
         const link = container.querySelector('link[rel="stylesheet"]');
         const script = container.querySelector('script[type="module"]');
 
-        expect(link?.getAttribute("href")).toBe("/client/client.css");
+        expect(link).toBeNull();
         expect(script?.getAttribute("src")).toBe("/client/client.js");
     });
 
@@ -50,7 +52,7 @@ describe("Scripts", () => {
         const script = container.querySelector('script[type="module"]');
 
         // In static mode, assets are in /client/ — should use /client prefix
-        expect(link?.getAttribute("href")).toBe("/client/client.css");
+        expect(link).toBeNull();
         expect(script?.getAttribute("src")).toBe("/client/client.js");
     });
 
@@ -96,6 +98,57 @@ describe("Scripts", () => {
             delete (globalThis as any).__VELO_CLIENT_JS__;
             delete (globalThis as any).__VELO_CLIENT_CSS__;
         }
+    });
+    it("links EVERY stylesheet of the entry — a list __VELO_CLIENT_CSS__ renders one <link> per css", async () => {
+        // The production <head> must carry the WHOLE css of the sync entry
+        // graph (main + theme), not just the first file the manifest listed.
+        process.env.NODE_ENV = "production";
+        process.env.STATIC_BASE_URL = "";
+
+        (globalThis as any).__VELO_CLIENT_JS__ = "client.a1b2c3.js";
+        (globalThis as any).__VELO_CLIENT_CSS__ = ["client.main123.css", "client.theme456.css"];
+
+        try {
+            const { Scripts: FreshScripts } = await import("../src/components.js");
+            const { container } = render(<FreshScripts />);
+            const hrefs = Array.from(container.querySelectorAll('link[rel="stylesheet"]'))
+                .map((l) => l.getAttribute("href"));
+
+            expect(hrefs).toEqual(["/client.main123.css", "/client.theme456.css"]);
+        } finally {
+            delete (globalThis as any).__VELO_CLIENT_JS__;
+            delete (globalThis as any).__VELO_CLIENT_CSS__;
+        }
+    });
+
+    it("a string __VELO_CLIENT_CSS__ (old single-file contract) still links exactly one stylesheet", async () => {
+        process.env.NODE_ENV = "production";
+        process.env.STATIC_BASE_URL = "";
+
+        (globalThis as any).__VELO_CLIENT_JS__ = "client.a1b2c3.js";
+        (globalThis as any).__VELO_CLIENT_CSS__ = "client.x9y8z7.css";
+
+        try {
+            const { Scripts: FreshScripts } = await import("../src/components.js");
+            const { container } = render(<FreshScripts />);
+            const hrefs = Array.from(container.querySelectorAll('link[rel="stylesheet"]'))
+                .map((l) => l.getAttribute("href"));
+
+            expect(hrefs).toEqual(["/client.x9y8z7.css"]);
+        } finally {
+            delete (globalThis as any).__VELO_CLIENT_JS__;
+            delete (globalThis as any).__VELO_CLIENT_CSS__;
+        }
+    });
+
+    it("an empty css list renders NO stylesheet link — the dead client.css fallback is gone", () => {
+        process.env.NODE_ENV = "production";
+        process.env.STATIC_BASE_URL = "";
+
+        const { container } = render(<Scripts />);
+        const links = container.querySelectorAll('link[rel="stylesheet"]');
+
+        expect(links.length).toBe(0);
     });
 });
 
