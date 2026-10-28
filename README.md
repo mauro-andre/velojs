@@ -1642,7 +1642,7 @@ export const Component = ({ children }) => (
 <script type="module" src="/client.x9y8z7.js"></script>
 ```
 
-One `<link>` per stylesheet of the sync entry graph — the build reads the whole css list from the client manifest (main, theme, …), so the page's full visual identity ships on first paint, no configuration needed. Css that only async chunks reach travels inside the chunk JS as an **absolute** path (public base respected) and is loaded by the runtime on navigation — it never resolves against the current route. With `build: { cssCodeSplit: false }` in the app's `vite.config.ts`, the single emitted stylesheet is linked exactly as emitted (hashed name) — no copy step, no unhashed 404s.
+One `<link>` per stylesheet of the **whole client graph** — entry and async chunks alike. The build reads every css the manifest reaches, so a theme that only async modules import still ships on first paint, no configuration needed: those modules load by interaction, and the `<link>` is what carries their css to the page. Any css the runtime injects later (when an async chunk loads) travels as an **absolute** path (public base respected) — it never resolves against the current route. With `build: { cssCodeSplit: false }` in the app's `vite.config.ts`, the single emitted stylesheet is linked exactly as emitted (hashed name) — no copy step, no unhashed 404s.
 
 Asset filenames include a content hash for cache busting. The hash changes only when the file content changes.
 

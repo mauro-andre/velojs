@@ -1649,11 +1649,16 @@ function veloConfigPlugin(veloConfig: VeloConfig): Plugin {
                 (isBroadBind ? true : undefined);
 
             // In server build, read the client manifest to get hashed asset filenames.
-            // The CSS is a LIST: every stylesheet the sync entry graph reaches
-            // (main + theme + …) becomes its own <link> — the vite build classic
-            // behavior. With cssCodeSplit disabled the single css asset is NOT
-            // listed on the manifest entry, so the emit itself is the source:
-            // every css the framework emits as client.[hash].css at the root of
+            // The CSS is a LIST covering the WHOLE client graph: the entry's own
+            // stylesheets PLUS every css reachable only through async chunks.
+            // Css of page identity (a theme's tokens) can live in modules that
+            // fall into async chunks — those load by INTERACTION, so nothing
+            // but a <link> in the served HTML can carry them to the first
+            // paint. The bundler's partitioning stays untouched: we anticipate
+            // the LINK, never the split.
+            // With cssCodeSplit disabled the single css asset is NOT listed on
+            // the manifest at all, so the emit itself is the source: every css
+            // the framework emits as client.[hash].css at the root of
             // dist/client. A dead "client.css" fallback never again — the names
             // referenced are exactly the names written to disk.
             let clientJs = "client.js";
@@ -1667,6 +1672,19 @@ function veloConfigPlugin(veloConfig: VeloConfig): Plugin {
                         clientJs = entry.file || clientJs;
                         if (Array.isArray(entry.css)) {
                             clientCss = entry.css.filter((f: unknown): f is string => typeof f === "string");
+                        }
+                    }
+                    // Async chunks' css joins the list — entry css keeps its
+                    // order first (cascade), the rest follows the manifest's
+                    // own emission order (deterministic for identical source).
+                    const seen = new Set(clientCss);
+                    for (const node of Object.values(manifest) as Array<Record<string, unknown>>) {
+                        if (!node || !Array.isArray(node.css)) continue;
+                        for (const css of node.css) {
+                            if (typeof css === "string" && !seen.has(css)) {
+                                seen.add(css);
+                                clientCss.push(css);
+                            }
                         }
                     }
                 } catch {}

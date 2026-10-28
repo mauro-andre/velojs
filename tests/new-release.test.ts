@@ -374,12 +374,20 @@ describe("release script delivery", () => {
         expect(fs.statSync(SCRIPT).mode & 0o111).toBeGreaterThan(0);
     });
 
-    it("drops publish.yml and leaves test.yml untouched", () => {
+    it("drops publish.yml and leaves the workflow tree exactly as committed", () => {
         expect(fs.existsSync(path.join(REPO_ROOT, ".github/workflows/publish.yml"))).toBe(false);
 
-        const current = fs.readFileSync(path.join(REPO_ROOT, ".github/workflows/test.yml"), "utf8");
-        const committed = git(["show", "HEAD:.github/workflows/test.yml"], REPO_ROOT);
-        expect(current).toBe(committed);
+        // The test workflow was removed by the repo's own call (commit
+        // "Remove workflow de testes do GitHub Actions") — the release script
+        // must neither resurrect it nor drift any committed workflow.
+        const committed = git(["ls-files", ".github/workflows"], REPO_ROOT)
+            .split("\n")
+            .filter(Boolean);
+        expect(committed).not.toContain(".github/workflows/test.yml");
+        for (const rel of committed) {
+            const current = fs.readFileSync(path.join(REPO_ROOT, rel), "utf8");
+            expect(current, rel).toBe(git(["show", `HEAD:${rel}`], REPO_ROOT));
+        }
     });
 
     it("documents the npm and GitHub credentials in .env.example", () => {

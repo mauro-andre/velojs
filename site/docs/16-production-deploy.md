@@ -16,7 +16,7 @@ This runs two Vite builds:
 1. **Client build** → `dist/client/` (JavaScript, CSS, and other static assets)
 2. **Server build** → `dist/server.js` (the SSR server entry point)
 
-The served HTML links **every stylesheet the sync entry reaches** (main, theme, …) — one `<link>` per css, straight from the client manifest. Css that only async chunks reach travels inside the chunk JS as an absolute path (respecting `STATIC_BASE_URL`) and is loaded by the runtime on navigation; it never resolves against the current route. With `build: { cssCodeSplit: false }` in the app's `vite.config.ts`, the single emitted stylesheet is linked exactly as emitted (hashed name) — no copy step, no unhashed 404s.
+The served HTML links **every stylesheet of the whole client graph** — entry and async chunks alike, one `<link>` per css, straight from the client manifest. A theme that only async modules import still ships on first paint: those modules load by interaction, and the `<link>` is what carries their css to the page. Any css the runtime injects later travels as an absolute path (respecting `STATIC_BASE_URL`) — it never resolves against the current route. With `build: { cssCodeSplit: false }` in the app's `vite.config.ts`, the single emitted stylesheet is linked exactly as emitted (hashed name) — no copy step, no unhashed 404s.
 
 ## Start in production
 

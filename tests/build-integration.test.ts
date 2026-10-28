@@ -120,36 +120,37 @@ export const Component = ({ children }: { children?: ComponentChildren }) => (
 `
     );
 
-    // app/client.tsx — clientInit: imports the sync-entry css (the shape the
-    // consumer app had: a big base stylesheet + a small theme one, both linked
-    // from the entry graph). The whole css of this graph must reach the HTML.
+    // app/client.tsx — clientInit: imports the BASE stylesheet (sync entry).
+    // The THEME deliberately does NOT live here: it mirrors the consumer —
+    // the css of identity (tokens in :root) is reachable ONLY through modules
+    // that fall into async chunks, loaded by interaction, never at boot.
     fs.writeFileSync(
         path.join(TEST_APP_DIR, "app/client.tsx"),
         `import "./base.css";
-import "./theme.css";
 `
     );
 
-    // app/base.css + app/theme.css — the two sync-entry stylesheets
+    // app/base.css — the sync-entry stylesheet
     fs.writeFileSync(
         path.join(TEST_APP_DIR, "app/base.css"),
         "body { font-family: sans-serif; }\n"
     );
+
+    // app/theme.css + app/lazy.css — stylesheets reachable ONLY through a
+    // dynamic import (async chunk): they travel as strings inside the chunk
+    // JS and the theme must still reach the FIRST PAINT of every page.
     fs.writeFileSync(
         path.join(TEST_APP_DIR, "app/theme.css"),
         ":root { --color-bg: #101014; }\n.themed { background: var(--color-bg); }\n"
     );
-
-    // app/lazy.css + app/lazy-pane.ts — css that is only reachable through a
-    // dynamic import (an async chunk): it travels as a string inside the chunk
-    // JS, loaded by the runtime — never inside the sync-entry graph.
     fs.writeFileSync(
         path.join(TEST_APP_DIR, "app/lazy.css"),
         ".lazy-pane { padding: 1rem; }\n"
     );
     fs.writeFileSync(
         path.join(TEST_APP_DIR, "app/lazy-pane.ts"),
-        `import "./lazy.css";
+        `import "./theme.css";
+import "./lazy.css";
 export const LAZY_PANE_MARKER = "lazy-pane-ok";
 `
     );
@@ -834,7 +835,7 @@ describe("Build Integration", () => {
             await served.stop();
         });
 
-        it("served HTML links EVERY css of the sync entry (base + theme reach the page)", async () => {
+        it("served HTML links EVERY css of the client graph — entry AND async chunks (the theme reaches the first paint)", async () => {
             const manifest = JSON.parse(
                 fs.readFileSync(
                     path.join(TEST_APP_DIR, "dist/client/.vite/manifest.json"),
@@ -842,30 +843,35 @@ describe("Build Integration", () => {
                 )
             );
             const entryCss: string[] = manifest["virtual:velo/client-entry"].css ?? [];
-            // The fixture declares TWO sync-entry stylesheets (base.css +
-            // theme.css). Vite may merge them into one entry asset or keep them
-            // apart — the contract is that EVERY listed css is linked and the
-            // SERVED stylesheet actually carries the theme (the consumer report:
-            // theme dead, every var(--color-*) unset).
+            // The consumer mirror: the THEME (tokens in :root) lives ONLY in
+            // async chunks — the module that imports it loads by interaction,
+            // so nothing but a <link> in the served HTML can carry it to the
+            // first paint. On 0.0.62 this is the red: the async css is never
+            // linked and never injected.
+            const asyncCss: string[] = Object.values(manifest)
+                .flatMap((node: any) => (node && Array.isArray(node.css) ? node.css : []))
+                .filter((css: string) => !entryCss.includes(css));
+            expect(asyncCss.length).toBeGreaterThanOrEqual(1);
             expect(entryCss.length).toBeGreaterThanOrEqual(1);
+            const allCss = [...entryCss, ...asyncCss];
 
             const res = await served.fetch("/");
             expect(res.status).toBe(200);
             const hrefs = stylesheetHrefs(await res.text());
 
-            expect(hrefs.length).toBe(entryCss.length);
-            for (const css of entryCss) {
+            expect(hrefs.length).toBe(allCss.length);
+            for (const css of allCss) {
                 expect(hrefs).toContain(`/${css}`);
             }
 
-            // The served css carries BOTH stylesheets' rules — the theme is on
-            // the page, not just the first stylesheet the manifest listed.
+            // The served css carries the theme tokens — identity on the first
+            // paint, even though the chunk that imports them never loaded.
             const cssBodies = await Promise.all(
                 hrefs.map(async (href) => (await served.fetch(href)).text())
             );
-            const allCss = cssBodies.join("\n");
-            expect(allCss).toContain("--color-bg");
-            expect(allCss).toContain("font-family");
+            const allCssBodies = cssBodies.join("\n");
+            expect(allCssBodies).toContain("--color-bg");
+            expect(allCssBodies).toContain("font-family");
         });
 
         it("every linked stylesheet answers 200 — the theme is actually served", async () => {

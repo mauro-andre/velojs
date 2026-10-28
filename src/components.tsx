@@ -67,12 +67,14 @@ export function Scripts({ basePath, favicon = "/favicon.ico" }: ScriptsProps = {
     }
 
     const jsFile = (globalThis as any).__veloClientJs || (typeof __VELO_CLIENT_JS__ !== "undefined" ? __VELO_CLIENT_JS__ : "client.js");
-    // The whole css of the sync entry graph — a LIST. The build reads every
-    // stylesheet the entry reaches (main + theme + …) from the client manifest,
-    // so each one becomes its own <link>. A plain string (the old single-file
-    // contract) is normalized to a one-item list; an empty list renders NO
-    // stylesheet link (the old "client.css" fallback pointed at a file the
-    // emit never wrote — a dead link on every page).
+    // The whole css of the client graph — a LIST. The build reads every
+    // stylesheet the graph reaches, entry AND async chunks alike (a theme's
+    // tokens can live in modules that only load by interaction — the <link>
+    // is what carries them to the first paint), so each one becomes its own
+    // <link>. A plain string (the old single-file contract) is normalized to
+    // a one-item list; an empty list renders NO stylesheet link (the old
+    // "client.css" fallback pointed at a file the emit never wrote — a dead
+    // link on every page).
     const rawCss: unknown = (globalThis as any).__veloClientCss || (typeof __VELO_CLIENT_CSS__ !== "undefined" ? __VELO_CLIENT_CSS__ : []);
     const cssFiles: string[] = Array.isArray(rawCss)
         ? rawCss.filter((f): f is string => typeof f === "string" && f.length > 0)

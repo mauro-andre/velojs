@@ -40,7 +40,7 @@ export const Component = ({ children }) => (
 <script type="module" src="/client.C3f9Ax_1.js"></script>
 ```
 
-One `<link>` per stylesheet of the sync entry graph — the build reads the whole css list from the client manifest (main, theme, …), so the page's full visual identity ships on first paint. Css that only async chunks reach travels inside the chunk JS as an absolute path and is loaded by the runtime on navigation — it never resolves against the current route.
+One `<link>` per stylesheet of the **whole client graph** — entry and async chunks alike. A theme that only async modules import still ships on first paint: those modules load by interaction, and the `<link>` is what carries their css to the page. Any css the runtime injects later travels as an absolute path — it never resolves against the current route.
 
 ## Props
 
