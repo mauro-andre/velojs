@@ -36,8 +36,11 @@ export const Component = ({ children }) => (
 ```html
 <link rel="icon" href="/favicon.ico" type="image/x-icon" />
 <link rel="stylesheet" href="/client.C3f9Ax_1.css" />
+<link rel="stylesheet" href="/client.D4e5fG_2.css" />
 <script type="module" src="/client.C3f9Ax_1.js"></script>
 ```
+
+One `<link>` per stylesheet of the sync entry graph — the build reads the whole css list from the client manifest (main, theme, …), so the page's full visual identity ships on first paint. Css that only async chunks reach travels inside the chunk JS as an absolute path and is loaded by the runtime on navigation — it never resolves against the current route.
 
 ## Props
 

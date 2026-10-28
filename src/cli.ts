@@ -18,8 +18,11 @@ const runVite = () => {
 };
 
 const runBuild = (isStatic: boolean) => {
-    // Generate build hash once so client and server share the same value
-    const buildHash = Date.now().toString(36);
+    // Build hash: VELO_BUILD_HASH from the environment wins — fixing it makes
+    // consecutive builds with identical source emit identical asset names
+    // (reproducible deploys). Absent, a fresh timestamp keeps every deploy's
+    // assets uniquely named (the versioning valve between deploys).
+    const buildHash = process.env.VELO_BUILD_HASH || Date.now().toString(36);
 
     const env = {
         ...process.env,

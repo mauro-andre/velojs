@@ -1,5 +1,5 @@
 ---
-description: "Deploying to production: `velojs build`/`start`, Docker, env vars (`PORT`, `NODE_ENV`, `STATIC_BASE_URL`), serving assets from a CDN. Use when writing a Dockerfile, configuring a host, or shipping to production."
+description: "Deploying to production: `velojs build`/`start`, Docker, env vars (`PORT`, `NODE_ENV`, `STATIC_BASE_URL`, `VELO_BUILD_HASH`), serving assets from a CDN. Use when writing a Dockerfile, configuring a host, or shipping to production."
 ---
 
 # Production Deploy
@@ -15,6 +15,8 @@ npx velojs build
 This runs two Vite builds:
 1. **Client build** → `dist/client/` (JavaScript, CSS, and other static assets)
 2. **Server build** → `dist/server.js` (the SSR server entry point)
+
+The served HTML links **every stylesheet the sync entry reaches** (main, theme, …) — one `<link>` per css, straight from the client manifest. Css that only async chunks reach travels inside the chunk JS as an absolute path (respecting `STATIC_BASE_URL`) and is loaded by the runtime on navigation; it never resolves against the current route. With `build: { cssCodeSplit: false }` in the app's `vite.config.ts`, the single emitted stylesheet is linked exactly as emitted (hashed name) — no copy step, no unhashed 404s.
 
 ## Start in production
 
@@ -130,6 +132,14 @@ STATIC_BASE_URL=https://cdn.example.com/assets npx velojs start
 ```
 
 The `<Scripts />` component and CSS `url()` references will automatically use this prefix. When `STATIC_BASE_URL` starts with `http`, the server mounts no local static at all: every path is an app path, and the public-by-design semantics come from the bucket/CDN.
+
+## Reproducible builds
+
+The build hash baked into the bundle defaults to a fresh timestamp per `velojs build` — every deploy ships uniquely named assets (the versioning valve between deploys). Fixing `VELO_BUILD_HASH` in the environment pins the input: consecutive builds from identical source emit **identical asset names** (JS and CSS), so rebuilding the same commit reproduces the same files. Set it on your CI when you want `diff`-able, cache-friendly artifact stores.
+
+```bash
+VELO_BUILD_HASH=release-2026-10-28 npx velojs build
+```
 
 ## Included dependencies
 

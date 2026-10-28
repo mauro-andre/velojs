@@ -5,6 +5,7 @@ import net from "node:net";
 import path from "node:path";
 import type { ComponentChildren } from "preact";
 import { createApp, onServer, startServer } from "../src/server.js";
+import { Scripts } from "../src/components.js";
 import type { AppRoutes } from "../src/types.js";
 
 /**
@@ -30,11 +31,13 @@ const FIXTURE_DIR = fs.mkdtempSync(
 const CLIENT_DIR = path.join(FIXTURE_DIR, "dist", "client");
 const JS_ASSET = "client.qx4BGU8J.js";
 const CSS_ASSET = "client.9mN2pQ3R.css";
+const THEME_ASSET = "client.th3m3AAAA.css";
 const JS_BODY = Buffer.from(
     'console.log("velojs asset");\n// ção — byte exact\n',
     "utf8"
 );
 const CSS_BODY = Buffer.from(".velo{color:#0af}\n", "utf8");
+const THEME_BODY = Buffer.from(":root{--color-bg:#101014}\n", "utf8");
 
 const MONTH = /^\d{4}-\d{2}$/;
 
@@ -63,7 +66,9 @@ const page = (
 const Root = {
     Component: ({ children }: { children?: ComponentChildren }) => (
         <html>
-            <head></head>
+            <head>
+                <Scripts />
+            </head>
             <body>{children}</body>
         </html>
     ),
@@ -124,6 +129,11 @@ beforeAll(async () => {
     fs.mkdirSync(CLIENT_DIR, { recursive: true });
     fs.writeFileSync(path.join(CLIENT_DIR, JS_ASSET), JS_BODY);
     fs.writeFileSync(path.join(CLIENT_DIR, CSS_ASSET), CSS_BODY);
+    fs.writeFileSync(path.join(CLIENT_DIR, THEME_ASSET), THEME_BODY);
+
+    // The whole sync-entry css of the build: main + theme, as the server
+    // entry virtual module sets it (a list since the css-of-the-entry fix).
+    (globalThis as any).__veloClientCss = [CSS_ASSET, THEME_ASSET];
 
     // `startServer` resolves dist/client from the process cwd — the fixture is
     // the app being served. Restored in afterAll (same pattern as init.test).
@@ -145,6 +155,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+    delete (globalThis as any).__veloClientCss;
     if (captured) {
         captured.closeIdleConnections?.();
         await new Promise<void>((resolve) => captured!.close(() => resolve()));
@@ -235,6 +246,26 @@ describe("production assets — served before the app route table", () => {
         const body = await res.text();
         expect(body).toContain("<html");
         expect(body).toContain("home page");
+    });
+
+    it("the served HTML links EVERY entry stylesheet — one <link> per css, absolute, all 200", async () => {
+        // The css-of-the-entry contract: main + theme BOTH reach the page.
+        // Proven on a dynamic route — the hrefs are absolute, so a nested path
+        // never resolves a stylesheet against itself.
+        const res = await get("/2026-10", withSession);
+        expect(res.status).toBe(200);
+        const html = await res.text();
+
+        const hrefs = Array.from(
+            html.matchAll(/<link\s+rel="stylesheet"\s+href="([^"]+)"/g),
+            (m) => m[1]!
+        );
+        expect(hrefs).toEqual([`/${CSS_ASSET}`, `/${THEME_ASSET}`]);
+
+        for (const href of hrefs) {
+            const cssRes = await get(href);
+            expect(cssRes.status).toBe(200);
+        }
     });
 
     it("gating preserved: CDN prefix, VELO_STATIC and dev never mount the local static", async () => {

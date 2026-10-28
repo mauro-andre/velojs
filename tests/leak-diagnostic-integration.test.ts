@@ -9,10 +9,12 @@
  * runs under Vite 7 and Vite 8 via `VELO_FIXTURE_VITE`, like
  * `build-integration.test.ts`.
  *
- * The baseline is `git archive HEAD` — the committed tree, collected before the
- * diagnostic exists. If a future commit ships the feature in HEAD, the
- * extraction is neutralized with an inert stub so the comparison keeps proving
- * the diagnostic's hooks touch nothing.
+ * The baseline is the CURRENT tree with the diagnostic neutralized by an
+ * inert stub — same source, same layout, only `src/leak-diagnostic.ts`
+ * swapped. That keeps the comparison proving exactly one thing (the
+ * diagnostic's hooks touch nothing) and stays honest on a dirty worktree:
+ * a slice in flight that changes the emit would otherwise drift the two
+ * sides apart for reasons that are not the diagnostic at all.
  *
  * Two hygiene rules make the byte comparison apples-to-apples:
  * - `NODE_ENV=production` on both sides. The test runner exports
@@ -80,23 +82,15 @@ function copyFeatureSource(to: string) {
     });
 }
 
-/** Extracts `git archive HEAD` — the tree without the feature — into the scratch dir. */
-async function extractBaselineSource(to: string) {
-    const archive = path.join(WORK, "baseline.tar");
-    const archived = await run("git", ["archive", "--format=tar", "-o", archive, "HEAD"], VELOJS_ROOT);
-    if (archived.status !== 0) {
-        throw new Error(`git archive HEAD failed:\n${archived.stdout}\n${archived.stderr}`);
-    }
+/** Prepares the baseline tree: the CURRENT source with the diagnostic inert. */
+async function prepareBaselineSource(to: string) {
     fs.mkdirSync(to, { recursive: true });
-    const extracted = await run("tar", ["-xf", archive, "-C", to], WORK);
-    if (extracted.status !== 0) {
-        throw new Error(`tar extract failed:\n${extracted.stdout}\n${extracted.stderr}`);
-    }
+    copyFeatureSource(to);
 
     const baselineFeature = path.join(to, "src", "leak-diagnostic.ts");
     if (fs.existsSync(baselineFeature)) {
-        // Future state: HEAD already ships the feature. Neutralize it so the
-        // comparison keeps proving the diagnostic's hooks touch nothing.
+        // The inert stub keeps every export the plugin imports — the ONLY
+        // difference between the two sides is the diagnostic being alive.
         fs.writeFileSync(
             baselineFeature,
             `export interface LeakReport { leaks: never[]; truncated: boolean; signature: string; moduleCount: number; }
@@ -357,13 +351,14 @@ describe("read-only against the baseline tree without the feature (C6)", () => {
         return { artifacts: clientArtifacts(), out: built.stdout + built.stderr };
     }
 
-    it("client artifacts are byte-identical (hash) to the pre-feature build", async () => {
-        // Baseline: the tree without the feature, same layout, same hash.
+    it("client artifacts are byte-identical (hash) to the same tree with the diagnostic inert", async () => {
+        // Baseline: the current tree with the diagnostic neutralized — same
+        // layout, same hash, only the feature swapped for the inert stub.
         fs.rmSync(SRC, { recursive: true, force: true });
-        await extractBaselineSource(SRC);
+        await prepareBaselineSource(SRC);
         const baseline = await buildSide(await buildAndPack("baseline"));
 
-        // Feature: the same build in the tree with the diagnostic.
+        // Feature: the same build in the tree with the diagnostic alive.
         fs.rmSync(SRC, { recursive: true, force: true });
         copyFeatureSource(SRC);
         const feature = await buildSide(await buildAndPack("c6-feature"));

@@ -8,7 +8,7 @@ import type { ComponentChildren } from "preact";
 import { __veloUpdatePending } from "./hooks.js";
 
 declare const __VELO_CLIENT_JS__: string;
-declare const __VELO_CLIENT_CSS__: string;
+declare const __VELO_CLIENT_CSS__: string[];
 
 // ============================================
 // SCRIPTS COMPONENT
@@ -67,12 +67,23 @@ export function Scripts({ basePath, favicon = "/favicon.ico" }: ScriptsProps = {
     }
 
     const jsFile = (globalThis as any).__veloClientJs || (typeof __VELO_CLIENT_JS__ !== "undefined" ? __VELO_CLIENT_JS__ : "client.js");
-    const cssFile = (globalThis as any).__veloClientCss || (typeof __VELO_CLIENT_CSS__ !== "undefined" ? __VELO_CLIENT_CSS__ : "client.css");
+    // The whole css of the sync entry graph — a LIST. The build reads every
+    // stylesheet the entry reaches (main + theme + …) from the client manifest,
+    // so each one becomes its own <link>. A plain string (the old single-file
+    // contract) is normalized to a one-item list; an empty list renders NO
+    // stylesheet link (the old "client.css" fallback pointed at a file the
+    // emit never wrote — a dead link on every page).
+    const rawCss: unknown = (globalThis as any).__veloClientCss || (typeof __VELO_CLIENT_CSS__ !== "undefined" ? __VELO_CLIENT_CSS__ : []);
+    const cssFiles: string[] = Array.isArray(rawCss)
+        ? rawCss.filter((f): f is string => typeof f === "string" && f.length > 0)
+        : typeof rawCss === "string" && rawCss.length > 0 ? [rawCss] : [];
 
     return (
         <>
             {faviconTag}
-            <link rel="stylesheet" href={`${basePath}/${cssFile}`} />
+            {cssFiles.map((cssFile) => (
+                <link rel="stylesheet" href={`${basePath}/${cssFile}`} />
+            ))}
             <script type="module" src={`${basePath}/${jsFile}`}></script>
         </>
     );
