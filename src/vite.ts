@@ -247,19 +247,22 @@ export function transformActionsForClient(
             // same `__path` ruler as the socket stubs — so `useLiveAction`
             // derives the `/_live` URL from the action itself.
             if (liveNames?.has(actionName)) {
-                declarator.init = t.callExpression(t.identifier("Object.assign"), [
-                    init,
-                    t.objectExpression([
-                        t.objectProperty(
-                            t.identifier("__isVeloLiveAction"),
-                            t.booleanLiteral(true)
-                        ),
-                        t.objectProperty(
-                            t.identifier("__path"),
-                            t.stringLiteral(`/_live/${moduleId}/${actionName}`)
-                        ),
-                    ]),
-                ]);
+                declarator.init = t.callExpression(
+                    t.memberExpression(t.identifier("Object"), t.identifier("assign")),
+                    [
+                        init,
+                        t.objectExpression([
+                            t.objectProperty(
+                                t.identifier("__isVeloLiveAction"),
+                                t.booleanLiteral(true)
+                            ),
+                            t.objectProperty(
+                                t.identifier("__path"),
+                                t.stringLiteral(`/_live/${moduleId}/${actionName}`)
+                            ),
+                        ]),
+                    ]
+                );
                 // The stub object has a different shape — drop the declarator
                 // annotation, if any (the socket transform does the same).
                 declarator.id.typeAnnotation = null;
@@ -382,9 +385,9 @@ function adjustParamsForClient(
             // Verifica se é ActionArgs<T>
             if (
                 t.isIdentifier(typeRef.typeName, { name: "ActionArgs" }) &&
-                typeRef.typeParameters?.params[0]
+                typeRef.typeArguments?.params[0]
             ) {
-                bodyType = typeRef.typeParameters.params[0];
+                bodyType = typeRef.typeArguments.params[0];
             }
         }
 

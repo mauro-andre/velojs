@@ -338,7 +338,7 @@ function collectRawEdges(ast: t.File): RawEdge[] {
                 t.isImportNamespaceSpecifier(spec) ||
                 t.isExportSpecifier(spec)
             ) {
-                locals.push(spec.local.name);
+                locals.push(t.isIdentifier(spec.local) ? spec.local.name : spec.local.value);
             }
         }
         edges.push({

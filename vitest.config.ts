@@ -4,8 +4,10 @@ export default defineConfig({
     test: {
         include: ["tests/**/*.test.{ts,tsx}"],
     },
-    esbuild: {
-        jsx: "automatic",
-        jsxImportSource: "preact",
+    oxc: {
+        jsx: {
+            runtime: "automatic",
+            importSource: "preact",
+        },
     },
 });
