@@ -1,5 +1,73 @@
 [
   {
+    "name": "velojs build prints the leak report and succeeds (C1) > finishes with success and names the leaked module",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/leak-diagnostic-integration.test.ts"
+  },
+  {
+    "name": "velojs build prints the leak report and succeeds (C1) > qualifies the leaked module with the builtin it touches",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/leak-diagnostic-integration.test.ts"
+  },
+  {
+    "name": "velojs build prints the leak report and succeeds (C1) > lists the chain from the client entry, file and line per link",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/leak-diagnostic-integration.test.ts"
+  },
+  {
+    "name": "velojs build prints the leak report and succeeds (C1) > highlights the entry point — the real import the developer edits (C2)",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/leak-diagnostic-integration.test.ts"
+  },
+  {
+    "name": "velojs build prints the leak report and succeeds (C1) > prints exactly one report — the server build adds none",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/leak-diagnostic-integration.test.ts"
+  },
+  {
+    "name": "velojs build --static prints the same report and succeeds (C1) > succeeds and carries the same leak report",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/leak-diagnostic-integration.test.ts"
+  },
+  {
+    "name": "read-only against the baseline tree without the feature (C6) > client artifacts are byte-identical (hash) to the same tree with the diagnostic inert",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/leak-diagnostic-integration.test.ts"
+  },
+  {
+    "name": "read-only against the baseline tree without the feature (C6) > the manifest and the fixed build hash are what got embedded",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/leak-diagnostic-integration.test.ts"
+  },
+  {
+    "name": "read-only against the baseline tree without the feature (C6) > runs under the requested Vite major (C10)",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/leak-diagnostic-integration.test.ts"
+  },
+  {
+    "name": "velojs dev re-emits the report without navigation (C7) > prints the full report at startup, before any navigation",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/leak-diagnostic-integration.test.ts"
+  },
+  {
+    "name": "velojs dev re-emits the report without navigation (C7) > the dev server keeps responding",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/leak-diagnostic-integration.test.ts"
+  },
+  {
+    "name": "velojs dev re-emits the report without navigation (C7) > removing the import re-emits with the zero-leak line (direction 2)",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/leak-diagnostic-integration.test.ts"
+  },
+  {
+    "name": "velojs dev re-emits the report without navigation (C7) > a new import stitching a server path appears in the next report (direction 1)",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/leak-diagnostic-integration.test.ts"
+  },
+  {
+    "name": "leak analysis guards the installed framework itself (regression guard) > the build completes with the leak present — the report is printed, nothing is blocked",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/leak-diagnostic-integration.test.ts"
+  },
+  {
+    "name": "leak analysis guards the installed framework itself (regression guard) > lists the installed framework module as a leak target, with its Node builtin",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/leak-diagnostic-integration.test.ts"
+  },
+  {
+    "name": "leak analysis guards the installed framework itself (regression guard) > static form: full chain from the client entry through the common module",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/leak-diagnostic-integration.test.ts"
+  },
+  {
+    "name": "leak analysis guards the installed framework itself (regression guard) > dynamic form: `await import()` of the subpath is followed and reported",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/leak-diagnostic-integration.test.ts"
+  },
+  {
     "name": "Build Integration > SSR build > generates client JS with content hash in filename",
     "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/build-integration.test.ts"
   },
@@ -128,74 +196,6 @@
     "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/build-integration.test.ts"
   },
   {
-    "name": "velojs build prints the leak report and succeeds (C1) > finishes with success and names the leaked module",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/leak-diagnostic-integration.test.ts"
-  },
-  {
-    "name": "velojs build prints the leak report and succeeds (C1) > qualifies the leaked module with the builtin it touches",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/leak-diagnostic-integration.test.ts"
-  },
-  {
-    "name": "velojs build prints the leak report and succeeds (C1) > lists the chain from the client entry, file and line per link",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/leak-diagnostic-integration.test.ts"
-  },
-  {
-    "name": "velojs build prints the leak report and succeeds (C1) > highlights the entry point — the real import the developer edits (C2)",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/leak-diagnostic-integration.test.ts"
-  },
-  {
-    "name": "velojs build prints the leak report and succeeds (C1) > prints exactly one report — the server build adds none",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/leak-diagnostic-integration.test.ts"
-  },
-  {
-    "name": "velojs build --static prints the same report and succeeds (C1) > succeeds and carries the same leak report",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/leak-diagnostic-integration.test.ts"
-  },
-  {
-    "name": "read-only against the baseline tree without the feature (C6) > client artifacts are byte-identical (hash) to the same tree with the diagnostic inert",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/leak-diagnostic-integration.test.ts"
-  },
-  {
-    "name": "read-only against the baseline tree without the feature (C6) > the manifest and the fixed build hash are what got embedded",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/leak-diagnostic-integration.test.ts"
-  },
-  {
-    "name": "read-only against the baseline tree without the feature (C6) > runs under the requested Vite major (C10)",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/leak-diagnostic-integration.test.ts"
-  },
-  {
-    "name": "velojs dev re-emits the report without navigation (C7) > prints the full report at startup, before any navigation",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/leak-diagnostic-integration.test.ts"
-  },
-  {
-    "name": "velojs dev re-emits the report without navigation (C7) > the dev server keeps responding",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/leak-diagnostic-integration.test.ts"
-  },
-  {
-    "name": "velojs dev re-emits the report without navigation (C7) > removing the import re-emits with the zero-leak line (direction 2)",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/leak-diagnostic-integration.test.ts"
-  },
-  {
-    "name": "velojs dev re-emits the report without navigation (C7) > a new import stitching a server path appears in the next report (direction 1)",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/leak-diagnostic-integration.test.ts"
-  },
-  {
-    "name": "leak analysis guards the installed framework itself (regression guard) > the build completes with the leak present — the report is printed, nothing is blocked",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/leak-diagnostic-integration.test.ts"
-  },
-  {
-    "name": "leak analysis guards the installed framework itself (regression guard) > lists the installed framework module as a leak target, with its Node builtin",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/leak-diagnostic-integration.test.ts"
-  },
-  {
-    "name": "leak analysis guards the installed framework itself (regression guard) > static form: full chain from the client entry through the common module",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/leak-diagnostic-integration.test.ts"
-  },
-  {
-    "name": "leak analysis guards the installed framework itself (regression guard) > dynamic form: `await import()` of the subpath is followed and reported",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/leak-diagnostic-integration.test.ts"
-  },
-  {
     "name": "release script delivery > ships scripts/new-release.sh as an executable",
     "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/new-release.test.ts"
   },
@@ -306,6 +306,50 @@
   {
     "name": "production assets — served before the app route table > gating preserved: CDN prefix, VELO_STATIC and dev never mount the local static",
     "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/production-assets.test.tsx"
+  },
+  {
+    "name": "devServerExcludeFor — composition > keeps the upstream defaults and adds .mjs",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/dev-server.test.ts"
+  },
+  {
+    "name": "devServerExcludeFor — composition > tracks the upstream defaults instead of a local copy",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/dev-server.test.ts"
+  },
+  {
+    "name": "devServerExcludeFor — composition > appends the project's own patterns without replacing the defaults",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/dev-server.test.ts"
+  },
+  {
+    "name": "dev server — project .mjs modules > serves a project .mjs module as JS instead of intercepting it as a page",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/dev-server.test.ts"
+  },
+  {
+    "name": "dev server — project .mjs modules > still serves the page itself (the exclusion did not break routing)",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/dev-server.test.ts"
+  },
+  {
+    "name": "dev server — Host header policy > a broad bind accepts a request carrying an arbitrary domain in Host",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/dev-server.test.ts"
+  },
+  {
+    "name": "dev server — Host header policy > keeps Vite's block on an arbitrary Host outside a broad bind",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/dev-server.test.ts"
+  },
+  {
+    "name": "dev server — Host header policy > respects a project-declared server.allowedHosts even on a broad bind",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/dev-server.test.ts"
+  },
+  {
+    "name": "dev server — listener bind (HOST in dev) > binds every interface when HOST=0.0.0.0",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/dev-server.test.ts"
+  },
+  {
+    "name": "dev server — listener bind (HOST in dev) > binds loopback when HOST=127.0.0.1",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/dev-server.test.ts"
+  },
+  {
+    "name": "dev server — listener bind (HOST in dev) > binds loopback when nothing is declared",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/dev-server.test.ts"
   },
   {
     "name": "createEventStream > basic factory > returns an object with the EventStream shape",
@@ -608,50 +652,6 @@
     "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/events.test.ts"
   },
   {
-    "name": "devServerExcludeFor — composition > keeps the upstream defaults and adds .mjs",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/dev-server.test.ts"
-  },
-  {
-    "name": "devServerExcludeFor — composition > tracks the upstream defaults instead of a local copy",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/dev-server.test.ts"
-  },
-  {
-    "name": "devServerExcludeFor — composition > appends the project's own patterns without replacing the defaults",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/dev-server.test.ts"
-  },
-  {
-    "name": "dev server — project .mjs modules > serves a project .mjs module as JS instead of intercepting it as a page",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/dev-server.test.ts"
-  },
-  {
-    "name": "dev server — project .mjs modules > still serves the page itself (the exclusion did not break routing)",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/dev-server.test.ts"
-  },
-  {
-    "name": "dev server — Host header policy > a broad bind accepts a request carrying an arbitrary domain in Host",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/dev-server.test.ts"
-  },
-  {
-    "name": "dev server — Host header policy > keeps Vite's block on an arbitrary Host outside a broad bind",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/dev-server.test.ts"
-  },
-  {
-    "name": "dev server — Host header policy > respects a project-declared server.allowedHosts even on a broad bind",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/dev-server.test.ts"
-  },
-  {
-    "name": "dev server — listener bind (HOST in dev) > binds every interface when HOST=0.0.0.0",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/dev-server.test.ts"
-  },
-  {
-    "name": "dev server — listener bind (HOST in dev) > binds loopback when HOST=127.0.0.1",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/dev-server.test.ts"
-  },
-  {
-    "name": "dev server — listener bind (HOST in dev) > binds loopback when nothing is declared",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/dev-server.test.ts"
-  },
-  {
     "name": "createTestApp — basics > creates an app from routes and exposes hono",
     "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/testing.test.ts"
   },
@@ -768,6 +768,98 @@
     "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/testing.test.ts"
   },
   {
+    "name": "anti-pattern: routes.tsx shape > `export default routes` (an identifier) yields an empty path map",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/anti-patterns.test.ts"
+  },
+  {
+    "name": "anti-pattern: routes.tsx shape > a default-imported page module is dropped from the path map",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/anti-patterns.test.ts"
+  },
+  {
+    "name": "anti-pattern: routes.tsx shape > a named-imported page module is dropped from the path map",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/anti-patterns.test.ts"
+  },
+  {
+    "name": "anti-pattern: routes.tsx shape > a `../` import produces a key that cannot match a module id",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/anti-patterns.test.ts"
+  },
+  {
+    "name": "anti-pattern: routes.tsx shape > a tsconfig-alias import produces a key that cannot match a module id",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/anti-patterns.test.ts"
+  },
+  {
+    "name": "anti-pattern: action/loader export shape > `export async function action_x` gets no stub — body and imports reach the client",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/anti-patterns.test.ts"
+  },
+  {
+    "name": "anti-pattern: action/loader export shape > a non-destructured action param yields a stub referencing an undeclared `body`",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/anti-patterns.test.ts"
+  },
+  {
+    "name": "anti-pattern: action/loader export shape > a non-async action arrow gets no stub",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/anti-patterns.test.ts"
+  },
+  {
+    "name": "anti-pattern: action/loader export shape > `export async function loader` survives into the client bundle",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/anti-patterns.test.ts"
+  },
+  {
+    "name": "anti-pattern: action/loader export shape > only the first declarator is read — the second action is ignored",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/anti-patterns.test.ts"
+  },
+  {
+    "name": "anti-pattern: files the transform never sees > transforms a .tsx page inside appDirectory (control)",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/anti-patterns.test.ts"
+  },
+  {
+    "name": "anti-pattern: files the transform never sees > skips a .jsx page — no metadata, no stubs, loader ships to the client",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/anti-patterns.test.ts"
+  },
+  {
+    "name": "anti-pattern: files the transform never sees > skips a .js page",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/anti-patterns.test.ts"
+  },
+  {
+    "name": "anti-pattern: files the transform never sees > skips a page outside appDirectory",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/anti-patterns.test.ts"
+  },
+  {
+    "name": "anti-pattern: files the transform never sees > a page outside the conventions never reaches the channels guards — the channel is inert, with no error",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/anti-patterns.test.ts"
+  },
+  {
+    "name": "anti-pattern: files the transform never sees > a page outside the conventions never reaches the liveActions guards — the declaration is inert, with no error",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/anti-patterns.test.ts"
+  },
+  {
+    "name": "anti-pattern: request-scoped data > hooks inside a loader read an empty store — LoaderArgs is the only source",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/anti-patterns.test.ts"
+  },
+  {
+    "name": "anti-pattern: request-scoped data > c.req.param() inside an action is always empty — actions mount on a static path",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/anti-patterns.test.ts"
+  },
+  {
+    "name": "anti-pattern: root layout without a <head> > injects __PAGE_DATA__ when the root renders a literal <head> (control)",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/anti-patterns.test.ts"
+  },
+  {
+    "name": "anti-pattern: root layout without a <head> > silently skips __PAGE_DATA__ when there is no </head> to replace",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/anti-patterns.test.ts"
+  },
+  {
+    "name": "anti-pattern: a live action with a side effect > the re-execution at every emit repeats the effect — nothing breaks, the effect just multiplies",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/anti-patterns.test.ts"
+  },
+  {
+    "name": "agent/AGENTS.md ↔ this file > pins exactly the rules the silent-failure table declares — no more, no less",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/anti-patterns.test.ts"
+  },
+  {
+    "name": "agent/AGENTS.md ↔ this file > every declared rule is unique, so a row cannot be pinned by accident",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/anti-patterns.test.ts"
+  },
+  {
     "name": "telemetry — page and data traces > a page request produces one trace with the route pattern, bytes, one span per loader and the render span (CA4)",
     "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/telemetry.test.ts"
   },
@@ -824,64 +916,68 @@
     "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/telemetry.test.ts"
   },
   {
-    "name": "createTestApp({ port }) — HTTP over real sockets > answers the same status, body and application headers as the in-memory API",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/testing-tcp.test.ts"
+    "name": "live loader — the loader runs with the connection's params > the connect snapshot carries the data of the declared resource (CA2)",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-route-params.test.ts"
   },
   {
-    "name": "createTestApp({ port }) — HTTP over real sockets > answers a redirect with the same status and Location",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/testing-tcp.test.ts"
+    "name": "live loader — the loader runs with the connection's params > an emit re-executes the loader with the params of each connection (CA3)",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-route-params.test.ts"
   },
   {
-    "name": "createTestApp({ port }) — TCP and in-memory share the instance > an action POSTed over TCP reaches a stream watched in-memory",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/testing-tcp.test.ts"
+    "name": "live loader — the loader runs with the connection's params > the query delivered to the loader excludes the internal `_route` key (CA4)",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-route-params.test.ts"
   },
   {
-    "name": "createTestApp({ port }) — TCP and in-memory share the instance > an endpoint POSTed over TCP reaches a stream watched in-memory",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/testing-tcp.test.ts"
+    "name": "live loader — partition relevance by resource > two connections of the same principal in different resources land in different partitions (CA3)",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-route-params.test.ts"
   },
   {
-    "name": "createTestApp({ port }) — binding > port: 0 reports the real port and two apps coexist",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/testing-tcp.test.ts"
+    "name": "live loader — the scope ctx > receives { user, params } on subscribe — the principal and the validated params (CA4)",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-route-params.test.ts"
   },
   {
-    "name": "createTestApp({ port }) — binding > rejects with the port and hostname when the bind fails",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/testing-tcp.test.ts"
+    "name": "live loader — the scope ctx > the emit applies the same scope to the object the producer built, verbatim (CA4)",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-route-params.test.ts"
   },
   {
-    "name": "createTestApp({ port }) — binding > reports the explicit hostname; wildcard or omitted hostnames report localhost",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/testing-tcp.test.ts"
+    "name": "live loader — the scope ctx > a scope that returns null denies with 403 — with params (CA4)",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-route-params.test.ts"
   },
   {
-    "name": "createTestApp({ port }) — binding > onServer() in bootstrap receives the listening TCP server",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/testing-tcp.test.ts"
+    "name": "live loader — the scope ctx > a scope that throws denies with 403 and logs loudly, naming the channel (CA4)",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-route-params.test.ts"
   },
   {
-    "name": "createTestApp({ port }) — binding > app.as(user) keeps port and url",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/testing-tcp.test.ts"
+    "name": "live loader — the scope ctx > without :params the connection declares none and the scope receives empty params (CA9)",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-route-params.test.ts"
   },
   {
-    "name": "createTestApp({ port }) — WebSocket over the listener > handshakes and exchanges messages with a real client",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/testing-tcp.test.ts"
+    "name": "live loader — route params validation > rejects a key the module's path does not declare (CA5)",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-route-params.test.ts"
   },
   {
-    "name": "createTestApp({ port }) — close() > refuses new connections, is idempotent and leaves no listener behind",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/testing-tcp.test.ts"
+    "name": "live loader — route params validation > rejects any key on a module whose path declares none (CA5)",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-route-params.test.ts"
   },
   {
-    "name": "createTestApp({ port }) — close() > resolves with an SSE stream open on the listener",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/testing-tcp.test.ts"
+    "name": "live loader — route params validation > rejects a malformed payload — invalid JSON, a list, a non-string value (CA5)",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-route-params.test.ts"
   },
   {
-    "name": "createTestApp({ port }) — close() > resolves with a WebSocket open on the listener",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/testing-tcp.test.ts"
+    "name": "live loader — route params validation > the parser is a pure function of the payload and the declared names (CA5)",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-route-params.test.ts"
   },
   {
-    "name": "createTestApp — without port > stays purely in-memory: no listener, no port, no url",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/testing-tcp.test.ts"
+    "name": "live loader — revalidation with route params > keeps a connection whose re-derivation still holds — the stored params are used",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-route-params.test.ts"
   },
   {
-    "name": "createTestApp — without port > never takes the port from process.env.PORT/HOST",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/testing-tcp.test.ts"
+    "name": "live loader — revalidation with route params > drops and closes a connection whose re-derived partition moved (CA6)",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-route-params.test.ts"
+  },
+  {
+    "name": "live loader — revalidation with route params > drops and closes a connection whose re-derived scope returns null (CA6)",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-route-params.test.ts"
   },
   {
     "name": "live action — subscription > the connect snapshot is the action executed once with the declared args (CA1, CA5)",
@@ -992,6 +1088,66 @@
     "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-action-server.test.ts"
   },
   {
+    "name": "createTestApp({ port }) — HTTP over real sockets > answers the same status, body and application headers as the in-memory API",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/testing-tcp.test.ts"
+  },
+  {
+    "name": "createTestApp({ port }) — HTTP over real sockets > answers a redirect with the same status and Location",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/testing-tcp.test.ts"
+  },
+  {
+    "name": "createTestApp({ port }) — TCP and in-memory share the instance > an action POSTed over TCP reaches a stream watched in-memory",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/testing-tcp.test.ts"
+  },
+  {
+    "name": "createTestApp({ port }) — TCP and in-memory share the instance > an endpoint POSTed over TCP reaches a stream watched in-memory",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/testing-tcp.test.ts"
+  },
+  {
+    "name": "createTestApp({ port }) — binding > port: 0 reports the real port and two apps coexist",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/testing-tcp.test.ts"
+  },
+  {
+    "name": "createTestApp({ port }) — binding > rejects with the port and hostname when the bind fails",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/testing-tcp.test.ts"
+  },
+  {
+    "name": "createTestApp({ port }) — binding > reports the explicit hostname; wildcard or omitted hostnames report localhost",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/testing-tcp.test.ts"
+  },
+  {
+    "name": "createTestApp({ port }) — binding > onServer() in bootstrap receives the listening TCP server",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/testing-tcp.test.ts"
+  },
+  {
+    "name": "createTestApp({ port }) — binding > app.as(user) keeps port and url",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/testing-tcp.test.ts"
+  },
+  {
+    "name": "createTestApp({ port }) — WebSocket over the listener > handshakes and exchanges messages with a real client",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/testing-tcp.test.ts"
+  },
+  {
+    "name": "createTestApp({ port }) — close() > refuses new connections, is idempotent and leaves no listener behind",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/testing-tcp.test.ts"
+  },
+  {
+    "name": "createTestApp({ port }) — close() > resolves with an SSE stream open on the listener",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/testing-tcp.test.ts"
+  },
+  {
+    "name": "createTestApp({ port }) — close() > resolves with a WebSocket open on the listener",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/testing-tcp.test.ts"
+  },
+  {
+    "name": "createTestApp — without port > stays purely in-memory: no listener, no port, no url",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/testing-tcp.test.ts"
+  },
+  {
+    "name": "createTestApp — without port > never takes the port from process.env.PORT/HOST",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/testing-tcp.test.ts"
+  },
+  {
     "name": "telemetry — activation by destination > no destination (absent) leaves the collection off in any environment: no file, no event (CA1)",
     "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/telemetry-destinations.test.ts"
   },
@@ -1058,6 +1214,250 @@
   {
     "name": "telemetry — rotation > the settings carry the override and the default",
     "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/telemetry-destinations.test.ts"
+  },
+  {
+    "name": "leak chain (builtin pulled by await import) > finds exactly one leak — the module that touches the builtin",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/leak-diagnostic.test.ts"
+  },
+  {
+    "name": "leak chain (builtin pulled by await import) > qualifies the leaked module with the builtin it touches",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/leak-diagnostic.test.ts"
+  },
+  {
+    "name": "leak chain (builtin pulled by await import) > lists every link of the chain with file and line",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/leak-diagnostic.test.ts"
+  },
+  {
+    "name": "leak chain (builtin pulled by await import) > highlights the entry point at the real import the developer edits (C2)",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/leak-diagnostic.test.ts"
+  },
+  {
+    "name": "leak chain (builtin pulled by await import) > prints the chain and the cut in the report",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/leak-diagnostic.test.ts"
+  },
+  {
+    "name": "leak chain (builtin pulled by await import) > is read-only: no fixture file changes under analysis",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/leak-diagnostic.test.ts"
+  },
+  {
+    "name": "leak chain (builtin pulled by await import) > is stable: two runs print the same list in the same order (C8)",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/leak-diagnostic.test.ts"
+  },
+  {
+    "name": "serverOnly declaration > no item without the declaration — builtin-free code is invisible",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/leak-diagnostic.test.ts"
+  },
+  {
+    "name": "serverOnly declaration > one item with the declaration, same format, qualifier names the pattern",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/leak-diagnostic.test.ts"
+  },
+  {
+    "name": "serverOnly declaration > the glob honors *, ** and ? against the root-relative path",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/leak-diagnostic.test.ts"
+  },
+  {
+    "name": "normal app shape (framework-removed points) > reports zero leaks and says so — absence is distinguishable from not running",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/leak-diagnostic.test.ts"
+  },
+  {
+    "name": "normal app shape (framework-removed points) > still walks what ships (the analysis ran over real modules)",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/leak-diagnostic.test.ts"
+  },
+  {
+    "name": "two paths to the same leaked module > generates two items, each with its own entry point",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/leak-diagnostic.test.ts"
+  },
+  {
+    "name": "live loader — transport headers > the channel SSE answer carries Cache-Control: no-store",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-operations.test.ts"
+  },
+  {
+    "name": "live loader — idle timeout > closes a connection with no deliveries past idleMs, and frees the group",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-operations.test.ts"
+  },
+  {
+    "name": "live loader — idle timeout > a delivery inside the window restarts the count",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-operations.test.ts"
+  },
+  {
+    "name": "live loader — idle timeout > idleMs: 0 disables it — the toolkit's default keeps connections alive",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-operations.test.ts"
+  },
+  {
+    "name": "live loader — idle timeout > the default 300000 applies on a registration without options — server-side, not via the toolkit",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-operations.test.ts"
+  },
+  {
+    "name": "live loader — idle timeout > heartbeats do not reset the idle clock",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-operations.test.ts"
+  },
+  {
+    "name": "live loader — heartbeat > writes the `: ping` comment through the write chain on the interval",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-operations.test.ts"
+  },
+  {
+    "name": "live loader — heartbeat > heartbeatMs: 0 disables it",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-operations.test.ts"
+  },
+  {
+    "name": "live loader — heartbeat > the default 20000 applies on a registration without options — one ruler with stream_*",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-operations.test.ts"
+  },
+  {
+    "name": "live loader — inspectChannels > reports the groups by (moduleId, partition), connections and last delivery",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-operations.test.ts"
+  },
+  {
+    "name": "live loader — inspectChannels > reflects emits and terminations",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-operations.test.ts"
+  },
+  {
+    "name": "live loader — inspectChannels > reports the coalescing windows still open, and their close",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-operations.test.ts"
+  },
+  {
+    "name": "live loader — inspectChannels > the empty registry reports empty — no channels, no totals",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-operations.test.ts"
+  },
+  {
+    "name": "GET /_channel-inspect > answers the inspector JSON in a non-production environment",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-operations.test.ts"
+  },
+  {
+    "name": "GET /_channel-inspect > does not exist in a production build",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-operations.test.ts"
+  },
+  {
+    "name": "live action — dev/build guards (CA11) > a well-formed declaration transforms normally (control)",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-action-build.test.ts"
+  },
+  {
+    "name": "live action — dev/build guards (CA11) > `liveActions` naming an action the module does not export is an explicit error",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-action-build.test.ts"
+  },
+  {
+    "name": "live action — dev/build guards (CA11) > a channel with no entry in app/channels.ts is an explicit error naming it",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-action-build.test.ts"
+  },
+  {
+    "name": "live action — dev/build guards (CA11) > with no app/channels.ts at all, every declared channel is unknown",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-action-build.test.ts"
+  },
+  {
+    "name": "live action — dev/build guards (CA11) > a module may declare `channels` and `liveActions` side by side — both pass",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-action-build.test.ts"
+  },
+  {
+    "name": "live action — static build (CA15) > warns once per (module, action), naming both",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-action-build.test.ts"
+  },
+  {
+    "name": "live action — static build (CA15) > does not warn outside a static build",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-action-build.test.ts"
+  },
+  {
+    "name": "live action — client stub > the live action's stub carries __isVeloLiveAction and the /_live path (CA12)",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-action-build.test.ts"
+  },
+  {
+    "name": "live action — client stub > an action not declared live keeps today's stub — no marks, no address",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-action-build.test.ts"
+  },
+  {
+    "name": "live action — client stub > on the SSR pass the action bodies are untouched — the server runs them",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-action-build.test.ts"
+  },
+  {
+    "name": "live action — reading the declaration > declaredLiveActions reads the object literal form",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-action-build.test.ts"
+  },
+  {
+    "name": "live action — reading the declaration > a `liveActions` that is not an object literal is not a declaration (the server guard is the backstop)",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-action-build.test.ts"
+  },
+  {
+    "name": "extractParams > returns no params for a pattern that declares none",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/loader-store.test.tsx"
+  },
+  {
+    "name": "extractParams > matches a layout pattern as a prefix of a deeper URL",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/loader-store.test.tsx"
+  },
+  {
+    "name": "extractParams > returns {} — not null — for a param-less pattern covering a deeper URL",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/loader-store.test.tsx"
+  },
+  {
+    "name": "extractParams > returns null when the pattern does not cover the URL",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/loader-store.test.tsx"
+  },
+  {
+    "name": "extractParams > exact mode: a leaf matches its own URL but nothing deeper",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/loader-store.test.tsx"
+  },
+  {
+    "name": "extractParams > exact mode: params are extracted and trailing slash is tolerated",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/loader-store.test.tsx"
+  },
+  {
+    "name": "extractParams > exact mode: the root leaf matches only `/`",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/loader-store.test.tsx"
+  },
+  {
+    "name": "extractParams > covers everything for a path-less wrapper",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/loader-store.test.tsx"
+  },
+  {
+    "name": "loader store — navigation > refreshes an entry whose declared param changed",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/loader-store.test.tsx"
+  },
+  {
+    "name": "loader store — navigation > leaves a param-less entry alone — client-owned state survives navigation",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/loader-store.test.tsx"
+  },
+  {
+    "name": "loader store — navigation > does not refetch when the declared param is unchanged",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/loader-store.test.tsx"
+  },
+  {
+    "name": "loader store — navigation > refetches a param-less page that unmounted and remounted (return navigation)",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/loader-store.test.tsx"
+  },
+  {
+    "name": "loader store — navigation > refetches a param-less leaf reached from a param page (and vice versa)",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/loader-store.test.tsx"
+  },
+  {
+    "name": "loader store — navigation > does not refetch when navigating to the same URL (no remount, no param change)",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/loader-store.test.tsx"
+  },
+  {
+    "name": "loader store — navigation > refetches a layout that unmounted and remounted (left the subtree and came back)",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/loader-store.test.tsx"
+  },
+  {
+    "name": "loader store — navigation > keeps a layout's client-owned state while navigating among its children",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/loader-store.test.tsx"
+  },
+  {
+    "name": "loader store — navigation > hard-navigates on a __redirect answer instead of writing loader data",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/loader-store.test.tsx"
+  },
+  {
+    "name": "loader store — navigation > coalesces one navigation into a single request for many stale entries",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/loader-store.test.tsx"
+  },
+  {
+    "name": "loader store — shared handle > Loader and useLoader return the same signal for a module",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/loader-store.test.tsx"
+  },
+  {
+    "name": "loader store — shared handle > a child's touch on the shared handle re-renders without a fetch",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/loader-store.test.tsx"
+  },
+  {
+    "name": "loader store — shared handle > refetch() asks the server and writes only that module",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/loader-store.test.tsx"
   },
   {
     "name": "veloPlugin — dev server port > defaults to 3000",
@@ -1130,6 +1530,46 @@
   {
     "name": "veloPlugin — dev server allowed hosts (broad bind) > respects a server.allowedHosts declared by the project on a broad bind",
     "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/vite-config.test.ts"
+  },
+  {
+    "name": "live loader — onGroupOpen > fires once, on the first connection, with the partition and the params (CA8)",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-group-lifecycle.test.ts"
+  },
+  {
+    "name": "live loader — onGroupOpen > a second connection of the same group does not fire it again — another resource does (CA8)",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-group-lifecycle.test.ts"
+  },
+  {
+    "name": "live loader — onGroupOpen > awaits an async hook: the connect snapshot only lands after it resolves (CA8)",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-group-lifecycle.test.ts"
+  },
+  {
+    "name": "live loader — onGroupOpen > a hook that throws is logged loudly and the group continues (CA8)",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-group-lifecycle.test.ts"
+  },
+  {
+    "name": "live loader — onGroupClose > fires when the last connection disconnects — not on the first of two (CA8)",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-group-lifecycle.test.ts"
+  },
+  {
+    "name": "live loader — onGroupClose > fires on the idle timeout — the same gesture as any server-side close (CA8)",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-group-lifecycle.test.ts"
+  },
+  {
+    "name": "live loader — onGroupClose > fires on the revalidation drop — the group empties before the discard (CA8)",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-group-lifecycle.test.ts"
+  },
+  {
+    "name": "live loader — onGroupClose > awaits an async hook before the group is discarded (CA8)",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-group-lifecycle.test.ts"
+  },
+  {
+    "name": "live loader — onGroupClose > re-arms the surviving group when a connection enters while the close hook runs (CA8)",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-group-lifecycle.test.ts"
+  },
+  {
+    "name": "live loader — onGroupClose > a close hook that throws is logged loudly and the teardown completes (CA8)",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-group-lifecycle.test.ts"
   },
   {
     "name": "live loader — slice mode > delivers the slice to the pair's connection without re-executing the loader (CA2)",
@@ -1228,58 +1668,6 @@
     "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-emit.test.ts"
   },
   {
-    "name": "leak chain (builtin pulled by await import) > finds exactly one leak — the module that touches the builtin",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/leak-diagnostic.test.ts"
-  },
-  {
-    "name": "leak chain (builtin pulled by await import) > qualifies the leaked module with the builtin it touches",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/leak-diagnostic.test.ts"
-  },
-  {
-    "name": "leak chain (builtin pulled by await import) > lists every link of the chain with file and line",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/leak-diagnostic.test.ts"
-  },
-  {
-    "name": "leak chain (builtin pulled by await import) > highlights the entry point at the real import the developer edits (C2)",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/leak-diagnostic.test.ts"
-  },
-  {
-    "name": "leak chain (builtin pulled by await import) > prints the chain and the cut in the report",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/leak-diagnostic.test.ts"
-  },
-  {
-    "name": "leak chain (builtin pulled by await import) > is read-only: no fixture file changes under analysis",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/leak-diagnostic.test.ts"
-  },
-  {
-    "name": "leak chain (builtin pulled by await import) > is stable: two runs print the same list in the same order (C8)",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/leak-diagnostic.test.ts"
-  },
-  {
-    "name": "serverOnly declaration > no item without the declaration — builtin-free code is invisible",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/leak-diagnostic.test.ts"
-  },
-  {
-    "name": "serverOnly declaration > one item with the declaration, same format, qualifier names the pattern",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/leak-diagnostic.test.ts"
-  },
-  {
-    "name": "serverOnly declaration > the glob honors *, ** and ? against the root-relative path",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/leak-diagnostic.test.ts"
-  },
-  {
-    "name": "normal app shape (framework-removed points) > reports zero leaks and says so — absence is distinguishable from not running",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/leak-diagnostic.test.ts"
-  },
-  {
-    "name": "normal app shape (framework-removed points) > still walks what ships (the analysis ran over real modules)",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/leak-diagnostic.test.ts"
-  },
-  {
-    "name": "two paths to the same leaked module > generates two items, each with its own entry point",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/leak-diagnostic.test.ts"
-  },
-  {
     "name": "socket_* — basic lifecycle > invokes the handler and delivers send() output to the client",
     "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/sockets.test.ts"
   },
@@ -1322,586 +1710,6 @@
   {
     "name": "socket_* — injectWebSocketServer filters by registered path > HMR-style upgrades (path not registered) are not forwarded to @hono/node-ws",
     "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/sockets.test.ts"
-  },
-  {
-    "name": "extractParams > returns no params for a pattern that declares none",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/loader-store.test.tsx"
-  },
-  {
-    "name": "extractParams > matches a layout pattern as a prefix of a deeper URL",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/loader-store.test.tsx"
-  },
-  {
-    "name": "extractParams > returns {} — not null — for a param-less pattern covering a deeper URL",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/loader-store.test.tsx"
-  },
-  {
-    "name": "extractParams > returns null when the pattern does not cover the URL",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/loader-store.test.tsx"
-  },
-  {
-    "name": "extractParams > exact mode: a leaf matches its own URL but nothing deeper",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/loader-store.test.tsx"
-  },
-  {
-    "name": "extractParams > exact mode: params are extracted and trailing slash is tolerated",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/loader-store.test.tsx"
-  },
-  {
-    "name": "extractParams > exact mode: the root leaf matches only `/`",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/loader-store.test.tsx"
-  },
-  {
-    "name": "extractParams > covers everything for a path-less wrapper",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/loader-store.test.tsx"
-  },
-  {
-    "name": "loader store — navigation > refreshes an entry whose declared param changed",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/loader-store.test.tsx"
-  },
-  {
-    "name": "loader store — navigation > leaves a param-less entry alone — client-owned state survives navigation",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/loader-store.test.tsx"
-  },
-  {
-    "name": "loader store — navigation > does not refetch when the declared param is unchanged",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/loader-store.test.tsx"
-  },
-  {
-    "name": "loader store — navigation > refetches a param-less page that unmounted and remounted (return navigation)",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/loader-store.test.tsx"
-  },
-  {
-    "name": "loader store — navigation > refetches a param-less leaf reached from a param page (and vice versa)",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/loader-store.test.tsx"
-  },
-  {
-    "name": "loader store — navigation > does not refetch when navigating to the same URL (no remount, no param change)",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/loader-store.test.tsx"
-  },
-  {
-    "name": "loader store — navigation > refetches a layout that unmounted and remounted (left the subtree and came back)",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/loader-store.test.tsx"
-  },
-  {
-    "name": "loader store — navigation > keeps a layout's client-owned state while navigating among its children",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/loader-store.test.tsx"
-  },
-  {
-    "name": "loader store — navigation > hard-navigates on a __redirect answer instead of writing loader data",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/loader-store.test.tsx"
-  },
-  {
-    "name": "loader store — navigation > coalesces one navigation into a single request for many stale entries",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/loader-store.test.tsx"
-  },
-  {
-    "name": "loader store — shared handle > Loader and useLoader return the same signal for a module",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/loader-store.test.tsx"
-  },
-  {
-    "name": "loader store — shared handle > a child's touch on the shared handle re-renders without a fetch",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/loader-store.test.tsx"
-  },
-  {
-    "name": "loader store — shared handle > refetch() asks the server and writes only that module",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/loader-store.test.tsx"
-  },
-  {
-    "name": "live action — dev/build guards (CA11) > a well-formed declaration transforms normally (control)",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-action-build.test.ts"
-  },
-  {
-    "name": "live action — dev/build guards (CA11) > `liveActions` naming an action the module does not export is an explicit error",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-action-build.test.ts"
-  },
-  {
-    "name": "live action — dev/build guards (CA11) > a channel with no entry in app/channels.ts is an explicit error naming it",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-action-build.test.ts"
-  },
-  {
-    "name": "live action — dev/build guards (CA11) > with no app/channels.ts at all, every declared channel is unknown",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-action-build.test.ts"
-  },
-  {
-    "name": "live action — dev/build guards (CA11) > a module may declare `channels` and `liveActions` side by side — both pass",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-action-build.test.ts"
-  },
-  {
-    "name": "live action — static build (CA15) > warns once per (module, action), naming both",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-action-build.test.ts"
-  },
-  {
-    "name": "live action — static build (CA15) > does not warn outside a static build",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-action-build.test.ts"
-  },
-  {
-    "name": "live action — client stub > the live action's stub carries __isVeloLiveAction and the /_live path (CA12)",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-action-build.test.ts"
-  },
-  {
-    "name": "live action — client stub > an action not declared live keeps today's stub — no marks, no address",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-action-build.test.ts"
-  },
-  {
-    "name": "live action — client stub > on the SSR pass the action bodies are untouched — the server runs them",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-action-build.test.ts"
-  },
-  {
-    "name": "live action — reading the declaration > declaredLiveActions reads the object literal form",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-action-build.test.ts"
-  },
-  {
-    "name": "live action — reading the declaration > a `liveActions` that is not an object literal is not a declaration (the server guard is the backstop)",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-action-build.test.ts"
-  },
-  {
-    "name": "anti-pattern: routes.tsx shape > `export default routes` (an identifier) yields an empty path map",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/anti-patterns.test.ts"
-  },
-  {
-    "name": "anti-pattern: routes.tsx shape > a default-imported page module is dropped from the path map",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/anti-patterns.test.ts"
-  },
-  {
-    "name": "anti-pattern: routes.tsx shape > a named-imported page module is dropped from the path map",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/anti-patterns.test.ts"
-  },
-  {
-    "name": "anti-pattern: routes.tsx shape > a `../` import produces a key that cannot match a module id",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/anti-patterns.test.ts"
-  },
-  {
-    "name": "anti-pattern: routes.tsx shape > a tsconfig-alias import produces a key that cannot match a module id",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/anti-patterns.test.ts"
-  },
-  {
-    "name": "anti-pattern: action/loader export shape > `export async function action_x` gets no stub — body and imports reach the client",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/anti-patterns.test.ts"
-  },
-  {
-    "name": "anti-pattern: action/loader export shape > a non-destructured action param yields a stub referencing an undeclared `body`",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/anti-patterns.test.ts"
-  },
-  {
-    "name": "anti-pattern: action/loader export shape > a non-async action arrow gets no stub",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/anti-patterns.test.ts"
-  },
-  {
-    "name": "anti-pattern: action/loader export shape > `export async function loader` survives into the client bundle",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/anti-patterns.test.ts"
-  },
-  {
-    "name": "anti-pattern: action/loader export shape > only the first declarator is read — the second action is ignored",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/anti-patterns.test.ts"
-  },
-  {
-    "name": "anti-pattern: files the transform never sees > transforms a .tsx page inside appDirectory (control)",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/anti-patterns.test.ts"
-  },
-  {
-    "name": "anti-pattern: files the transform never sees > skips a .jsx page — no metadata, no stubs, loader ships to the client",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/anti-patterns.test.ts"
-  },
-  {
-    "name": "anti-pattern: files the transform never sees > skips a .js page",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/anti-patterns.test.ts"
-  },
-  {
-    "name": "anti-pattern: files the transform never sees > skips a page outside appDirectory",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/anti-patterns.test.ts"
-  },
-  {
-    "name": "anti-pattern: files the transform never sees > a page outside the conventions never reaches the channels guards — the channel is inert, with no error",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/anti-patterns.test.ts"
-  },
-  {
-    "name": "anti-pattern: files the transform never sees > a page outside the conventions never reaches the liveActions guards — the declaration is inert, with no error",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/anti-patterns.test.ts"
-  },
-  {
-    "name": "anti-pattern: request-scoped data > hooks inside a loader read an empty store — LoaderArgs is the only source",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/anti-patterns.test.ts"
-  },
-  {
-    "name": "anti-pattern: request-scoped data > c.req.param() inside an action is always empty — actions mount on a static path",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/anti-patterns.test.ts"
-  },
-  {
-    "name": "anti-pattern: root layout without a <head> > injects __PAGE_DATA__ when the root renders a literal <head> (control)",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/anti-patterns.test.ts"
-  },
-  {
-    "name": "anti-pattern: root layout without a <head> > silently skips __PAGE_DATA__ when there is no </head> to replace",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/anti-patterns.test.ts"
-  },
-  {
-    "name": "anti-pattern: a live action with a side effect > the re-execution at every emit repeats the effect — nothing breaks, the effect just multiplies",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/anti-patterns.test.ts"
-  },
-  {
-    "name": "agent/AGENTS.md ↔ this file > pins exactly the rules the silent-failure table declares — no more, no less",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/anti-patterns.test.ts"
-  },
-  {
-    "name": "agent/AGENTS.md ↔ this file > every declared rule is unique, so a row cannot be pinned by accident",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/anti-patterns.test.ts"
-  },
-  {
-    "name": "live loader — onGroupOpen > fires once, on the first connection, with the partition and the params (CA8)",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-group-lifecycle.test.ts"
-  },
-  {
-    "name": "live loader — onGroupOpen > a second connection of the same group does not fire it again — another resource does (CA8)",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-group-lifecycle.test.ts"
-  },
-  {
-    "name": "live loader — onGroupOpen > awaits an async hook: the connect snapshot only lands after it resolves (CA8)",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-group-lifecycle.test.ts"
-  },
-  {
-    "name": "live loader — onGroupOpen > a hook that throws is logged loudly and the group continues (CA8)",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-group-lifecycle.test.ts"
-  },
-  {
-    "name": "live loader — onGroupClose > fires when the last connection disconnects — not on the first of two (CA8)",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-group-lifecycle.test.ts"
-  },
-  {
-    "name": "live loader — onGroupClose > fires on the idle timeout — the same gesture as any server-side close (CA8)",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-group-lifecycle.test.ts"
-  },
-  {
-    "name": "live loader — onGroupClose > fires on the revalidation drop — the group empties before the discard (CA8)",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-group-lifecycle.test.ts"
-  },
-  {
-    "name": "live loader — onGroupClose > awaits an async hook before the group is discarded (CA8)",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-group-lifecycle.test.ts"
-  },
-  {
-    "name": "live loader — onGroupClose > re-arms the surviving group when a connection enters while the close hook runs (CA8)",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-group-lifecycle.test.ts"
-  },
-  {
-    "name": "live loader — onGroupClose > a close hook that throws is logged loudly and the teardown completes (CA8)",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-group-lifecycle.test.ts"
-  },
-  {
-    "name": "live loader — the loader runs with the connection's params > the connect snapshot carries the data of the declared resource (CA2)",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-route-params.test.ts"
-  },
-  {
-    "name": "live loader — the loader runs with the connection's params > an emit re-executes the loader with the params of each connection (CA3)",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-route-params.test.ts"
-  },
-  {
-    "name": "live loader — the loader runs with the connection's params > the query delivered to the loader excludes the internal `_route` key (CA4)",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-route-params.test.ts"
-  },
-  {
-    "name": "live loader — partition relevance by resource > two connections of the same principal in different resources land in different partitions (CA3)",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-route-params.test.ts"
-  },
-  {
-    "name": "live loader — the scope ctx > receives { user, params } on subscribe — the principal and the validated params (CA4)",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-route-params.test.ts"
-  },
-  {
-    "name": "live loader — the scope ctx > the emit applies the same scope to the object the producer built, verbatim (CA4)",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-route-params.test.ts"
-  },
-  {
-    "name": "live loader — the scope ctx > a scope that returns null denies with 403 — with params (CA4)",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-route-params.test.ts"
-  },
-  {
-    "name": "live loader — the scope ctx > a scope that throws denies with 403 and logs loudly, naming the channel (CA4)",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-route-params.test.ts"
-  },
-  {
-    "name": "live loader — the scope ctx > without :params the connection declares none and the scope receives empty params (CA9)",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-route-params.test.ts"
-  },
-  {
-    "name": "live loader — route params validation > rejects a key the module's path does not declare (CA5)",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-route-params.test.ts"
-  },
-  {
-    "name": "live loader — route params validation > rejects any key on a module whose path declares none (CA5)",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-route-params.test.ts"
-  },
-  {
-    "name": "live loader — route params validation > rejects a malformed payload — invalid JSON, a list, a non-string value (CA5)",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-route-params.test.ts"
-  },
-  {
-    "name": "live loader — route params validation > the parser is a pure function of the payload and the declared names (CA5)",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-route-params.test.ts"
-  },
-  {
-    "name": "live loader — revalidation with route params > keeps a connection whose re-derivation still holds — the stored params are used",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-route-params.test.ts"
-  },
-  {
-    "name": "live loader — revalidation with route params > drops and closes a connection whose re-derived partition moved (CA6)",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-route-params.test.ts"
-  },
-  {
-    "name": "live loader — revalidation with route params > drops and closes a connection whose re-derived scope returns null (CA6)",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-route-params.test.ts"
-  },
-  {
-    "name": "live loader — dev/build guards (CA9) > a declared channel with an entry in the map transforms normally (control)",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-build.test.ts"
-  },
-  {
-    "name": "live loader — dev/build guards (CA9) > `channels` without a `loader` is an explicit error",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-build.test.ts"
-  },
-  {
-    "name": "live loader — dev/build guards (CA9) > a channel with no entry in app/channels.ts is an explicit error naming it",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-build.test.ts"
-  },
-  {
-    "name": "live loader — dev/build guards (CA9) > with no app/channels.ts at all, every declared channel is unknown",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-build.test.ts"
-  },
-  {
-    "name": "live loader — dev/build guards (CA9) > app/channels.ts itself is not a module declaring channels",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-build.test.ts"
-  },
-  {
-    "name": "live loader — static build (CA10) > warns once per module, naming it",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-build.test.ts"
-  },
-  {
-    "name": "live loader — static build (CA10) > does not warn outside a static build",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-build.test.ts"
-  },
-  {
-    "name": "live loader — reading the conventions > declaredChannelNames reads the array form and ignores the object form",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-build.test.ts"
-  },
-  {
-    "name": "live loader — reading the conventions > readChannelMapNames collects the keys of the app map",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-build.test.ts"
-  },
-  {
-    "name": "live loader — virtual server entry > imports and registers app/channels.ts when it exists",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-build.test.ts"
-  },
-  {
-    "name": "live loader — virtual server entry > registers nothing when the app has no channel map",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-build.test.ts"
-  },
-  {
-    "name": "live loader — snapshot on connect > a fresh connection receives the current state, with its own principal",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-server.test.ts"
-  },
-  {
-    "name": "live loader — snapshot on connect > a reconnect is a new connection and gets a new snapshot",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-server.test.ts"
-  },
-  {
-    "name": "live loader — snapshot on connect > two principals of different partitions receive distinct snapshots (CA4)",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-server.test.ts"
-  },
-  {
-    "name": "live loader — emit > re-executes the loader and pushes the snapshot to the emitting partition (CA6a)",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-server.test.ts"
-  },
-  {
-    "name": "live loader — emit > does not reach a connection of another partition (CA6b)",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-server.test.ts"
-  },
-  {
-    "name": "live loader — emit > reaches every module of the channel — layout and page (CA11)",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-server.test.ts"
-  },
-  {
-    "name": "live loader — emit > is a no-op on a valid channel with no subscribers",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-server.test.ts"
-  },
-  {
-    "name": "live loader — emit > throws immediately on a channel with no entry in the map, naming it (CA6)",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-server.test.ts"
-  },
-  {
-    "name": "live loader — write chain > keeps the chain alive after a failed write and logs it — never silently",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-server.test.ts"
-  },
-  {
-    "name": "live loader — guards > inherits the route node middlewares: no session, no subscription (CA3)",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-server.test.ts"
-  },
-  {
-    "name": "live loader — guards > denies with 403 when the scope returns null (CA5)",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-server.test.ts"
-  },
-  {
-    "name": "live loader — guards > a channel with no principal is public when its scope ignores it (CA5)",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-server.test.ts"
-  },
-  {
-    "name": "live loader — guards > forging query input never changes the partition (CA5)",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-server.test.ts"
-  },
-  {
-    "name": "live loader — guards > a module without channels produces no channel route (CA12f)",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-server.test.ts"
-  },
-  {
-    "name": "live loader — guards > throws a loud error for channels without a loader",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-server.test.ts"
-  },
-  {
-    "name": "live loader — guards > throws a loud error for a channel missing from the app map",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-server.test.ts"
-  },
-  {
-    "name": "live loader — guards > registerChannels() accepts the map from bootstrap too",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-server.test.ts"
-  },
-  {
-    "name": "buildRouteTree > parses simple flat routes",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/graph.test.ts"
-  },
-  {
-    "name": "buildRouteTree > parses nested routes with layouts",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/graph.test.ts"
-  },
-  {
-    "name": "buildRouteTree > preserves isRoot flag",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/graph.test.ts"
-  },
-  {
-    "name": "buildRouteTree > captures middlewares from route nodes",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/graph.test.ts"
-  },
-  {
-    "name": "buildRouteTree > handles path-less layout (pure wrapper)",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/graph.test.ts"
-  },
-  {
-    "name": "buildRouteTree > handles catch-all route (path: '*')",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/graph.test.ts"
-  },
-  {
-    "name": "buildRouteTree > handles satisfies AppRoutes syntax",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/graph.test.ts"
-  },
-  {
-    "name": "buildRouteTree > handles as AppRoutes syntax",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/graph.test.ts"
-  },
-  {
-    "name": "buildRouteTree > returns empty tree for routes without namespace imports",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/graph.test.ts"
-  },
-  {
-    "name": "detectExports > detects Component + loader in a page module",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/graph.test.ts"
-  },
-  {
-    "name": "detectExports > detects action_* exports",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/graph.test.ts"
-  },
-  {
-    "name": "detectExports > detects stream_* exports",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/graph.test.ts"
-  },
-  {
-    "name": "detectExports > detects socket_* exports",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/graph.test.ts"
-  },
-  {
-    "name": "detectExports > does not match export function action_* (only const)",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/graph.test.ts"
-  },
-  {
-    "name": "detectExports > returns empty for non-existent files",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/graph.test.ts"
-  },
-  {
-    "name": "buildGraph > builds full graph from a minimal project",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/graph.test.ts"
-  },
-  {
-    "name": "buildGraph > returns empty graph when routes.tsx is missing",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/graph.test.ts"
-  },
-  {
-    "name": "buildGraph > tracks importedBy correctly",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/graph.test.ts"
-  },
-  {
-    "name": "buildGraph > handles external imports without crawling them",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/graph.test.ts"
-  },
-  {
-    "name": "buildGraph > builds layout kind correctly from route tree",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/graph.test.ts"
-  },
-  {
-    "name": "live loader — transport headers > the channel SSE answer carries Cache-Control: no-store",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-operations.test.ts"
-  },
-  {
-    "name": "live loader — idle timeout > closes a connection with no deliveries past idleMs, and frees the group",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-operations.test.ts"
-  },
-  {
-    "name": "live loader — idle timeout > a delivery inside the window restarts the count",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-operations.test.ts"
-  },
-  {
-    "name": "live loader — idle timeout > idleMs: 0 disables it — the toolkit's default keeps connections alive",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-operations.test.ts"
-  },
-  {
-    "name": "live loader — idle timeout > the default 300000 applies on a registration without options — server-side, not via the toolkit",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-operations.test.ts"
-  },
-  {
-    "name": "live loader — idle timeout > heartbeats do not reset the idle clock",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-operations.test.ts"
-  },
-  {
-    "name": "live loader — heartbeat > writes the `: ping` comment through the write chain on the interval",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-operations.test.ts"
-  },
-  {
-    "name": "live loader — heartbeat > heartbeatMs: 0 disables it",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-operations.test.ts"
-  },
-  {
-    "name": "live loader — heartbeat > the default 20000 applies on a registration without options — one ruler with stream_*",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-operations.test.ts"
-  },
-  {
-    "name": "live loader — inspectChannels > reports the groups by (moduleId, partition), connections and last delivery",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-operations.test.ts"
-  },
-  {
-    "name": "live loader — inspectChannels > reflects emits and terminations",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-operations.test.ts"
-  },
-  {
-    "name": "live loader — inspectChannels > reports the coalescing windows still open, and their close",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-operations.test.ts"
-  },
-  {
-    "name": "live loader — inspectChannels > the empty registry reports empty — no channels, no totals",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-operations.test.ts"
-  },
-  {
-    "name": "GET /_channel-inspect > answers the inspector JSON in a non-production environment",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-operations.test.ts"
-  },
-  {
-    "name": "GET /_channel-inspect > does not exist in a production build",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-operations.test.ts"
   },
   {
     "name": "createApp — loader short-circuit Response > a Response returned by a loader short-circuits rendering (redirect on direct load)",
@@ -2042,6 +1850,74 @@
   {
     "name": "EndpointRoute — validation warns > warns when endpoint GET conflicts with a page GET, and the PAGE wins",
     "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/endpoints.test.ts"
+  },
+  {
+    "name": "live loader — snapshot on connect > a fresh connection receives the current state, with its own principal",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-server.test.ts"
+  },
+  {
+    "name": "live loader — snapshot on connect > a reconnect is a new connection and gets a new snapshot",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-server.test.ts"
+  },
+  {
+    "name": "live loader — snapshot on connect > two principals of different partitions receive distinct snapshots (CA4)",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-server.test.ts"
+  },
+  {
+    "name": "live loader — emit > re-executes the loader and pushes the snapshot to the emitting partition (CA6a)",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-server.test.ts"
+  },
+  {
+    "name": "live loader — emit > does not reach a connection of another partition (CA6b)",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-server.test.ts"
+  },
+  {
+    "name": "live loader — emit > reaches every module of the channel — layout and page (CA11)",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-server.test.ts"
+  },
+  {
+    "name": "live loader — emit > is a no-op on a valid channel with no subscribers",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-server.test.ts"
+  },
+  {
+    "name": "live loader — emit > throws immediately on a channel with no entry in the map, naming it (CA6)",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-server.test.ts"
+  },
+  {
+    "name": "live loader — write chain > keeps the chain alive after a failed write and logs it — never silently",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-server.test.ts"
+  },
+  {
+    "name": "live loader — guards > inherits the route node middlewares: no session, no subscription (CA3)",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-server.test.ts"
+  },
+  {
+    "name": "live loader — guards > denies with 403 when the scope returns null (CA5)",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-server.test.ts"
+  },
+  {
+    "name": "live loader — guards > a channel with no principal is public when its scope ignores it (CA5)",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-server.test.ts"
+  },
+  {
+    "name": "live loader — guards > forging query input never changes the partition (CA5)",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-server.test.ts"
+  },
+  {
+    "name": "live loader — guards > a module without channels produces no channel route (CA12f)",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-server.test.ts"
+  },
+  {
+    "name": "live loader — guards > throws a loud error for channels without a loader",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-server.test.ts"
+  },
+  {
+    "name": "live loader — guards > throws a loud error for a channel missing from the app map",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-server.test.ts"
+  },
+  {
+    "name": "live loader — guards > registerChannels() accepts the map from bootstrap too",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-server.test.ts"
   },
   {
     "name": "injectMetadata > injects moduleId into existing metadata",
@@ -2264,52 +2140,48 @@
     "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/transforms.test.ts"
   },
   {
-    "name": "client router — catch-all with a path-less group layout > renders the catch-all NotFound for an unmatched path (not the group layout)",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/client-routes.test.tsx"
+    "name": "live loader — dev/build guards (CA9) > a declared channel with an entry in the map transforms normally (control)",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-build.test.ts"
   },
   {
-    "name": "client router — catch-all with a path-less group layout > still renders a grouped page (inside its layout) when its route matches",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/client-routes.test.tsx"
+    "name": "live loader — dev/build guards (CA9) > `channels` without a `loader` is an explicit error",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-build.test.ts"
   },
   {
-    "name": "client router — catch-all with a path-less group layout > renders top-level pages normally",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/client-routes.test.tsx"
+    "name": "live loader — dev/build guards (CA9) > a channel with no entry in app/channels.ts is an explicit error naming it",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-build.test.ts"
   },
   {
-    "name": "client router — catch-all with a path-ful nested layout > renders a nested page inside its path-ful layout",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/client-routes.test.tsx"
+    "name": "live loader — dev/build guards (CA9) > with no app/channels.ts at all, every declared channel is unknown",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-build.test.ts"
   },
   {
-    "name": "client router — catch-all with a path-ful nested layout > still reaches the catch-all for an unmatched path",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/client-routes.test.tsx"
+    "name": "live loader — dev/build guards (CA9) > app/channels.ts itself is not a module declaring channels",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-build.test.ts"
   },
   {
-    "name": "client router — path-less parent layout wrapping a path-ful nested area > renders the nested area pages (control)",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/client-routes.test.tsx"
+    "name": "live loader — static build (CA10) > warns once per module, naming it",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-build.test.ts"
   },
   {
-    "name": "client router — path-less parent layout wrapping a path-ful nested area > renders the 404 in-shell for an unmatched nested sub-route",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/client-routes.test.tsx"
+    "name": "live loader — static build (CA10) > does not warn outside a static build",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-build.test.ts"
   },
   {
-    "name": "client router — path-less parent layout wrapping a path-ful nested area > renders the 404 standalone for a top-level unmatched URL",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/client-routes.test.tsx"
+    "name": "live loader — reading the conventions > declaredChannelNames reads the array form and ignores the object form",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-build.test.ts"
   },
   {
-    "name": "client router — path-less parent layout wrapping a path-ful nested area > resolves parent-layout links against the root base (no doubled prefix)",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/client-routes.test.tsx"
+    "name": "live loader — reading the conventions > readChannelMapNames collects the keys of the app map",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-build.test.ts"
   },
   {
-    "name": "client router — two path-less sibling layouts don't shadow each other > renders the first sibling's route in its own layout",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/client-routes.test.tsx"
+    "name": "live loader — virtual server entry > imports and registers app/channels.ts when it exists",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-build.test.ts"
   },
   {
-    "name": "client router — two path-less sibling layouts don't shadow each other > renders the second sibling's route (not shadowed by the first)",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/client-routes.test.tsx"
-  },
-  {
-    "name": "client router — two path-less sibling layouts don't shadow each other > falls through both siblings to the standalone catch-all",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/client-routes.test.tsx"
+    "name": "live loader — virtual server entry > registers nothing when the app has no channel map",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-build.test.ts"
   },
   {
     "name": "useLoader > hydrates from __PAGE_DATA__ on first render",
@@ -2336,40 +2208,100 @@
     "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/useLoader.test.tsx"
   },
   {
-    "name": "generateStatic > generates index.html and index.json for a simple route",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/static.test.ts"
+    "name": "site/docs frontmatter > finds the docs",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/agent-payload.test.ts"
   },
   {
-    "name": "generateStatic > generates nested route paths",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/static.test.ts"
+    "name": "site/docs frontmatter > every doc declares a description — without it the skill never loads",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/agent-payload.test.ts"
   },
   {
-    "name": "generateStatic > skips dynamic routes without staticPaths",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/static.test.ts"
+    "name": "site/docs frontmatter > every doc's frontmatter is valid YAML carrying only `description`",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/agent-payload.test.ts"
   },
   {
-    "name": "generateStatic > generates pages for dynamic routes with staticPaths",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/static.test.ts"
+    "name": "site/docs frontmatter > description fits the 1–1024 char limit both harnesses impose",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/agent-payload.test.ts"
   },
   {
-    "name": "generateStatic > handles routes with children (layout + pages)",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/static.test.ts"
+    "name": "site/docs frontmatter > the body no longer carries the frontmatter",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/agent-payload.test.ts"
   },
   {
-    "name": "generateStatic > copies public/ folder contents to dist/ root",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/static.test.ts"
+    "name": "agent/skills > emits one skill per doc",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/agent-payload.test.ts"
   },
   {
-    "name": "generateStatic > emits dist/404.html for a catch-all route (and does not generate it as a normal page)",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/static.test.ts"
+    "name": "agent/skills > refuses to build a doc with no description — prepack must fail, not ship it",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/agent-payload.test.ts"
   },
   {
-    "name": "generateStatic > does not emit 404.html when there is no catch-all",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/static.test.ts"
+    "name": "agent/skills > names the directory exactly what the frontmatter declares",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/agent-payload.test.ts"
   },
   {
-    "name": "generateStatic > works without a public/ folder",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/static.test.ts"
+    "name": "agent/skills > uses kebab-case names prefixed with the package",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/agent-payload.test.ts"
+  },
+  {
+    "name": "agent/skills > emits only `name` and `description` — opencode drops any other field",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/agent-payload.test.ts"
+  },
+  {
+    "name": "agent/skills > keeps the doc body intact after the frontmatter",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/agent-payload.test.ts"
+  },
+  {
+    "name": "npm package > ships agent/ — agent-sync reads it from node_modules",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/agent-payload.test.ts"
+  },
+  {
+    "name": "Scripts > renders production assets with default paths",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/scripts.test.tsx"
+  },
+  {
+    "name": "Scripts > renders production assets with STATIC_BASE_URL prefix",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/scripts.test.tsx"
+  },
+  {
+    "name": "Scripts > BUG: static build SSR should use /client prefix even without STATIC_BASE_URL env",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/scripts.test.tsx"
+  },
+  {
+    "name": "Scripts > uses hashed filenames from __VELO_CLIENT_JS__ and __VELO_CLIENT_CSS__ defines",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/scripts.test.tsx"
+  },
+  {
+    "name": "Scripts > uses hashed filenames with STATIC_BASE_URL prefix",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/scripts.test.tsx"
+  },
+  {
+    "name": "Scripts > links EVERY stylesheet of the entry — a list __VELO_CLIENT_CSS__ renders one <link> per css",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/scripts.test.tsx"
+  },
+  {
+    "name": "Scripts > a string __VELO_CLIENT_CSS__ (old single-file contract) still links exactly one stylesheet",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/scripts.test.tsx"
+  },
+  {
+    "name": "Scripts > an empty css list renders NO stylesheet link — the dead client.css fallback is gone",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/scripts.test.tsx"
+  },
+  {
+    "name": "Link > renders a wouter Link when no update is pending",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/scripts.test.tsx"
+  },
+  {
+    "name": "Link > renders a plain <a> with full navigation when update is pending",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/scripts.test.tsx"
+  },
+  {
+    "name": "Link > does full navigation on click when update is pending",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/scripts.test.tsx"
+  },
+  {
+    "name": "Link > strips wouter ~ prefix in href when update is pending",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/scripts.test.tsx"
   },
   {
     "name": "live loader — the last mile > a snapshot replaces the handle's data and re-renders the Component (CA7)",
@@ -2432,6 +2364,302 @@
     "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-client.test.tsx"
   },
   {
+    "name": "buildRouteTree > parses simple flat routes",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/graph.test.ts"
+  },
+  {
+    "name": "buildRouteTree > parses nested routes with layouts",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/graph.test.ts"
+  },
+  {
+    "name": "buildRouteTree > preserves isRoot flag",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/graph.test.ts"
+  },
+  {
+    "name": "buildRouteTree > captures middlewares from route nodes",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/graph.test.ts"
+  },
+  {
+    "name": "buildRouteTree > handles path-less layout (pure wrapper)",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/graph.test.ts"
+  },
+  {
+    "name": "buildRouteTree > handles catch-all route (path: '*')",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/graph.test.ts"
+  },
+  {
+    "name": "buildRouteTree > handles satisfies AppRoutes syntax",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/graph.test.ts"
+  },
+  {
+    "name": "buildRouteTree > handles as AppRoutes syntax",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/graph.test.ts"
+  },
+  {
+    "name": "buildRouteTree > returns empty tree for routes without namespace imports",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/graph.test.ts"
+  },
+  {
+    "name": "detectExports > detects Component + loader in a page module",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/graph.test.ts"
+  },
+  {
+    "name": "detectExports > detects action_* exports",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/graph.test.ts"
+  },
+  {
+    "name": "detectExports > detects stream_* exports",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/graph.test.ts"
+  },
+  {
+    "name": "detectExports > detects socket_* exports",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/graph.test.ts"
+  },
+  {
+    "name": "detectExports > does not match export function action_* (only const)",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/graph.test.ts"
+  },
+  {
+    "name": "detectExports > returns empty for non-existent files",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/graph.test.ts"
+  },
+  {
+    "name": "buildGraph > builds full graph from a minimal project",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/graph.test.ts"
+  },
+  {
+    "name": "buildGraph > returns empty graph when routes.tsx is missing",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/graph.test.ts"
+  },
+  {
+    "name": "buildGraph > tracks importedBy correctly",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/graph.test.ts"
+  },
+  {
+    "name": "buildGraph > handles external imports without crawling them",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/graph.test.ts"
+  },
+  {
+    "name": "buildGraph > builds layout kind correctly from route tree",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/graph.test.ts"
+  },
+  {
+    "name": "client router — catch-all with a path-less group layout > renders the catch-all NotFound for an unmatched path (not the group layout)",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/client-routes.test.tsx"
+  },
+  {
+    "name": "client router — catch-all with a path-less group layout > still renders a grouped page (inside its layout) when its route matches",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/client-routes.test.tsx"
+  },
+  {
+    "name": "client router — catch-all with a path-less group layout > renders top-level pages normally",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/client-routes.test.tsx"
+  },
+  {
+    "name": "client router — catch-all with a path-ful nested layout > renders a nested page inside its path-ful layout",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/client-routes.test.tsx"
+  },
+  {
+    "name": "client router — catch-all with a path-ful nested layout > still reaches the catch-all for an unmatched path",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/client-routes.test.tsx"
+  },
+  {
+    "name": "client router — path-less parent layout wrapping a path-ful nested area > renders the nested area pages (control)",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/client-routes.test.tsx"
+  },
+  {
+    "name": "client router — path-less parent layout wrapping a path-ful nested area > renders the 404 in-shell for an unmatched nested sub-route",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/client-routes.test.tsx"
+  },
+  {
+    "name": "client router — path-less parent layout wrapping a path-ful nested area > renders the 404 standalone for a top-level unmatched URL",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/client-routes.test.tsx"
+  },
+  {
+    "name": "client router — path-less parent layout wrapping a path-ful nested area > resolves parent-layout links against the root base (no doubled prefix)",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/client-routes.test.tsx"
+  },
+  {
+    "name": "client router — two path-less sibling layouts don't shadow each other > renders the first sibling's route in its own layout",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/client-routes.test.tsx"
+  },
+  {
+    "name": "client router — two path-less sibling layouts don't shadow each other > renders the second sibling's route (not shadowed by the first)",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/client-routes.test.tsx"
+  },
+  {
+    "name": "client router — two path-less sibling layouts don't shadow each other > falls through both siblings to the standalone catch-all",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/client-routes.test.tsx"
+  },
+  {
+    "name": "startServer — hostname binding > binds the configured hostname (loopback for local/sensitive apps)",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/start-server.test.tsx"
+  },
+  {
+    "name": "startServer — hostname binding > HOST env wins over the config hostname (same precedence as PORT)",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/start-server.test.tsx"
+  },
+  {
+    "name": "startServer — hostname binding > default binds all interfaces — current behavior, unchanged (semver)",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/start-server.test.tsx"
+  },
+  {
+    "name": "Boot — SSR > renders one inline classic script in the page declaring the keys",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/boot-ssr.test.tsx"
+  },
+  {
+    "name": "Boot — SSR > renders one script per Boot declaration (storages declared separately)",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/boot-ssr.test.tsx"
+  },
+  {
+    "name": "Boot — SSR > embeds keys safely — no raw < in the script source",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/boot-ssr.test.tsx"
+  },
+  {
+    "name": "useBoot — server branch > returns an empty object during SSR (no window access)",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/boot-ssr.test.tsx"
+  },
+  {
+    "name": "buildFullPathMap > parses simple flat routes",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/paths.test.ts"
+  },
+  {
+    "name": "buildFullPathMap > parses nested routes with layouts",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/paths.test.ts"
+  },
+  {
+    "name": "buildFullPathMap > handles routes with parameters",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/paths.test.ts"
+  },
+  {
+    "name": "buildFullPathMap > handles deeply nested routes",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/paths.test.ts"
+  },
+  {
+    "name": "buildFullPathMap > handles layout without path (pure wrapper)",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/paths.test.ts"
+  },
+  {
+    "name": "buildFullPathMap > handles satisfies AppRoutes syntax",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/paths.test.ts"
+  },
+  {
+    "name": "buildFullPathMap > handles as AppRoutes syntax",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/paths.test.ts"
+  },
+  {
+    "name": "buildFullPathMap > returns empty map for routes without namespace imports",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/paths.test.ts"
+  },
+  {
+    "name": "generateStatic > generates index.html and index.json for a simple route",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/static.test.ts"
+  },
+  {
+    "name": "generateStatic > generates nested route paths",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/static.test.ts"
+  },
+  {
+    "name": "generateStatic > skips dynamic routes without staticPaths",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/static.test.ts"
+  },
+  {
+    "name": "generateStatic > generates pages for dynamic routes with staticPaths",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/static.test.ts"
+  },
+  {
+    "name": "generateStatic > handles routes with children (layout + pages)",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/static.test.ts"
+  },
+  {
+    "name": "generateStatic > copies public/ folder contents to dist/ root",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/static.test.ts"
+  },
+  {
+    "name": "generateStatic > emits dist/404.html for a catch-all route (and does not generate it as a normal page)",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/static.test.ts"
+  },
+  {
+    "name": "generateStatic > does not emit 404.html when there is no catch-all",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/static.test.ts"
+  },
+  {
+    "name": "generateStatic > works without a public/ folder",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/static.test.ts"
+  },
+  {
+    "name": "layout persistence across sibling navigations > path-ful layout (master) is NOT re-mounted across sibling routes",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/client-persistence.test.tsx"
+  },
+  {
+    "name": "layout persistence across sibling navigations > parent layout (admin) is NOT re-mounted within a section",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/client-persistence.test.tsx"
+  },
+  {
+    "name": "layout persistence across sibling navigations > keeps the SAME layout DOM node across sibling navigations (no flicker)",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/client-persistence.test.tsx"
+  },
+  {
+    "name": "layout persistence across sibling navigations > preserves layout component state across sibling navigations (no reload)",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/client-persistence.test.tsx"
+  },
+  {
+    "name": "layout persistence across sibling navigations > path-less shell persists across disjoint top-level children (the PodCubo case)",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/client-persistence.test.tsx"
+  },
+  {
+    "name": "layout persistence across sibling navigations > path-less parent persists across ALL its children; inner section re-mounts on re-entry",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/client-persistence.test.tsx"
+  },
+  {
+    "name": "useQuery — client navigation > reflects query-only navigation instead of staying pinned to the SSR query",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/useQuery.test.tsx"
+  },
+  {
+    "name": "useQuery — client navigation > useLoader([query.x]) refetches on query-only navigation — the pattern the skill teaches",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/useQuery.test.tsx"
+  },
+  {
+    "name": "live loader — params extraction > extracts the params of a layout from a child's pathname — prefix match (CA13)",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-route-params-client.test.tsx"
+  },
+  {
+    "name": "live loader — params extraction > a catch-all declares no key — empty params, the channel travels by principal",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-route-params-client.test.tsx"
+  },
+  {
+    "name": "live loader — params extraction > a pathname outside the module's route yields no params",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-route-params-client.test.tsx"
+  },
+  {
+    "name": "live loader — params extraction > a layout with params opens its connection with the prefix params, under a child URL (CA13)",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-route-params-client.test.tsx"
+  },
+  {
+    "name": "live loader — the connection is keyed by the declared params > moves to another resource: the old connection closes and a new one opens (CA7)",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-route-params-client.test.tsx"
+  },
+  {
+    "name": "live loader — the connection is keyed by the declared params > does not reconnect between children of the same params (CA7)",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-route-params-client.test.tsx"
+  },
+  {
+    "name": "live loader — the connection is keyed by the declared params > navigating inside the same params keeps the connection alive (CA7)",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-route-params-client.test.tsx"
+  },
+  {
+    "name": "live loader — the connection is keyed by the declared params > a module without :params opens its connection without `?_route=` — unchanged (CA9)",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-route-params-client.test.tsx"
+  },
+  {
+    "name": "live loader — the connection is keyed by the declared params > a catch-all module opens without `?_route=` — no key to declare",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-route-params-client.test.tsx"
+  },
+  {
+    "name": "live loader — the route tree passes the module's fullPath > a layout with :params opened under a child's URL declares the prefix params (CA13)",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-route-params-client.test.tsx"
+  },
+  {
     "name": "live loader — freshnessByChannel > fills with the module's channels as the connections open",
     "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-channel-freshness.test.tsx"
   },
@@ -2490,234 +2718,6 @@
   {
     "name": "useBoot — client branch > returns an empty object when nothing was declared/loaded",
     "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/boot.test.tsx"
-  },
-  {
-    "name": "site/docs frontmatter > finds the docs",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/agent-payload.test.ts"
-  },
-  {
-    "name": "site/docs frontmatter > every doc declares a description — without it the skill never loads",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/agent-payload.test.ts"
-  },
-  {
-    "name": "site/docs frontmatter > every doc's frontmatter is valid YAML carrying only `description`",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/agent-payload.test.ts"
-  },
-  {
-    "name": "site/docs frontmatter > description fits the 1–1024 char limit both harnesses impose",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/agent-payload.test.ts"
-  },
-  {
-    "name": "site/docs frontmatter > the body no longer carries the frontmatter",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/agent-payload.test.ts"
-  },
-  {
-    "name": "agent/skills > emits one skill per doc",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/agent-payload.test.ts"
-  },
-  {
-    "name": "agent/skills > refuses to build a doc with no description — prepack must fail, not ship it",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/agent-payload.test.ts"
-  },
-  {
-    "name": "agent/skills > names the directory exactly what the frontmatter declares",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/agent-payload.test.ts"
-  },
-  {
-    "name": "agent/skills > uses kebab-case names prefixed with the package",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/agent-payload.test.ts"
-  },
-  {
-    "name": "agent/skills > emits only `name` and `description` — opencode drops any other field",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/agent-payload.test.ts"
-  },
-  {
-    "name": "agent/skills > keeps the doc body intact after the frontmatter",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/agent-payload.test.ts"
-  },
-  {
-    "name": "npm package > ships agent/ — agent-sync reads it from node_modules",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/agent-payload.test.ts"
-  },
-  {
-    "name": "startServer — hostname binding > binds the configured hostname (loopback for local/sensitive apps)",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/start-server.test.tsx"
-  },
-  {
-    "name": "startServer — hostname binding > HOST env wins over the config hostname (same precedence as PORT)",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/start-server.test.tsx"
-  },
-  {
-    "name": "startServer — hostname binding > default binds all interfaces — current behavior, unchanged (semver)",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/start-server.test.tsx"
-  },
-  {
-    "name": "Boot — SSR > renders one inline classic script in the page declaring the keys",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/boot-ssr.test.tsx"
-  },
-  {
-    "name": "Boot — SSR > renders one script per Boot declaration (storages declared separately)",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/boot-ssr.test.tsx"
-  },
-  {
-    "name": "Boot — SSR > embeds keys safely — no raw < in the script source",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/boot-ssr.test.tsx"
-  },
-  {
-    "name": "useBoot — server branch > returns an empty object during SSR (no window access)",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/boot-ssr.test.tsx"
-  },
-  {
-    "name": "live loader — params extraction > extracts the params of a layout from a child's pathname — prefix match (CA13)",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-route-params-client.test.tsx"
-  },
-  {
-    "name": "live loader — params extraction > a catch-all declares no key — empty params, the channel travels by principal",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-route-params-client.test.tsx"
-  },
-  {
-    "name": "live loader — params extraction > a pathname outside the module's route yields no params",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-route-params-client.test.tsx"
-  },
-  {
-    "name": "live loader — params extraction > a layout with params opens its connection with the prefix params, under a child URL (CA13)",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-route-params-client.test.tsx"
-  },
-  {
-    "name": "live loader — the connection is keyed by the declared params > moves to another resource: the old connection closes and a new one opens (CA7)",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-route-params-client.test.tsx"
-  },
-  {
-    "name": "live loader — the connection is keyed by the declared params > does not reconnect between children of the same params (CA7)",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-route-params-client.test.tsx"
-  },
-  {
-    "name": "live loader — the connection is keyed by the declared params > navigating inside the same params keeps the connection alive (CA7)",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-route-params-client.test.tsx"
-  },
-  {
-    "name": "live loader — the connection is keyed by the declared params > a module without :params opens its connection without `?_route=` — unchanged (CA9)",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-route-params-client.test.tsx"
-  },
-  {
-    "name": "live loader — the connection is keyed by the declared params > a catch-all module opens without `?_route=` — no key to declare",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-route-params-client.test.tsx"
-  },
-  {
-    "name": "live loader — the route tree passes the module's fullPath > a layout with :params opened under a child's URL declares the prefix params (CA13)",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/live-loader-route-params-client.test.tsx"
-  },
-  {
-    "name": "Scripts > renders production assets with default paths",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/scripts.test.tsx"
-  },
-  {
-    "name": "Scripts > renders production assets with STATIC_BASE_URL prefix",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/scripts.test.tsx"
-  },
-  {
-    "name": "Scripts > BUG: static build SSR should use /client prefix even without STATIC_BASE_URL env",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/scripts.test.tsx"
-  },
-  {
-    "name": "Scripts > uses hashed filenames from __VELO_CLIENT_JS__ and __VELO_CLIENT_CSS__ defines",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/scripts.test.tsx"
-  },
-  {
-    "name": "Scripts > uses hashed filenames with STATIC_BASE_URL prefix",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/scripts.test.tsx"
-  },
-  {
-    "name": "Scripts > links EVERY stylesheet of the entry — a list __VELO_CLIENT_CSS__ renders one <link> per css",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/scripts.test.tsx"
-  },
-  {
-    "name": "Scripts > a string __VELO_CLIENT_CSS__ (old single-file contract) still links exactly one stylesheet",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/scripts.test.tsx"
-  },
-  {
-    "name": "Scripts > an empty css list renders NO stylesheet link — the dead client.css fallback is gone",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/scripts.test.tsx"
-  },
-  {
-    "name": "Link > renders a wouter Link when no update is pending",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/scripts.test.tsx"
-  },
-  {
-    "name": "Link > renders a plain <a> with full navigation when update is pending",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/scripts.test.tsx"
-  },
-  {
-    "name": "Link > does full navigation on click when update is pending",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/scripts.test.tsx"
-  },
-  {
-    "name": "Link > strips wouter ~ prefix in href when update is pending",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/scripts.test.tsx"
-  },
-  {
-    "name": "buildFullPathMap > parses simple flat routes",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/paths.test.ts"
-  },
-  {
-    "name": "buildFullPathMap > parses nested routes with layouts",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/paths.test.ts"
-  },
-  {
-    "name": "buildFullPathMap > handles routes with parameters",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/paths.test.ts"
-  },
-  {
-    "name": "buildFullPathMap > handles deeply nested routes",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/paths.test.ts"
-  },
-  {
-    "name": "buildFullPathMap > handles layout without path (pure wrapper)",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/paths.test.ts"
-  },
-  {
-    "name": "buildFullPathMap > handles satisfies AppRoutes syntax",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/paths.test.ts"
-  },
-  {
-    "name": "buildFullPathMap > handles as AppRoutes syntax",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/paths.test.ts"
-  },
-  {
-    "name": "buildFullPathMap > returns empty map for routes without namespace imports",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/paths.test.ts"
-  },
-  {
-    "name": "layout persistence across sibling navigations > path-ful layout (master) is NOT re-mounted across sibling routes",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/client-persistence.test.tsx"
-  },
-  {
-    "name": "layout persistence across sibling navigations > parent layout (admin) is NOT re-mounted within a section",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/client-persistence.test.tsx"
-  },
-  {
-    "name": "layout persistence across sibling navigations > keeps the SAME layout DOM node across sibling navigations (no flicker)",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/client-persistence.test.tsx"
-  },
-  {
-    "name": "layout persistence across sibling navigations > preserves layout component state across sibling navigations (no reload)",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/client-persistence.test.tsx"
-  },
-  {
-    "name": "layout persistence across sibling navigations > path-less shell persists across disjoint top-level children (the PodCubo case)",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/client-persistence.test.tsx"
-  },
-  {
-    "name": "layout persistence across sibling navigations > path-less parent persists across ALL its children; inner section re-mounts on re-entry",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/client-persistence.test.tsx"
-  },
-  {
-    "name": "useQuery — client navigation > reflects query-only navigation instead of staying pinned to the SSR query",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/useQuery.test.tsx"
-  },
-  {
-    "name": "useQuery — client navigation > useLoader([query.x]) refetches on query-only navigation — the pattern the skill teaches",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/useQuery.test.tsx"
   },
   {
     "name": "useEventStream > opens an EventSource at the stream's __path",
@@ -2908,6 +2908,50 @@
     "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/telemetry-cli.test.ts"
   },
   {
+    "name": "touch > re-emits an object signal with a new reference",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/touch.test.ts"
+  },
+  {
+    "name": "touch > notifies subscribers after a nested mutation",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/touch.test.ts"
+  },
+  {
+    "name": "touch > keeps an array signal an array",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/touch.test.ts"
+  },
+  {
+    "name": "touch > is a no-op for null",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/touch.test.ts"
+  },
+  {
+    "name": "touch > is a no-op for a primitive",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/touch.test.ts"
+  },
+  {
+    "name": "Link — resolution after the no-nest router change > string path resolves root-absolute",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/link.test.tsx"
+  },
+  {
+    "name": "Link — resolution after the no-nest router change > \"~/x\" resolves to \"/x\" (tilde stripped, not literal)",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/link.test.tsx"
+  },
+  {
+    "name": "Link — resolution after the no-nest router change > module ref navigates to its fullPath (default mode)",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/link.test.tsx"
+  },
+  {
+    "name": "Link — resolution after the no-nest router change > module ref with absolute (no-op) still uses fullPath",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/link.test.tsx"
+  },
+  {
+    "name": "Link — resolution after the no-nest router change > substitutes params into a module fullPath",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/link.test.tsx"
+  },
+  {
+    "name": "Link — resolution after the no-nest router change > appends search params",
+    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/link.test.tsx"
+  },
+  {
     "name": "useSocket > opens a WebSocket at the stub's __path",
     "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/useSocket.test.tsx"
   },
@@ -2952,26 +2996,6 @@
     "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/useSocket.test.tsx"
   },
   {
-    "name": "touch > re-emits an object signal with a new reference",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/touch.test.ts"
-  },
-  {
-    "name": "touch > notifies subscribers after a nested mutation",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/touch.test.ts"
-  },
-  {
-    "name": "touch > keeps an array signal an array",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/touch.test.ts"
-  },
-  {
-    "name": "touch > is a no-op for null",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/touch.test.ts"
-  },
-  {
-    "name": "touch > is a no-op for a primitive",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/touch.test.ts"
-  },
-  {
     "name": "substituteParams > replaces :id with actual value",
     "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/components.test.ts"
   },
@@ -2990,29 +3014,5 @@
   {
     "name": "substituteParams > replaces only matching params",
     "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/components.test.ts"
-  },
-  {
-    "name": "Link — resolution after the no-nest router change > string path resolves root-absolute",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/link.test.tsx"
-  },
-  {
-    "name": "Link — resolution after the no-nest router change > \"~/x\" resolves to \"/x\" (tilde stripped, not literal)",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/link.test.tsx"
-  },
-  {
-    "name": "Link — resolution after the no-nest router change > module ref navigates to its fullPath (default mode)",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/link.test.tsx"
-  },
-  {
-    "name": "Link — resolution after the no-nest router change > module ref with absolute (no-op) still uses fullPath",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/link.test.tsx"
-  },
-  {
-    "name": "Link — resolution after the no-nest router change > substitutes params into a module fullPath",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/link.test.tsx"
-  },
-  {
-    "name": "Link — resolution after the no-nest router change > appends search params",
-    "file": "/home/mauro/dev-projects/velojs/.worktrees/2026-10-28-atualizar-dependencias-v2/tests/link.test.tsx"
   }
 ]
